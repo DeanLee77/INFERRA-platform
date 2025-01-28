@@ -336,12 +336,12 @@ class TopologicalSort:
                 record_of_node = record_dictionary_of_nodes.get(node.get_node_name())
 
             if record_of_node is not None:
-                yes_count = record_of_node['true']
+                yes_count = int(record_of_node['true'])
             else:
                 yes_count = 0
 
             if record_of_node is not None:
-                no_count = record_of_node['false']
+                no_count = int(record_of_node['false'])
             else:
                 no_count = 0
 
@@ -360,6 +360,8 @@ class TopologicalSort:
         for node_index in range(len(child_node_list)):
             if child_node_list[node_index].get_node_name() == the_most_positive.get_node_name():
                 child_node_list.pop(node_index)
+                break
+            
         return the_most_positive
 
     @staticmethod
