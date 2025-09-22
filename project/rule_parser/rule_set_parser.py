@@ -46,9 +46,15 @@ class RuleSetParser(IScanFeeder, ABC):
     # iterate_matcher = r"(^[MLU(No)(Da)]+)(I)([MLU]+$)"
     # warning_matcher = r"WARNING"
 
-    __match_types = LineType.get_all_values()
-    __node_set = NodeSet()
-    __dependency_list = []
+    # __match_types = LineType.get_all_values()
+    # __node_set = NodeSet()
+    # __dependency_list = []
+
+    def __init__(self):
+        self.__node_set = NodeSet()
+        self.__dependency_list = []
+        self.__match_types = LineType.get_all_values()
+        logging.info("RuleSetParser is initiated")
 
     def handle_parent(self, parent_text, line_number) -> None:
         node_data = None
