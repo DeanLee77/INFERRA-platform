@@ -1,6 +1,6 @@
 from copy import deepcopy
 
-from project.loggers import Logger
+from project.loggers.logger import Logger
 from project.nodes.node import Node
 from project.nodes import DependencyType
 
@@ -151,7 +151,7 @@ class TopologicalSort:
     #
 
     @staticmethod
-    def dfs_topological_sort(node_dictionary: dict, node_id_dictionary: dict, dependency_matrix: [[]]) -> list:
+    def dfs_topological_sort(node_dictionary: dict, node_id_dictionary:     dict, dependency_matrix: [[]]) -> list:
 
         sorted_list = list()
         copy_of_dependency_matrix = TopologicalSort.create_copy_of_dependency_matrix(dependency_matrix,
@@ -223,23 +223,19 @@ class TopologicalSort:
     #         		5.1.3.1 find the most positive rule, and add the rule into the 'sortedList'
     #
     @staticmethod
-    def dfs_topological_sort_with_record(node_dictionary: dict, node_id_dictionary: dict,
-                                         dependency_matrix: [[]], record_dictionary_of_node: dict) -> list:
+    def dfs_topological_sort_with_record(node_dictionary: dict, node_id_dictionary: dict,dependency_matrix: [[]], record_dictionary_of_node: dict) -> list:
         sorted_list = list()
         if (record_dictionary_of_node is None) or (len(record_dictionary_of_node) == 0):
             sorted_list = TopologicalSort.bfs_topological_sort(node_dictionary, node_id_dictionary, dependency_matrix)
         else:
             visited_node_list = list()
-            copy_of_dependency_matrix = TopologicalSort.create_copy_of_dependency_matrix(dependency_matrix,
-                                                                                         len(dependency_matrix))
-            s_list = TopologicalSort.filling_s_list(node_dictionary, node_id_dictionary,
-                                                    list(), copy_of_dependency_matrix)
+            copy_of_dependency_matrix = TopologicalSort.create_copy_of_dependency_matrix(dependency_matrix,len(dependency_matrix))
+            s_list = TopologicalSort.filling_s_list(node_dictionary, node_id_dictionary,list(), copy_of_dependency_matrix)
 
             while len(s_list) > 0:
                 node = s_list.pop(0)
                 visited_node_list.append(node)
-                TopologicalSort.visit(node, sorted_list, record_dictionary_of_node, node_dictionary, node_id_dictionary,
-                                      visited_node_list, dependency_matrix)
+                TopologicalSort.visit(node, sorted_list, record_dictionary_of_node, node_dictionary, node_id_dictionary, visited_node_list, dependency_matrix)
         return sorted_list
 
     # The idea of this method is to visit a rule that could get a result of parent rule of the rule
@@ -248,8 +244,7 @@ class TopologicalSort:
     # AS result, visit more likely true 'OR' rule or more likely false 'AND' rule to determine a parent rule
     # as fast as we can
     @staticmethod
-    def visit(node: Node, sorted_list: list, record_dictionary_of_nodes: dict, node_dictionary: dict,
-              node_id_dictionary: dict, visited_node_list: list, dependency_matrix: [[]]) -> list:
+    def visit(node: Node, sorted_list: list, record_dictionary_of_nodes: dict, node_dictionary: dict, node_id_dictionary: dict, visited_node_list: list, dependency_matrix) -> list:
         if node is not None:
             sorted_list.append(node)
             node_id = node.get_node_id()
@@ -258,15 +253,18 @@ class TopologicalSort:
             dependency_matrix_as_list = list(dependency_matrix[node_id])
             size_of_dependency_matrix_as_list = len(dependency_matrix_as_list)
             or_out_dependency = list(
-                filter(lambda index: dependency_matrix_as_list[index] > 0 and (dependency_matrix_as_list[index] & or_dependency_type) == or_dependency_type,
+                filter(lambda index: 
+                       not dependency_matrix_as_list[index] <= 0 and(dependency_matrix_as_list[index] & or_dependency_type) == or_dependency_type,
                        list([x for x in range(size_of_dependency_matrix_as_list)])))
             and_out_dependency = list(
-                filter(lambda index: dependency_matrix_as_list[index] > 0 and (dependency_matrix_as_list[index] & and_dependency_type) == and_dependency_type,
+                filter(lambda index: 
+                       not dependency_matrix_as_list[index] <= 0 and
+                       (dependency_matrix_as_list[index] & and_dependency_type) == and_dependency_type,
                        list([x for x in range(size_of_dependency_matrix_as_list)])))
 
             if (len(or_out_dependency) != 0) or (len(and_out_dependency) != 0):
                 child_rule_list = list()
-                for item in list(filter(lambda child_index: dependency_matrix_as_list[child_index] > 0 and dependency_matrix_as_list[child_index] != 0,
+                for item in list(filter(lambda child_index: not dependency_matrix_as_list[child_index] <= 0,
                                         list([x for x in range(size_of_dependency_matrix_as_list)]))):
                     child_rule_list.append(node_dictionary[node_id_dictionary[item]])
 
@@ -278,7 +276,7 @@ class TopologicalSort:
                         # Therefore, looking for more likely 'TRUE' rule would be the shortest one rather than
                         # looking for more likely 'FALSE' rule in terms of processing time
 
-                        the_most_positive = TopologicalSort.find_the_most_positive(child_rule_list,
+                        the_most_positive, child_rule_list = TopologicalSort.find_the_most_positive(child_rule_list,
                                                                                    record_dictionary_of_nodes,
                                                                                    dependency_matrix_as_list)
 
@@ -298,7 +296,7 @@ class TopologicalSort:
                         # processing time
 
                         while len(child_rule_list) != 0:
-                            the_most_negative = TopologicalSort.find_the_most_negative(child_rule_list,
+                            the_most_negative, child_rule_list = TopologicalSort.find_the_most_negative(child_rule_list,
                                                                                         record_dictionary_of_nodes,
                                                                                         dependency_matrix_as_list)
 
@@ -335,34 +333,20 @@ class TopologicalSort:
             else:
                 record_of_node = record_dictionary_of_nodes.get(node.get_node_name())
 
-            if record_of_node is not None:
-                yes_count = int(record_of_node['true'])
-            else:
-                yes_count = 0
+            yes_count = int(_get_true_count(record_of_node)) if record_of_node else 0
+            no_count = int(_get_false_count(record_of_node)) if record_of_node else 0
+        
+            yes_plus_no_count = -1 if yes_count + no_count == 0 else yes_count + no_count
 
-            if record_of_node is not None:
-                no_count = int(record_of_node['false'])
-            else:
-                no_count = 0
-
-            if yes_count + no_count == 0:
-                yes_plus_no_count = -1
-            else:
-                yes_plus_no_count = yes_count + no_count
-
-            the_result = yes_count / yes_plus_no_count
+            the_result = 0 if yes_count == 0 else yes_count / yes_plus_no_count
 
             if TopologicalSort.analysis(the_result, the_most_possibility, yes_plus_no_count, summation):
                 the_most_possibility = the_result
                 summation = yes_count + no_count
                 the_most_positive = node
-
-        for node_index in range(len(child_node_list)):
-            if child_node_list[node_index].get_node_name() == the_most_positive.get_node_name():
-                child_node_list.pop(node_index)
-                break
-            
-        return the_most_positive
+        child_node_list = [node for node in child_node_list if node.get_node_name() != the_most_positive.get_node_name()]
+        
+        return the_most_positive, child_node_list
 
     @staticmethod
     def find_the_most_negative(child_node_list: list, record_dictionary_of_nodes: dict,
@@ -389,22 +373,12 @@ class TopologicalSort:
             else:
                 record_of_node = record_dictionary_of_nodes.get(node.get_node_name())
 
-            if record_of_node is not None:
-                yes_count = int(record_of_node['true'])
-            else:
-                yes_count = 0
+            yes_count = int(_get_true_count(record_of_node)) if record_of_node else 0
+            no_count = int(_get_false_count(record_of_node)) if record_of_node else 0
 
-            if record_of_node is not None:
-                no_count = int(record_of_node['false'])
-            else:
-                no_count = 0
+            yes_plus_no_count = -1 if yes_count + no_count == 0 else yes_count + no_count
 
-            if yes_count + no_count == 0:
-                yes_plus_no_count = -1
-            else:
-                yes_plus_no_count = yes_count + no_count
-
-            the_result = no_count / yes_plus_no_count
+            the_result = 0 if no_count == 0 else no_count / yes_plus_no_count
 
             if TopologicalSort.analysis(the_result, the_most_possibility, yes_plus_no_count, summation):
                 the_most_possibility = the_result
@@ -414,13 +388,9 @@ class TopologicalSort:
                 else:
                     summation = yes_count + no_count
                 the_most_negative = node
+        child_node_list = [node for node in child_node_list if node.get_node_name() != the_most_negative.get_node_name()]
 
-        for node_index in range(len(child_node_list)):
-            if child_node_list[node_index].get_node_name() == the_most_negative.get_node_name():
-                child_node_list.pop(node_index)
-                break
-
-        return the_most_negative
+        return the_most_negative, child_node_list
 
     @staticmethod
     def analysis(the_result: float, the_most_possibility: float, yes_count_no_count: int, summation: int) -> bool:
@@ -445,3 +415,12 @@ class TopologicalSort:
             highly_possible = True
 
         return highly_possible
+
+def _get_true_count(record:dict):
+    return(record.get('true'))
+
+def _get_false_count(record:dict):
+    return(record.get('false'))
+
+def _get_record_type(record:dict):
+    return(record.get('type'))

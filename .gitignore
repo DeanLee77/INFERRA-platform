@@ -1,8 +1,10 @@
 .idea/Nadia-PyRest.iml
 .vscode/launch.json
+.vscode/
 **/__pycache__/**
 
 Nadia-Engine *.log
+*.log.*
 
 *.lock
 Pipfile*

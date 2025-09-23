@@ -1,3 +1,5 @@
+import base64
+import os
 import json
 import requests
 
@@ -28,6 +30,7 @@ app = create_app()
 
 rule_prefix_url = '/service/rule/'
 inference_prefix_url = '/service/inference/'
+file_prefix_url = '/service/file/'
 session = requests.session()
 
 
@@ -452,6 +455,53 @@ def set_machine_learning_inference_engine():
 
     return object_node
 
+@app.route(file_prefix_url + 'convert', methods=['POST'])
+def convert_file():
+    file_bytes = request.json.get('file')
+    file_type = request.json.get('type')
+    
+    # Decode base64 file data
+    try:
+        decoded_file = base64.b64decode(file_bytes)
+    except Exception as e:
+        return jsonify({'success': False, 'error': 'Invalid file data'})
+    
+    # Save temporary file
+    temp_file_path = f'temp_file.{file_type}'
+    with open(temp_file_path, 'wb') as f:
+        f.write(decoded_file)
+    
+    # Call OpenRouter API
+    openrouter_api_key = os.getenv('OPENROUTER_API_KEY')
+    if not openrouter_api_key:
+        return jsonify({'success': False, 'error': 'API key not found'})
+    
+    headers = {
+        'Authorization': f'Bearer {openrouter_api_key}',
+        'Content-Type': 'application/json'
+    }
+    
+    data = {
+        'model': 'z-ai/glm-4.5-air:free',
+        'messages': [
+            {
+                'role': 'user',
+                'content': f'Convert this {file_type.upper()} file to markdown format:\n\n' + decoded_file.decode('utf-8', errors='ignore')
+            }
+        ]
+    }
+    
+    try:
+        response = requests.post('https://openrouter.ai/api/v1/chat/completions', headers=headers, json=data)
+        response.raise_for_status()
+        markdown_content = response.json().get('choices', [{}])[0].get('message', {}).get('content', '')
+        return jsonify({'success': True, 'markdown': markdown_content})
+    except requests.exceptions.RequestException as e:
+        return jsonify({'success': False, 'error': str(e)})
+    finally:
+        # Clean up temporary file
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
 
 if __name__ == '__main__':
     app.run()

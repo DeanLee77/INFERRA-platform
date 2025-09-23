@@ -44,9 +44,16 @@ class RuleSetParser(IScanFeeder, ABC):
     # comparison_matcher = r"(^[MLU(Da)]+)(O)([MLUQ(No)(Da)(De)(Ha)(Url)(Id)]*$)"
     # iterate_matcher = r"(^[MLU(No)(Da)]+)(I)([MLU]+$)"
     # warning_matcher = r"WARNING"
-    __match_types = LineType.get_all_values()
-    __node_set = NodeSet()
-    __dependency_list = []
+
+    # __match_types = LineType.get_all_values()
+    # __node_set = NodeSet()
+    # __dependency_list = []
+
+    def __init__(self):
+        self.__node_set = NodeSet()
+        self.__dependency_list = []
+        self.__match_types = LineType.get_all_values()
+        logging.info("RuleSetParser is initiated")
 
     def create(self):
         self.__match_types = LineType.get_all_values()
