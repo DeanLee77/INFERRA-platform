@@ -9,13 +9,14 @@ from datetime import datetime
 logging: Logger = Logger.get_logger(__name__)
 
 
+
 class ComparisonLine(Node):
     __operatorString = None
     __lhs = None
     __rhs = None
 
-    def __init__(self, child_text: str, tokens: Token):
-        super().__init__(child_text, tokens)
+    def __init__(self, id:int=None, child_text: str=None, tokens: Token=None):
+        super().__init__(id=id, parent_text=child_text, tokens=tokens)
         self._lineType = LineType.COMPARISON
     
     def __repr__(self):
@@ -56,6 +57,42 @@ class ComparisonLine(Node):
 
     def get_line_type(self):
         return LineType.COMPARISON
+    
+    def get_detected_date(self, given_date_string: str) -> datetime:
+        """
+        Detect the date format of a given string by trying common date formats.
+        
+        Args:
+            date_string (str): The string to inspect for a date format.
+            
+        Returns:
+            datetime or None if no match.
+        """
+        # List of common date formats to check
+        date_formats = [
+            '%Y-%m-%d',           # 2025-10-09
+            '%d/%m/%Y',           # 09/10/2025
+            '%m/%d/%Y',           # 10/09/2025
+            '%d-%b-%Y',           # 09-Oct-2025
+            '%d %b %Y',           # 09 Oct 2025
+            '%Y/%m/%d',           # 2025/10/09
+            '%B %d, %Y',          # October 09, 2025
+            '%d-%m-%Y',           # 09-10-2025
+            '%Y.%m.%d',           # 2025.10.09
+            '%m-%d-%Y',           # 10-09-2025
+        ]
+        
+        # Clean the input string (remove extra whitespace)
+        date_string = given_date_string.strip()
+        
+        # Try each format
+        for fmt in date_formats:
+            try:
+                return datetime.strptime(date_string, fmt)
+            except ValueError:
+                continue
+                
+        return None
 
     def self_evaluate(self, working_memory):
         # Negation type can only be used for this line type
@@ -88,26 +125,35 @@ class ComparisonLine(Node):
                  and (working_memory_rhs_value.get_value_type() == FactValueType.DATE)):
             working_memory_lhs_value_str = str(working_memory_lhs_value.get_value()).split(" ")[0]
             working_memory_rhs_value_str = str(working_memory_rhs_value.get_value()).split(" ")[0]
+
             if self.__operatorString == ">":
-                return_value = \
-                    datetime.strptime(working_memory_lhs_value_str, "%Y-%m-%d") \
-                    > datetime.strptime(working_memory_rhs_value_str, "%Y-%m-%d")
+                return_value =  self.get_detected_date(working_memory_lhs_value_str) > self.get_detected_date(working_memory_rhs_value_str)
+                    # datetime.strptime(working_memory_lhs_value_str, "%Y-%m-%d") \
+                    # > datetime.strptime(working_memory_rhs_value_str, "%Y-%m-%d")
             elif self.__operatorString == ">=":
-                return_value = \
-                    datetime.strptime(working_memory_lhs_value_str, "%Y-%m-%d") \
-                    >= datetime.strptime(working_memory_rhs_value_str, "%Y-%m-%d")
+                return_value = self.get_detected_date(working_memory_lhs_value_str) >= self.get_detected_date(working_memory_rhs_value_str)
+                
+                # return_value = \
+                #     datetime.strptime(working_memory_lhs_value_str, "%Y-%m-%d") \
+                #     >= datetime.strptime(working_memory_rhs_value_str, "%Y-%m-%d")
             elif self.__operatorString == "<":
-                return_value = \
-                    datetime.strptime(working_memory_lhs_value_str, "%Y-%m-%d") \
-                    < datetime.strptime(working_memory_rhs_value_str, "%Y-%m-%d")
+                return_value = self.get_detected_date(working_memory_lhs_value_str) < self.get_detected_date(working_memory_rhs_value_str)
+
+                # return_value = \
+                #     datetime.strptime(working_memory_lhs_value_str, "%Y-%m-%d") \
+                #     < datetime.strptime(working_memory_rhs_value_str, "%Y-%m-%d")
             elif self.__operatorString == "<=":
-                return_value = \
-                    datetime.strptime(working_memory_lhs_value_str, "%Y-%m-%d") \
-                    <= datetime.strptime(working_memory_rhs_value_str, "%Y-%m-%d")
+                return_value = self.get_detected_date(working_memory_lhs_value_str) <= self.get_detected_date(working_memory_rhs_value_str)
+
+                # return_value = \
+                #     datetime.strptime(working_memory_lhs_value_str, "%Y-%m-%d") \
+                #     <= datetime.strptime(working_memory_rhs_value_str, "%Y-%m-%d")
             elif self.__operatorString == "==":
-                return_value = \
-                    datetime.strptime(working_memory_lhs_value_str, "%Y-%m-%d") \
-                    == datetime.strptime(working_memory_rhs_value_str, "%Y-%m-%d")
+                return_value = self.get_detected_date(working_memory_lhs_value_str) == self.get_detected_date(working_memory_rhs_value_str)
+
+                # return_value = \
+                #     datetime.strptime(working_memory_lhs_value_str, "%Y-%m-%d") \
+                #     == datetime.strptime(working_memory_rhs_value_str, "%Y-%m-%d")
             script = str(return_value)
         elif (working_memory_lhs_value is not None) and \
              ((working_memory_lhs_value.get_value_type() == FactValueType.DECIMAL)

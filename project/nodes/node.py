@@ -6,10 +6,12 @@ from project.fact_values import FactValueType
 from project.nodes.line_type import LineType
 from project.tokens import Token, TokenStringDictionary
 from project.fact_values import FactValue
+from project.nodes.meta_data import MetaData
 
 
 class Node(metaclass=ABCMeta):
     __staticNodeId: int = 0
+    _nodeUniqueId: int = None
     _nodeId: int = None
     _nodeName: str = None
     _nodeLine: int = None
@@ -17,14 +19,19 @@ class Node(metaclass=ABCMeta):
     _value: FactValue = FactValue()
     _tokens: Token = Token()
     _lineType: LineType
+    _meta_data: MetaData = None
 
-    def __init__(self, parent_text=None, tokens=None):
-        self._nodeId = Node.__staticNodeId
+    def __init__(self, id:int=None, parent_text:str=None, tokens:Token=None, meta_data: MetaData=None):
+        self._nodeUniqueId = Node.__staticNodeId
+        self._nodeId = id
         Node.__staticNodeId += 1
         
         if parent_text != None and tokens != None:
             self.initialisation(parent_text, tokens)
             self._tokens = tokens
+        
+        if meta_data != None:
+            self._meta_data = meta_data
 
     def __repr__(self):
         return json.dumps(self.__dict__)
@@ -37,6 +44,12 @@ class Node(metaclass=ABCMeta):
 
     @abc.abstractmethod
     def self_evaluate(self, working_memory: dict) -> FactValue: pass
+
+    def set_meta_data(self, meta_data: MetaData):
+        self._meta_data = meta_data
+    
+    def get_meta_data(self):
+        return self._meta_data
 
     def set_node_line(self, node_line: int):
         self._nodeLine = node_line

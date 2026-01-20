@@ -91,19 +91,19 @@ def test_handle_parent(rule_set_parser_test):
         passTest = False
 
     fact_value: FactValue = node_set.get_input_dictionary()["the groom's name"]
-    is_string = fact_value.get_value_type() is FactValueType.STRING
+    is_string = fact_value.get_value_type().value is FactValueType.STRING.value
     if is_string is not True:
         passTest = False
 
 
     second_fact_value: FactValue = node_set.get_fact_dictionary()["the groom's homepage"]
-    is_url = second_fact_value.get_value_type() is FactValueType.URL
+    is_url = second_fact_value.get_value_type().value is FactValueType.URL.value
     value_is_correct = second_fact_value.get_value() == "https://www.theGroomHomepage.com.au"
     if is_url is not True and value_is_correct is True:
         passTest = False
 
     third_fact_value: FactValue = node_set.get_fact_dictionary().get("the wedding booking schedule for the venue")
-    is_list = third_fact_value.get_value_type() == FactValueType.LIST
+    is_list = third_fact_value.get_value_type().value == FactValueType.LIST.value
     if is_list is not True:
         passTest = False
 

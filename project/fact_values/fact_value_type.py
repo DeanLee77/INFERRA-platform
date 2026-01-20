@@ -21,6 +21,7 @@ class FactValueType(Enum):
     URL = "URL"
     HASH = "HASH"
     GUID = "GUID"
+    SECTION = "SECTION"
     NULL = "NULL"
     WARNING = "WARNING"
 

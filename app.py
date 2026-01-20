@@ -2,9 +2,8 @@ import base64
 import os
 import json
 import requests
-
-# from flask import jsonify, Response, request, make_response, session
-# from project import create_app
+import tempfile
+from flask import Response
 from project import create_app, jsonify, request
 from project.domain.create_file import CreateFile
 from project.domain.models import Rule, History
@@ -16,6 +15,7 @@ from project.nodes import HistoryRecord, LineType
 # from project.repository import RuleRepository
 from project.rule_parser import RuleSetReader, RuleSetScanner
 from project.rule_parser.rule_set_parser import RuleSetParser
+from project.inference import TopologicalSort
 from project.repository import find_rule_by_rule_name, create_rule_file
 from project.repository import find_rule_text_by_rule_name
 from project.repository import find_all_rules
@@ -25,22 +25,67 @@ from project.repository import find_id_by_name
 from project.repository import create_rule_history
 from project.loggers import Logger
 
+from utils import validate_file, convert_file_to_markdown, transform_to_nadia_rules_stream
+from openai import OpenAI
+from dotenv import load_dotenv
+
 logging: Logger = Logger.get_logger(__name__)
+
 app = create_app()
-
-rule_prefix_url = '/service/rule/'
-inference_prefix_url = '/service/inference/'
-file_prefix_url = '/service/file/'
 session = requests.session()
+dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+load_dotenv(dotenv_path=dotenv_path)
+
+RULE_PREFIX_URL = '/service/rule/'
+INFERENCE_PREFIX_URL = '/service/inference/'
+FILE_PREFIX_URL = '/service/file/'
+MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH"))
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL")
+OPENROUTER_TIMEOUT = os.getenv("OPENROUTER_TIMEOUT") # seconds
+
+app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
 
-@app.route(rule_prefix_url + 'searchRuleByName')
+@app.route(f"{RULE_PREFIX_URL}searchRuleByName")
 def search_rule_by_name(nadia_rule_name: str):  # put application's code here
     return find_rule_by_rule_name(nadia_rule_name)
 
 
 ############################################################# Done
-@app.route(rule_prefix_url + 'findRuleTextByName')
+@app.route(f"{RULE_PREFIX_URL}findRuleTreeDataByName")
+def find_rule_tree_data_by_name():
+    rule_tree_data: str = None
+    nadia_rule_name = request.args.get('ruleName')
+    logging.info(f'THIS IS RULE NAME: {nadia_rule_name}')
+    temp_rule = find_rule_text_by_rule_name(nadia_rule_name)
+    rule_text: str = str(find_rule_text_by_rule_name(nadia_rule_name).files, 'utf-8')
+
+    rule_set_reader = RuleSetReader()
+    rule_set_reader.create()
+
+    rule_set_parser = RuleSetParser()
+    rule_set_parser.create()
+    rule_set_reader.set_file_with_text(rule_text)
+    rule_set_scanner = RuleSetScanner(rule_set_reader, rule_set_parser)
+    rule_set_scanner.scan_rule_set()
+    rule_set_scanner.establish_node_set()
+
+    response = jsonify("{}")
+    response.headers.add('Access-Control-Allow-Origin', '*')
+
+    if temp_rule is not None:
+        # rule_file = temp_rule.get_the_latest_file()
+        # response = jsonify("{\"ruleText\":\"" + temp_rule.files.decode('utf-8') + "\"}")
+        response = {"ruleTreeData": temp_rule.files.decode('utf-8')}
+
+        return response
+
+    return response
+    
+
+    return rule_tree_data
+
+@app.route(f"{RULE_PREFIX_URL}findRuleTextByName")
 def find_rule_text_by_name():
     nadia_rule_name = request.args.get('ruleName')
     logging.info(f'THIS IS RULE NAME: {nadia_rule_name}')
@@ -57,15 +102,14 @@ def find_rule_text_by_name():
 
     return response
 
-
-@app.route(rule_prefix_url + 'findTheLatestRuleFileByName')
+@app.route(f"{RULE_PREFIX_URL}findTheLatestRuleFileByName")
 def get_the_latest_rule_file_by_name():
     ###### ##################       Current
     nadia_rule_name = request.args.get('ruleName')
     return find_rule_text_by_rule_name(nadia_rule_name)
 
 
-@app.route(rule_prefix_url + 'findTheLatestRuleHistoryByName')
+@app.route(f"{RULE_PREFIX_URL}findTheLatestRuleHistoryByName")
 def get_the_latest_rule_history_by_name(nadia_rule_name):
     temp_rule = find_rule_by_rule_name(nadia_rule_name)
     if temp_rule is not None:
@@ -74,7 +118,7 @@ def get_the_latest_rule_history_by_name(nadia_rule_name):
 
 
 ############################################################# Done
-@app.route(rule_prefix_url + 'findAllRules')
+@app.route(f"{RULE_PREFIX_URL}findAllRules")
 def get_all_rules():
     response = json.dumps(find_all_rules(), indent=4)
     # response.headers.add('Access-Control-Allow-Origin', '*')
@@ -83,7 +127,7 @@ def get_all_rules():
     # return jsonify({'rule_list': rule_list})
 
 
-@app.route(rule_prefix_url + 'updateRule', methods=['POST'])
+@app.route(f"{RULE_PREFIX_URL}updateRule", methods=['POST'])
 def update_rule():
 
     old_rule_name = request.json['oldRuleName']
@@ -99,7 +143,7 @@ def update_rule():
     return None
 
 
-@app.route(rule_prefix_url + 'createNewRule', methods=['POST'])
+@app.route(f"{RULE_PREFIX_URL}createNewRule", methods=['POST'])
 def create_new_rule():
     new_rule_name = request.json['name']
     new_rule_category = request.json['category']
@@ -109,15 +153,38 @@ def create_new_rule():
 
     rule_from_database = find_rule_by_rule_name(new_rule_name)
     if rule_from_database is not None:
-        return jsonify(
-            "{\"ruleName\":\"" + rule_from_database.name + "\", \
-              \"category\":\"" + rule_from_database.category + "\", \
-              \"description\":\""+ rule_from_database.description +"\"}")
+        return json.dumps({"ruleName" : rule_from_database.name, 
+              "category" : rule_from_database.category, 
+              "description" : rule_from_database.description})
+
+    return None
+
+@app.route(f"{RULE_PREFIX_URL}saveConvertedRule", methods=['POST'])
+def save_converted_rule():
+    converted_rule_name = request.json['name']
+    converted_rule_category = request.json['category']
+    converted_rule_description = request.json['description']
+    converted_rule_text_byte_array = bytearray(request.json['ruleText'], 'utf-8')
+
+
+    rule_id = create_rule(
+        rule_details={
+            'rule_name': converted_rule_name, 
+            'rule_category': converted_rule_category, 
+            'rule_description': converted_rule_description})
+
+    rule_from_database = find_rule_by_rule_name(converted_rule_name)
+    create_rule_file(rule_id, converted_rule_text_byte_array)
+
+    if rule_from_database is not None:
+        return json.dumps({"ruleName" : rule_from_database.name, 
+              "category" : rule_from_database.category, 
+              "description" : rule_from_database.description})
 
     return None
 
 
-@app.post(rule_prefix_url + 'createFile')
+@app.post(f"{RULE_PREFIX_URL}createFile")
 def create_file():
     # my_request = request.json
     rule_name = request.json['ruleName']
@@ -133,18 +200,20 @@ def create_file():
     response.headers.add('Access-Control-Allow-Origin', '*')
 
     if rule_file_from_database is not None:
-        return jsonify("{\"ruleText\":\"" + rule_file_from_database.files.decode('utf-8') + "\"}")
+        return jsonify({"ruleText":rule_file_from_database.files.decode('utf-8')})
 
     return response
 
 
-@app.route(rule_prefix_url + 'updateHistory', methods=['POST'])
+@app.route(f"{RULE_PREFIX_URL}updateHistory", methods=['POST'])
 def update_history():
-    nadia_rule_name = request.json['ruleName']
-    inference_engine: InferenceEngine = session.__getattribute__(f'inferenceEngine-{nadia_rule_name}')
+
+    rule_name = request.get_json().get('ruleName')
+    target_goal_node_name = request.get_json().get('targetNodeName')
+
+    inference_engine: InferenceEngine = session.__getattribute__(f'inferenceEngine-{target_goal_node_name}')
     working_memory: dict = inference_engine.get_assessment_state().get_working_memory()
 
-    rule_name = request.json['ruleName']
     rule_history: History
     temp_rule = find_rule_by_rule_name(rule_name)
 
@@ -185,7 +254,7 @@ def update_history():
 
                 fact_value: FactValue = working_memory[each_rule_key]
 
-                if fact_value.get_value_type() == FactValueType.BOOLEAN:
+                if fact_value.get_value_type().value == FactValueType.BOOLEAN.value:
                     record.set_type(str(fact_value.get_value_type().value).lower())
                     if fact_value.get_value() is True:
                         record.increment_true_count()
@@ -230,7 +299,7 @@ def update_history():
             fact_value: FactValue = working_memory.get(work_item)
             temp_history: json = json.loads("{}")
 
-            if fact_value.get_value_type() == FactValueType.BOOLEAN:
+            if fact_value.get_value_type().value == FactValueType.BOOLEAN.value:
                 if fact_value.get_value() is True:
                     temp_history["true"] = "1"
                     temp_history["false"] = "0"
@@ -249,10 +318,12 @@ def update_history():
     return json.loads("{\"update\":\"done\"}")
 
 
-@app.route(inference_prefix_url + 'viewSummary')
+@app.route(f"{INFERENCE_PREFIX_URL}viewSummary")
 def view_summary():
     nadia_rule_name = request.args.get('ruleName')
-    inference_engine: InferenceEngine = session.__getattribute__(f'inferenceEngine-{nadia_rule_name}')
+    target_goal_node_name = request.args.get('targetNodeName')
+
+    inference_engine: InferenceEngine = session.__getattribute__(f'inferenceEngine-{target_goal_node_name}')
     temp_summary_list = list()
     temp_assessment_state = inference_engine.get_assessment_state()
     temp_working_memory = temp_assessment_state.get_working_memory()
@@ -283,7 +354,7 @@ def view_summary():
 
 
 # TODO: this API still needs further work
-@app.route(inference_prefix_url + 'editAnswer', methods=['POST'])
+@app.route(f"{INFERENCE_PREFIX_URL}editAnswer", methods=['POST'])
 def edit_answer(question: json):
     nadia_rule_name = request.json['ruleName']
     inference_engine: InferenceEngine = session.__getattribute__(f'inferenceEngine-{nadia_rule_name}')
@@ -316,14 +387,16 @@ def edit_answer(question: json):
     return object_node
 
 
-@app.route(inference_prefix_url + 'feedAnswer', methods=['POST'])
+@app.route(f"{INFERENCE_PREFIX_URL}feedAnswer", methods=['POST'])
 def feed_answer():
-    nadia_rule_name = request.json['ruleName']
-    inference_engine: InferenceEngine = session.__getattribute__('inferenceEngine-'+nadia_rule_name)
-    assessment: Assessment = session.__getattribute__('assessment-'+nadia_rule_name)
+    nadia_rule_name = request.get_json().get('ruleName')
+    target_goal_node_name = request.get_json().get('targetNodeName')
 
-    question_name = request.json['question']
-    answer_entry = request.json['answer']
+    inference_engine: InferenceEngine = session.__getattribute__('inferenceEngine-'+target_goal_node_name)
+    assessment: Assessment = session.__getattribute__('assessment-'+target_goal_node_name)
+
+    question_name = request.get_json().get('question')
+    answer_entry = request.get_json().get('answer')
 
     from project.fact_values import FactValueType
     fact_value_type: FactValueType = FactValueType[str(answer_entry['type']).upper()]
@@ -355,18 +428,23 @@ def feed_answer():
     return object_node
 
 
-@app.route(inference_prefix_url + 'getNextQuestion')
+@app.route(f"{INFERENCE_PREFIX_URL}getNextQuestion")
 def get_next_question():
     nadia_rule_name = request.args.get('targetRuleName')
-    inference_engine: InferenceEngine = session.__getattribute__(f'inferenceEngine-{nadia_rule_name}')
+    target_goal_node_name = request.args.get('targetNodeName')
+
+    inference_engine: InferenceEngine = session.__getattribute__(f'inferenceEngine-{target_goal_node_name}')
 
     if inference_engine is None or inference_engine.get_node_set().get_node_set_name() != nadia_rule_name:
-        set_inference_engine()
+        _reset_inferene_engine(
+        nadia_rule_name=nadia_rule_name, 
+        target_goal_node_name=target_goal_node_name)
 
-    inference_engine: InferenceEngine = session.__getattribute__(f'inferenceEngine-{nadia_rule_name}')
-    assessment: Assessment = session.__getattribute__(f'assessment-{nadia_rule_name}')
+    inference_engine: InferenceEngine = session.__getattribute__(f'inferenceEngine-{target_goal_node_name}')
+    assessment: Assessment = session.__getattribute__(f'assessment-{target_goal_node_name}')
 
-    next_question_node = inference_engine.get_next_question(assessment)
+    # next_question_node = inference_engine.get_next_question(assessment)
+    next_question_node = inference_engine.get_next_question_with_goal_name(target_goal_node_name)
     if assessment.get_node_to_be_asked().get_line_type() == LineType.ITERATE:
         assessment.set_aux_node_to_be_asked(next_question_node)
 
@@ -383,51 +461,21 @@ def get_next_question():
     return questionnaire_list
 
 
-@app.route(inference_prefix_url + 'setInferenceEngine')
+@app.route(f"{INFERENCE_PREFIX_URL}setInferenceEngine")
 def set_inference_engine():
     nadia_rule_name = request.args.get('ruleName')
-    rule_text: str = str(find_rule_text_by_rule_name(nadia_rule_name).files, 'utf-8')
+    target_goal_node_name = request.args.get('targetNodeName')
 
-    rule_set_reader = RuleSetReader()
-    rule_set_reader.create()
-
-    rule_set_parser = RuleSetParser()
-    rule_set_parser.create()
-    rule_set_reader.set_file_with_text(rule_text)
-    rule_set_scanner = RuleSetScanner(rule_set_reader, rule_set_parser)
-    rule_set_scanner.scan_rule_set()
-    rule_set_scanner.establish_node_set()
-    inference_engine = InferenceEngine(rule_set_parser.get_node_set())
-
-    inference_engine.get_node_set().set_node_set_name(nadia_rule_name)
-    assessment = Assessment(rule_set_parser.get_node_set(),
-                            rule_set_parser.get_node_set().get_sorted_node_list()[0].get_node_name())
-    inference_engine.set_assessment(assessment)
-
-    session.__setattr__('inferenceEngine-'+nadia_rule_name, inference_engine)
-    session.__setattr__('assessment-'+nadia_rule_name, assessment)
-    
-    object_node = json.loads("{}")
-    object_node['InferenceEngine'] = 'created'
-
-    return jsonify(object_node)
+    return _reset_inferene_engine(
+        nadia_rule_name=nadia_rule_name, 
+        target_goal_node_name=target_goal_node_name)
 
 
-@app.route(inference_prefix_url + "setMachineLearningInferenceEngine")
+@app.route(f"{INFERENCE_PREFIX_URL}setMachineLearningInferenceEngine")
 def set_machine_learning_inference_engine():
     nadia_rule_name = request.args.get('ruleName')
-    rule_text: str = str(find_rule_text_by_rule_name(nadia_rule_name).files, 'utf-8')
-
-    rule_set_reader = RuleSetReader()
-    rule_set_reader.create()
-
-    rule_set_parser = RuleSetParser()
-    rule_set_parser.create()
-
-    rule_set_reader.set_file_with_text(rule_text)
-    rule_set_scanner = RuleSetScanner(rule_set_reader, rule_set_parser)
-    rule_set_scanner.scan_rule_set()
-
+    target_goal_node_name = request.args.get('targetNodeName')
+    
     temp_rule = find_rule_by_rule_name(nadia_rule_name)
     rule_history: History = None
     if temp_rule is not None:
@@ -438,70 +486,154 @@ def set_machine_learning_inference_engine():
         history_dict = rule_history.history
     else:
         history_dict = None
+    
+    return _reset_inferene_engine(
+        nadia_rule_name=nadia_rule_name, 
+        target_goal_node_name=target_goal_node_name, 
+        history_dict=history_dict)
 
-    rule_set_scanner.establish_node_set(history_dict)
+
+@app.route(f"{FILE_PREFIX_URL}convert", methods=['POST'])
+def convert_document():
+    """Handle document conversion and transformation request"""
+    try:
+        # Check if file was uploaded
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        form_data = request.form  # Get form data
+        file_type = form_data.get('type', '').lower()
+        file_type = request.form.get('type')
+        fileName = file.filename
+
+        
+        # Validate file - pass form_data as parameter
+        is_valid, error_msg = validate_file(file, form_data)
+        if not is_valid:
+            return jsonify({'success': False, 'error': error_msg}), 400
+        
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+        
+
+        # Debug info (can remove later)
+        logging.info(f'Received file: {file.filename}')
+        logging.info(f'File type: {form_data.get("type", "").lower()}')
+        
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp_file:
+            file.save(tmp_file.name)
+            tmp_file_path = tmp_file.name
+
+        # Additional check for empty file (double-check)
+        if os.path.getsize(tmp_file_path) == 0:
+            os.unlink(tmp_file_path)
+            return jsonify({'success': False, 'error': 'Empty file'}), 400
+
+
+        try:
+            # Read the entire content of the file
+            with open(tmp_file_path, 'r', encoding='utf-8') as file:
+                markdown_content = file.read()
+            
+            # Stream the response directly from the generator
+            return Response(
+                transform_to_nadia_rules_stream(fileName, markdown_content),
+                mimetype='text/plain',
+                headers={
+                    'Access-Control-Allow-Origin': '*',
+                    'Cache-Control': 'no-cache',
+                    'Transfer-Encoding': 'chunked'
+                }
+            )
+        finally:
+            # Clean up temporary files
+            os.unlink(tmp_file_path)                    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route(f"{RULE_PREFIX_URL}targetNodeNameList", methods=['GET'])
+def get_all_possible_target_node_name_list():
+    rule_name = request.args.get('ruleName')
+    
+    node_set = _set_rule_set_parser(rule_name).get_node_set()
+    targetNodeList = TopologicalSort.filling_s_list(
+            node_set.get_node_dictionary(),
+            node_set.get_node_id_dictionary(),
+            list(),
+            node_set.get_dependency_matrix().get_dependency_two_dimension_list())
+    response_list = list(x.get_node_name() for x in targetNodeList)
+    return json.dumps(response_list, indent=4)
+    
+            
+    
+
+
+
+def _set_rule_set_parser(nadia_rule_name:str) -> RuleSetParser:
+    rule_text: str = str(find_rule_text_by_rule_name(nadia_rule_name).files, 'utf-8')
+
+    rule_set_reader = RuleSetReader()
+    rule_set_reader.create()
+
+    rule_set_parser = RuleSetParser()
+    rule_set_parser.create()
+
+    rule_set_reader.set_file_with_text(rule_text)
+    rule_set_scanner = RuleSetScanner(rule_set_reader, rule_set_parser)
+    rule_set_scanner.scan_rule_set()
+
+    rule_set_scanner.establish_node_set()
+
+    return rule_set_parser
+    
+    
+        
+
+def _reset_inferene_engine(nadia_rule_name:str, target_goal_node_name: str, history_dict: dict=None):
+
+    rule_text: str = str(find_rule_text_by_rule_name(nadia_rule_name).files, 'utf-8')
+
+    rule_set_reader = RuleSetReader()
+    rule_set_reader.create()
+
+    rule_set_parser = RuleSetParser()
+    rule_set_parser.create()
+
+    rule_set_reader.set_file_with_text(rule_text)
+    rule_set_scanner = RuleSetScanner(rule_set_reader, rule_set_parser)
+    rule_set_scanner.scan_rule_set()
+
+    if history_dict == None:
+        rule_set_scanner.establish_node_set()
+    else:
+        rule_set_scanner.establish_node_set(history_dict)
+
     inference_engine = InferenceEngine(rule_set_parser.get_node_set())
     inference_engine.get_node_set().set_node_set_name(nadia_rule_name)
 
-    assessment = Assessment(rule_set_parser.get_node_set(),
-                            rule_set_parser.get_node_set().get_sorted_node_list()[0].get_node_name())
-    inference_engine.set_assessment(assessment)
+    if target_goal_node_name != None:
+        assessment = Assessment(rule_set_parser.get_node_set(), target_goal_node_name)
+    else:
+        target_goal_node_name = rule_set_parser.get_node_set().get_sorted_node_list()[0].get_node_name()
+        logging.info(f'Currently target node name is not given for : {nadia_rule_name}. \n \
+                     Setting target node : {target_goal_node_name}') 
+        assessment = Assessment(rule_set_parser.get_node_set(), target_goal_node_name)
     
-    session.__setattr__(f'inferenceEngine-{nadia_rule_name}', inference_engine)
-    session.__setattr__(f'assessment-{nadia_rule_name}', assessment)
+    inference_engine.add_assessment_into_assessment_list(assessment)
+    # inference_engine.set_assessment(assessment)
 
+    session.__setattr__('inferenceEngine-'+target_goal_node_name, inference_engine)
+    session.__setattr__('assessment-'+target_goal_node_name, assessment)
+    
     object_node = json.loads("{}")
     object_node['InferenceEngine'] = 'created'
 
-    return object_node
+    return jsonify(object_node)
 
-@app.route(file_prefix_url + 'convert', methods=['POST'])
-def convert_file():
-    file_bytes = request.json.get('file')
-    file_type = request.json.get('type')
     
-    # Decode base64 file data
-    try:
-        decoded_file = base64.b64decode(file_bytes)
-    except Exception as e:
-        return jsonify({'success': False, 'error': 'Invalid file data'})
-    
-    # Save temporary file
-    temp_file_path = f'temp_file.{file_type}'
-    with open(temp_file_path, 'wb') as f:
-        f.write(decoded_file)
-    
-    # Call OpenRouter API
-    openrouter_api_key = os.getenv('OPENROUTER_API_KEY')
-    if not openrouter_api_key:
-        return jsonify({'success': False, 'error': 'API key not found'})
-    
-    headers = {
-        'Authorization': f'Bearer {openrouter_api_key}',
-        'Content-Type': 'application/json'
-    }
-    
-    data = {
-        'model': 'z-ai/glm-4.5-air:free',
-        'messages': [
-            {
-                'role': 'user',
-                'content': f'Convert this {file_type.upper()} file to markdown format:\n\n' + decoded_file.decode('utf-8', errors='ignore')
-            }
-        ]
-    }
-    
-    try:
-        response = requests.post('https://openrouter.ai/api/v1/chat/completions', headers=headers, json=data)
-        response.raise_for_status()
-        markdown_content = response.json().get('choices', [{}])[0].get('message', {}).get('content', '')
-        return jsonify({'success': True, 'markdown': markdown_content})
-    except requests.exceptions.RequestException as e:
-        return jsonify({'success': False, 'error': str(e)})
-    finally:
-        # Clean up temporary file
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
 
 if __name__ == '__main__':
     app.run()

@@ -1,10 +1,11 @@
 from abc import ABCMeta
 import abc
+from project.nodes.meta_data import MetaData
 
 
 class IScanFeeder(metaclass=ABCMeta):
     @abc.abstractmethod
-    def handle_parent(self, parent_text, line_number): pass
+    def handle_parent(self, parent_text, line_number, meta_data: MetaData): pass
 
     @abc.abstractmethod
     def handle_child(self, parent_text, child_text, first_keywords_group, line_number): pass

@@ -11,6 +11,7 @@ class TokenStringDictionary:
         "Url": FactValueType.URL,
         "Id": FactValueType.GUID,
         "Ha": FactValueType.HASH,
+        "Se": FactValueType.SECTION,
         "Q": FactValueType.DEFI_STRING,
         "false": FactValueType.BOOLEAN,
         "FALSE": FactValueType.BOOLEAN,

@@ -8,4 +8,4 @@ Nadia-Engine *.log
 
 *.lock
 Pipfile*
-.env
+project/.env

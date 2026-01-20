@@ -2,23 +2,15 @@ import re
 from abc import ABC
 from datetime import *
 from project.constants import DependencyTypeStringMatcher
-from project.nodes import DependencyMatrix
 from project.nodes.iterate_line import IterateLine
 from project.nodes.node_set import NodeSet
-from project.nodes import LineType
 from project.rule_parser import IScanFeeder
 from project.tokens import Tokenizer
 from project.constants import LineMatcherConstant
-from project.nodes import MetadataLine
-from project.nodes import ValueConclusionLine
-from project.nodes import ExprConclusionLine
-from project.nodes import ComparisonLine
-from project.fact_values import FactValue
-from project.fact_values import FactValueType
-from project.nodes import DependencyType
-from project.nodes import Dependency
-from project.nodes import MetaType
+from project.fact_values import FactValue, FactValueType
+from project.nodes import Dependency, DependencyType, MetaType, MetadataLine, ValueConclusionLine, ExprConclusionLine, ComparisonLine, LineType, DependencyMatrix
 from project.nodes.node import Node
+from project.nodes.meta_data import MetaData
 from project.loggers.logger import Logger
 
 logging: Logger = Logger.get_logger(__name__)
@@ -59,109 +51,122 @@ class RuleSetParser(IScanFeeder, ABC):
         self.__match_types = LineType.get_all_values()
         self.__node_set = NodeSet()
         self.__dependency_list = []
-    def handle_parent(self, parent_text, line_number) -> None:
+    def handle_parent(self, parent_text, line_number, meta_data: MetaData) -> None:
         node_data = None
-
+        next_node_id = len(self.__node_set.get_node_dictionary())
         if parent_text in self.__node_set.get_node_dictionary().keys():
             node_data = self.__node_set.get_node_dictionary()[parent_text]
 
         if node_data is None:
             tokens = Tokenizer.get_tokens(parent_text)
-            line_match_patterns = [LineMatcherConstant.META_PATTERN_MATCHER.value,
-                                   LineMatcherConstant.VALUE_CONCLUSION_MATCHER.value,
+            line_match_patterns = [LineMatcherConstant.VALUE_CONCLUSION_MATCHER.value,
                                    LineMatcherConstant.EXPRESSION_CONCLUSION_MATCHER.value,
                                    LineMatcherConstant.WARNING_MATCHER.value]
+            
+            first_word = tokens.get_tokens_list()[0].split()[0]  # Get first word
+            if first_word in (MetaType.FIXED.value, MetaType.INPUT.value):
+                node_data = MetadataLine(node_text=parent_text, tokens=tokens)
+                if node_data.get_fact_value().get_value() == 'WARNING':
+                    self.handle_warning(parent_text)
+                self._parent_node_data_set(node_data, line_number)
 
-            for i in range(len(line_match_patterns)):
-                pattern = re.compile(line_match_patterns[i])
-                match = pattern.match(tokens.get_tokens_string())
-                if match:
-                    if i == 3:  # warning matcher
-                        self.handle_warning(parent_text)
-                    elif i == 0:  # meta matcher
-                        node_data = MetadataLine(parent_text, tokens)
-                        if node_data.get_fact_value().get_value() == 'WARNING':
+            else:
+                for i in range(len(line_match_patterns)):
+                    pattern = re.compile(line_match_patterns[i])
+                    match = pattern.match(tokens.get_tokens_string())
+                    
+                    if match:
+                        if i == 2:  # warning matcher
                             self.handle_warning(parent_text)
-                    elif i == 1:  # value conclusion matcher
-                        node_data = ValueConclusionLine(parent_text, tokens)
-                        # if (len(match.groups()) == 2 and match.group(2) is not None) \
-                        if match.group(2) is not None \
-                                or (
-                                tokens.get_tokens_string() == 'L' or tokens.get_tokens_string() == 'LM'
-                                or tokens.get_tokens_string() == 'ML' or tokens.get_tokens_string() == 'M'):
+                        
+                        elif i == 0:  # value conclusion matcher
+                            node_data = ValueConclusionLine(next_node_id, parent_text, tokens, meta_data)
+                            # if (len(match.groups()) == 2 and match.group(2) is not None) \
+                            if match.group(2) is not None \
+                                    or (
+                                    tokens.get_tokens_string() == 'L' or tokens.get_tokens_string() == 'LM'
+                                    or tokens.get_tokens_string() == 'ML' or tokens.get_tokens_string() == 'M'):
+                                variable_name = node_data.get_variable_name()
+                                temp_node = node_data
+
+                                # following lines are to look for any nodes having a its nodeName with any operators
+                                # due to the reason that the nodes could be used to define a nodes previously used
+                                # as a child nodes for other nodes
+                                
+                                possible_parent_node_key_list = \
+                                list(
+                                    filter(lambda key:
+                                        re.match(r"^\s*" + re.escape(variable_name) + r"\s*$", key)
+                                        or re.search(r"[<>=]\s*" + re.escape(variable_name) + r"\s*$", key)
+                                        or re.match(r"^\s*" + re.escape(variable_name) + r"\s*[<>=]+\s*.+$", key)
+                                        or re.match(r"\b" + re.escape(variable_name)  + r"\b(.*(IS IN LIST).*)+", key),
+                                        self.__node_set.get_node_dictionary().keys()
+                                    )
+                                )
+
+                                if len(possible_parent_node_key_list) > 0:
+                                    for item in possible_parent_node_key_list:
+                                        # Dependency Type: OR
+                                        self.__dependency_list.append(
+                                            Dependency(self.__node_set.get_node_dictionary()[item], temp_node,
+                                                    DependencyType.get_or()))
+
+                                if node_data.get_fact_value().get_value() == 'WARNING':
+                                    self.handle_warning(parent_text)
+
+                        elif i == 1:  # expr conclusion matcher
+                            node_data = ExprConclusionLine(next_node_id, parent_text, tokens, meta_data)
                             variable_name = node_data.get_variable_name()
                             temp_node = node_data
 
                             # following lines are to look for any nodes having a its nodeName with any operators
-                            # due to the reason that the nodes could be used to define a nodes previously used
-                            # as a child nodes for other nodes
+                            # due to the reason that the exprConclusion nodes could be used to define another nodes
+                            # as a child nodes for other nodes if the variableName of exprConclusion nodes is mentioned
+                            # somewhere else. However, it is excluding nodes having 'IS' keyword because if it has
+                            # the keyword then it should have child nodes to define the nodes otherwise the entire rule set
+                            # has NOT been written in correct way
 
                             possible_parent_node_key_list = \
                                 list(
-                                    filter(lambda key: \
-                                           re.match(r"(.+)(\s[<>=]+\s?)(" + variable_name + ")", key) \
-                                           or re.match(r"(" + variable_name + r")(\s*[<>=]+.*)+", key) \
-                                           or re.match(r"(" + variable_name + r")(?!\s*IS)+", key) \
-                                           or re.match(r"(" + variable_name + ")(.*(IS IN LIST).*)+",
-                                       key)
-                                   , self.__node_set.get_node_dictionary().keys()))
+                                    filter(lambda key:
+                                        re.match(r"(.+)(\s[<>=]+\s?)\b" + variable_name + r"\b", key)
+                                        or re.match(r"\b" + variable_name + r"\b(\s*[<>=]+.*)+", key)
+                                        or re.match(r"^\s*" + re.escape(variable_name) + r"\s*$", key)
+                                        or re.match(r"\b" + variable_name + r"\b(.*(IS IN LIST).*)+", key),
+                                        self.__node_set.get_node_dictionary().keys()
+                                    )
+                                )
+
                             if len(possible_parent_node_key_list) > 0:
                                 for item in possible_parent_node_key_list:
-                                    # Dependency Type: OR
                                     self.__dependency_list.append(
                                         Dependency(self.__node_set.get_node_dictionary()[item], temp_node,
-                                                   DependencyType.get_or()))
+                                                DependencyType.get_or()))  # Dependency Type: OR
 
                             if node_data.get_fact_value().get_value() == 'WARNING':
                                 self.handle_warning(parent_text)
 
-                    elif i == 2:  # expr conclusion matcher
-                        node_data = ExprConclusionLine(parent_text, tokens)
-                        variable_name = node_data.get_variable_name()
-                        temp_node = node_data
-
-                        # following lines are to look for any nodes having a its nodeName with any operators
-                        # due to the reason that the exprConclusion nodes could be used to define another nodes
-                        # as a child nodes for other nodes if the variableName of exprConclusion nodes is mentioned
-                        # somewhere else. However, it is excluding nodes having 'IS' keyword because if it has
-                        # the keyword then it should have child nodes to define the nodes otherwise the entire rule set
-                        # has NOT been written in correct way
-
-                        possible_parent_node_key_list = \
-                            list(
-                                filter(lambda key: \
-                                       re.match(r"(.+)(\s[<>=]+\s?)(" + variable_name + ")", key) \
-                                       or re.match(r"(" + variable_name + r")(\s*[<>=]+.*)+", key) \
-                                       or re.match(r"(" + variable_name + r")(?!\s*IS)+", key) \
-                                       or re.match(r"(" + variable_name + ")(.*(IS IN LIST).*)+",
-                                                   key)
-                                   , self.__node_set.get_node_dictionary().keys()))
-                        if len(possible_parent_node_key_list) > 0:
-                            for item in possible_parent_node_key_list:
-                                self.__dependency_list.append(
-                                    Dependency(self.__node_set.get_node_dictionary()[item], temp_node,
-                                               DependencyType.get_or()))  # Dependency Type: OR
-
-                        if node_data.get_fact_value().get_value() == 'WARNING':
+                        else:
                             self.handle_warning(parent_text)
 
-                    else:
-                        self.handle_warning(parent_text)
+                        self._parent_node_data_set(node_data, line_number, meta_data)
+                        break
 
-                    node_data.set_node_line(line_number)
-
-                    if node_data.get_line_type() == LineType.META:
-                        if node_data.get_meta_type() == MetaType.INPUT:
-                            self.__node_set.get_input_dictionary()[
-                                node_data.get_variable_name()] = node_data.get_fact_value()
-                        elif node_data.get_meta_type() == MetaType.FIXED:
-                            self.__node_set.get_fact_dictionary()[
-                                node_data.get_variable_name()] = node_data.get_fact_value()
-                    else:
-                        self.__node_set.get_node_dictionary()[node_data.get_node_name()] = node_data
-                        self.__node_set.get_node_id_dictionary()[node_data.get_node_id()] = node_data.get_node_name()
-
-                    break
+    def _parent_node_data_set(self, node_data: Node, line_number: int, meta_data: MetaData=None) -> None:
+        node_data.set_node_line(line_number)
+        if meta_data != None:
+            node_data.set_meta_data(meta_data)
+            
+        if node_data.get_line_type() == LineType.META:
+            if node_data.get_meta_type() == MetaType.INPUT:
+                self.__node_set.get_input_dictionary()[
+                    node_data.get_variable_name()] = node_data.get_fact_value()
+            elif node_data.get_meta_type() == MetaType.FIXED:
+                self.__node_set.get_fact_dictionary()[
+                    node_data.get_variable_name()] = node_data.get_fact_value()
+        else:
+            self.__node_set.get_node_dictionary()[node_data.get_node_name()] = node_data
+            self.__node_set.get_node_id_dictionary()[node_data.get_node_id()] = node_data.get_node_name()
 
     def handle_child(self, parent_text, child_text, first_key_words_group, line_number) -> None:
 
@@ -210,6 +215,7 @@ class RuleSetParser(IScanFeeder, ABC):
             # as 'string.replace(firstTokenString)', then it will remove 'AND NOT ALL' even we only need to remove 'AND'
 
             node_data = None
+            next_node_id = len(self.__node_set.get_node_dictionary())
             if child_text in self.__node_set.get_node_dictionary().keys():
                 node_data = self.__node_set.get_node_dictionary()[child_text]
             tokens = Tokenizer.get_tokens(child_text)
@@ -227,11 +233,12 @@ class RuleSetParser(IScanFeeder, ABC):
                         if pattern_index == 4:  # warning matcher
                             self.handle_warning(child_text)
                         elif pattern_index == 0:  # value conclusion matcher
-                            node_data = ValueConclusionLine(child_text, tokens)
+                            node_data = ValueConclusionLine(next_node_id, child_text, tokens)
                             temp_node = node_data
                             possible_child_node_key_list = \
                                 list(filter(lambda key: re.match(
-                                    r"^(" + temp_node.get_variable_name() + ")(\\s+(IS(?!(\\s+IN\\s+LIST))).*)*$", key),
+                                    r"^(" + temp_node.get_variable_name() + ")(\\s+(IS(?!(\\s+IN\\s+LIST))).*)*$", key)
+                                    or re.match(r"^\b" + temp_node.get_variable_name() + r"\b(\s+(IS(?!(\s+CALC))).*)*$",key),
                                             self.__node_set.get_node_dictionary().keys()))
                             if len(possible_child_node_key_list) > 0:
                                 for item in possible_child_node_key_list:
@@ -241,20 +248,22 @@ class RuleSetParser(IScanFeeder, ABC):
                             if node_data.get_fact_value().get_value() == "WARNING":
                                 self.handle_warning(child_text)
                         elif pattern_index == 1:  # comparison matcher
-                            node_data = ComparisonLine(child_text, tokens)
+                            node_data = ComparisonLine(next_node_id, child_text, tokens)
                             rhs_type = node_data.get_rhs().get_value_type()
                             rhs_string = node_data.get_rhs().get_value()
                             lhs_string = node_data.get_lhs()
                             temp_node = node_data
                             if rhs_type == FactValueType.STRING:
                                 possible_child_node_key_list = list(filter(
-                                    lambda key: re.match(r"^(" + lhs_string + r")(\s+(IS(?!(\s+IN\s+LIST))).*)*$", key)
-                                                or re.match(r"^(" + rhs_string + r")(\s+(IS(?!(\s+IN\s+LIST))).*)*$",
-                                                            key),
+                                    lambda key: re.match(r"^\b" + lhs_string + r"\b(\s+(IS(?!(\s+IN\s+LIST))).*)*$", key)
+                                                or re.match(r"^\b" + rhs_string + r"\b(\s+(IS(?!(\s+IN\s+LIST))).*)*$",key)
+                                                or re.match(r"^\b" + lhs_string + r"\b(\s+(IS(?!(\s+CALC))).*)*$",key)
+                                                or re.match(r"^\b" + rhs_string + r"\b(\s+(IS(?!(\s+CALC))).*)*$",key),
                                     self.__node_set.get_node_dictionary().keys()))
                             else:
                                 possible_child_node_key_list = list(filter(
-                                    lambda key: re.match(r"^(" + lhs_string + r")(\s+(IS(?!(\s+IN\s+LIST))).*)*$", key),
+                                    lambda key: re.match(r"^\b" + lhs_string + r"\b(\s+(IS(?!(\s+IN\s+LIST))).*)*$", key)
+                                    or re.match(r"^\b" + lhs_string + r"\b(\s+(IS(?!(\s+CALC))).*)*$",key),
                                     self.__node_set.get_node_dictionary().keys()))
 
                             if len(possible_child_node_key_list) > 0:
@@ -267,11 +276,11 @@ class RuleSetParser(IScanFeeder, ABC):
                                 self.handle_warning(parent_text)
 
                         elif pattern_index == 2:  # iterate matcher
-                            node_data = IterateLine(child_text, tokens)
+                            node_data = IterateLine(next_node_id, child_text, tokens)
                             if node_data.get_fact_value().get_value_type() == FactValueType.WARNING:
                                 self.handle_warning(parent_text)
                         elif pattern_index == 3:  # expr conclusion matcher
-                            node_data = ExprConclusionLine(child_text, tokens)
+                            node_data = ExprConclusionLine(next_node_id, child_text, tokens)
                             # In this case, there is no mechanism to find possible parent nodes.
                             # I have brought 'local variable' concept for this case due to it may mass up with
                             # structuring a node dependency tree with topological sort
@@ -283,6 +292,7 @@ class RuleSetParser(IScanFeeder, ABC):
                         node_data.set_node_line(line_number)
                         self.__node_set.get_node_dictionary()[node_data.get_node_name()] = node_data
                         self.__node_set.get_node_id_dictionary()[node_data.get_node_id()] = node_data.get_node_name()
+                        break
 
             self.__dependency_list.append(Dependency(self.__node_set.get_node(parent_text), node_data, dependency_type))
 
@@ -291,7 +301,7 @@ class RuleSetParser(IScanFeeder, ABC):
         fv = None
 
         if tokens.get_tokens_string() == "Da":
-            fact_value_in_date = datetime.strptime(item_text, '%d/%m/%Y')
+            fact_value_in_date = datetime.strptime(item_text, '%d/%m/%Y').strftime("%d/%m/%Y")
             fv = FactValue(fact_value_in_date, FactValueType.DATE)
         elif tokens.get_tokens_string() == "De":
             fv = FactValue(float(item_text), FactValueType.DOUBLE)
@@ -311,12 +321,12 @@ class RuleSetParser(IScanFeeder, ABC):
         string_to_get_fact_value = (parent_text[5: parent_text.index("AS")]).strip()
         if meta_type == MetaType.INPUT:
             fact_value: FactValue = self.__node_set.get_input_dictionary().get(string_to_get_fact_value)
-            if fact_value.get_value_type() is not FactValueType.LIST:
+            if fact_value.get_value_type().value is not FactValueType.LIST.value:
                 fact_value = FactValue(list(), FactValueType.LIST)
-            list(fact_value.get_value()).append(fv)
+            fact_value.get_value().append(fv)
         elif meta_type == MetaType.FIXED:
             fact_value: FactValue = self.__node_set.get_fact_dictionary().get(string_to_get_fact_value)
-            if fact_value.get_value_type() is not FactValueType.LIST:
+            if fact_value.get_value_type().value is not FactValueType.LIST.value:
                 fact_value = FactValue(list(), FactValueType.LIST)
             fact_value.get_value().append(fv)
 
@@ -362,13 +372,15 @@ class RuleSetParser(IScanFeeder, ABC):
                     parent_node_of_virtual_node_name = each_node.get_node_name()
                     node_line_type = each_node.get_line_type()
                     virtual_node: Node
+                    next_node_id = len(self.get_node_set().get_node_dictionary())
                     virtual_node_name_text = "VirtualNode-" + parent_node_of_virtual_node_name
+                    
                     if node_line_type == LineType.EXPR_CONCLUSION:
-                        virtual_node = ExprConclusionLine(virtual_node_name_text,
-                                                          Tokenizer.get_tokens(virtual_node_name_text))
+                        virtual_node = ExprConclusionLine(id=next_node_id, parent_text=virtual_node_name_text,
+                                                          tokens=Tokenizer.get_tokens(virtual_node_name_text))
                     else:
-                        virtual_node = ValueConclusionLine(virtual_node_name_text,
-                                                           Tokenizer.get_tokens(virtual_node_name_text))
+                        virtual_node = ValueConclusionLine(id=next_node_id, node_text=virtual_node_name_text,
+                                                           tokens=Tokenizer.get_tokens(virtual_node_name_text))
 
                     self.__node_set.get_node_id_dictionary()[virtual_node.get_node_id()] = virtual_node_name_text
                     virtual_node_dictionary[virtual_node_name_text] = virtual_node
@@ -416,5 +428,6 @@ class RuleSetParser(IScanFeeder, ABC):
                 match = regex.match(first_token_string)
                 if match:
                     dependency_type = dependency_type | DependencyType.get_dependency_array()[index]
+
 
         return dependency_type

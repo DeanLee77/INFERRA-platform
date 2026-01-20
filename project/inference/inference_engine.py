@@ -2,10 +2,12 @@ import json
 from datetime import *
 from project.fact_values import FactValue, FactValueType
 from project.inference import Assessment, AssessmentState
+from project.inference.assesments import Assessments
 from project.nodes import ComparisonLine, ValueConclusionLine, DependencyType, LineType
 from project.nodes.node import Node
 from project.nodes.node_set import NodeSet
 from project.loggers import Logger
+
 
 logging: Logger = Logger.get_logger(__name__)
 
@@ -15,6 +17,7 @@ class InferenceEngine:
     __targetNode: Node
     __ast: AssessmentState
     __ass: Assessment
+    __asses: Assessments
     __nodeFactList: list
 
     def __init__(self, node_set: NodeSet = None):
@@ -22,6 +25,7 @@ class InferenceEngine:
         self.__targetNode = None
         self.__ast = self.new_assessment_state()
         self.__ass = Assessment()
+        self.__asses = Assessments()
         self.__nodeFactList = list()  # contains all rules set as a fact given by a user from a ruleList
 
         temp_fact_dict = node_set.get_fact_dictionary()
@@ -101,16 +105,30 @@ class InferenceEngine:
 
         return ast
 
+    def set_assessments(self, asses: Assessments):
+        self.__asses = asses
+
+    def get_assessments(self) -> Assessments:
+        return self.__asses
+    
+    def add_assessment_into_assessment_list(self, assessment: Assessment):
+        self.__asses.add_assessment(assessment)
+
+    def get_assessment_of_rule(self, goal_rule_name: str):
+        return self.__asses.get_assessment(goal_rule_name)
+    
     def set_assessment(self, ass: Assessment):
         self.__ass = ass
 
     def get_assessment(self) -> Assessment:
         return self.__ass
 
-    # this method is to extract all variableName of Nodes, and put them into a List<String>
-    # it may be useful to display and ask a user to select which information they do have
-    # even before starting Inference process
-    def get_list_of_variable_name_and_value_of_nodes(self) -> list:
+    def get_list_of_variable_name_and_value_of_nodes(self) -> list[str]:
+        """
+        this method is to extract all variableName of Nodes, and put them into a list[str]
+        it may be useful to display and ask a user to select which information they do have
+        even before starting Inference process
+        """
         variable_name_list: list = []
         for each_node in self.__nodeSet.get_node_dictionary().values():
             if len(self.__nodeSet.get_dependency_matrix().get_to_child_dependency_list()[each_node.get_node_id()]) == 0:
@@ -122,19 +140,23 @@ class InferenceEngine:
 
         return variable_name_list
 
-    # this method allows to store all information via GUI even before starting Inference process.
+    
     def add_node_fact(self, node_variable_name: str, fv: FactValue) -> None:
+        """
+        this method allows to store all information via GUI even before starting Inference process
+        """
         for each_node in self.__nodeSet.get_node_dictionary().values():
             if (each_node.get_variable_name() == node_variable_name) or \
                     (str(each_node.get_fact_value().get_value()) == node_variable_name):
                 self.__nodeFactList.append(each_node)
         self.__ast.get_working_memory()[node_variable_name] = fv
 
-    # this method is to find all relevant Nodes(immediate child nodes of the most parent)
-    # with given information from a user
-    # while finding out all relevant factors, all given information will be stored
-    # in AssessmentState.workingMemory
+    
     def find_relevant_factors(self) -> list:
+        """
+        this method is to find all relevant Nodes(immediate child nodes of the most parent) with given information
+        while finding out all relevant factors, all given information will be stored in AssessmentState.workingMemory
+        """
         relevant_factor_list: list = []
         if len(self.__nodeFactList) > 0:
             for each_node in self.__nodeFactList:
@@ -163,10 +185,21 @@ class InferenceEngine:
                     relevant_factor_node = self.aux_find_relevant_factors(parent_node)
         return relevant_factor_node
 
-    # this method uses 'BACKWARD-CHAINING', and it will return node to be asked of a given assessment, which has not
-    # been determined and does not have any child nodes if the goal node of the given assessment has still
-    # not been determined.
+    def get_next_question_with_goal_name(self, goal_name:str) -> Node:
+        """
+        this method uses a function, get_next_question() which uses 'BACKWARD-CHAINING'. 
+        In order to support multiple assessments on a multiple root node in rule set group,
+        it needs capability of next question retrieval with its goal name from the target assessment.
+        """
+        assessment = self.__asses.get_assessment(goal_name)
+        return self.get_next_question(assessment)
+        
     def get_next_question(self, ass: Assessment) -> Node:
+        """
+        this method uses 'BACKWARD-CHAINING', and it will return node to be asked of a given assessment, which has not
+        been determined and does not have any child nodes if the goal node of the given assessment has still
+        not been determined.
+        """
         if ass.get_goal_node().get_node_name() not in self.get_assessment_state().get_inclusive_list():
             self.__ast.get_inclusive_list().append(ass.get_goal_node().get_node_name())
 
@@ -339,7 +372,7 @@ class InferenceEngine:
                 fact_value_type = temp_input_dictionary[node_variable_name].get_value_type()
             elif node_value_string in self.__ast.get_working_memory().keys():
                 temp_fact_value: FactValue = self.__ast.get_working_memory()[node_value_string]
-                if FactValueType.LIST == temp_fact_value.get_value_type():
+                if FactValueType.LIST.value == temp_fact_value.get_value_type().value:
                     fact_value_type = temp_fact_value.get_value()[0].get_value_type()
                 else:
                     fact_value_type = temp_fact_value.get_value_type()
@@ -392,15 +425,17 @@ class InferenceEngine:
                 temp_list.append(1)
             else:
                 self.is_iterate_line_child_aux(temp_list, iterate_child_node_list_aux, node_id)
-
-    # this is to check whether a node can be evaluated with all information in the workingMemory.
-    # If there is information for a value of node's value(FactValue) or variableName,
-    # then the node can be evaluated otherwise not.
-    # In order to do it, AssessmentState.workingMemory must contain a value for variable of the rule,
-    # and rule type must be either COMPARISON, ITERATE or VALUE_CONCLUSION
-    # because they are the ones only can be the most child nodes, and other type of node must be a parent
-    # of other types of node.
+    
     def can_evaluate(self, target_node: Node) -> bool:
+        """
+        This is to check whether a node can be evaluated with all information in the workingMemory.
+        If there is information for a value of node's value(FactValue) or variableName,
+        then the node can be evaluated otherwise not.
+        In order to do it, AssessmentState.workingMemory must contain a value for variable of the rule,
+        and rule type must be either COMPARISON, ITERATE or VALUE_CONCLUSION
+        because they are the ones only can be the most child nodes, and other type of node must be a parent
+        of other types of node.
+        """
         can_be_evaluate = False
         line_type: LineType = target_node.get_line_type()
 
@@ -447,13 +482,15 @@ class InferenceEngine:
 
         return can_be_evaluate
 
-    # this method is to add fact or set a node as a fact by using AssessmentState.setFact() method.
-    # it also is used to feed an answer to a being asked node. Once a fact is added then forward-chain is used
-    # to update all effected nodes' state, and workingMemory in AssessmentState class will be updated accordingly.
-    # the reason for taking nodeName instead nodeVariableName is that it will be easier to find an exact node with
-    # nodeName rather than nodeVariableName because a certain nodeVariableName could be found in several nodes.
     def feed_answer_to_node(self, target_node: Node, question_name: str, node_value: any,
                             node_value_type: FactValueType, ass: Assessment):
+        """
+        This method is to add fact or set a node as a fact by using AssessmentState.setFact() method.
+        It also is used to feed an answer to a being asked node. Once a fact is added then forward-chain is used
+        to update all effected nodes' state, and workingMemory in AssessmentState class will be updated accordingly.
+        The reason for taking nodeName instead nodeVariableName is that it will be easier to find an exact node with
+        nodeName rather than nodeVariableName because a certain nodeVariableName could be found in several nodes.
+        """
         fact_value: FactValue = None
         if FactValueType.BOOLEAN == node_value_type:
             if isinstance(node_value, bool):
@@ -894,9 +931,11 @@ class InferenceEngine:
     def get_assessment_goal_rule_answer(self, ass: Assessment) -> FactValue:
         return self.__ast.get_working_memory()[ass.get_goal_node().get_variable_name()]
 
-    # Returns boolean value that can determine whether the given rule has any children
-    # this method is used within the process of backward chaining.
     def has_children(self, node_id: int) -> bool:
+        """
+        Returns boolean value that can determine whether the given rule has any children
+        this method is used within the process of backward chaining.
+        """
         it_has_children = False
         if len(self.__nodeSet.get_dependency_matrix().get_to_child_dependency_list(node_id)) != 0:
             it_has_children = True
@@ -907,8 +946,8 @@ class InferenceEngine:
 
         return it_has_children
 
-    # the method adds all children rules of relevant parent rule into the 'inclusive_list' if they are not in the list.
     def add_child_rule_into_inclusive_list(self, parent_node: Node):
+        """ the method adds all children rules of relevant parent rule into the 'inclusive_list' if they are not in the list. """
         children_list_of_node: list = \
             self.__nodeSet.get_dependency_matrix().get_to_child_dependency_list(parent_node.get_node_id())
         for item in children_list_of_node:
@@ -1166,19 +1205,21 @@ class InferenceEngine:
                 sorted_summary_list.insert(1, node_name)
 
         return sorted_summary_list
-
-    # this method is to reset 'workingMemory' list and 'inclusiveList'
-    # usage of this method will depend on a user. if a user wants to continue to assessment on a same case
-    # with same conditions then don't need to reset 'workingMemory' and 'inclusiveList' otherwise reset them.
+    
     def reset_working_memory_and_inclusive_list(self):
+        """
+        this method is to reset 'workingMemory' list and 'inclusiveList'
+        use of this method will depend on a user. if a user wants to continue to assessment on a same case
+        with same conditions then don't need to reset 'workingMemory' and 'inclusiveList' otherwise reset them.
+        """
         if len(self.__ast.get_inclusive_list()) > 0:
             self.__ast.get_inclusive_list().clear()
 
         if len(self.__ast.get_working_memory()) > 0:
             self.__ast.get_working_memory().clear()
 
-    # this is to generate Assessment Summary
     def generate_assessment_summary(self) -> list:
+        """ this is to generate Assessment Summary """
         temp_summary_list: list = []
         for sum_item in self.get_assessment_state().get_summary_list():
             to_be_json_obj = dict()
@@ -1188,7 +1229,7 @@ class InferenceEngine:
 
         return temp_summary_list
 
-    def edit_answer(self, question: str) -> None:
+    def edit_answer(self, question: str, target_goal_node_name: str) -> None:
         temp_summary_list = self.get_assessment_state().get_summary_list()
         index_of_question_to_be_edited = temp_summary_list.index(question)
         temp_working_memory = self.get_assessment_state().get_working_memory()
@@ -1208,7 +1249,7 @@ class InferenceEngine:
         # unless they are appeared during the questionnaire after all re-establishment.
         for index in range(0, len(temp_summary_list)):
             if index < index_of_question_to_be_edited:
-                node = self.get_next_question(self.get_assessment())
+                node = self.get_next_question(self.get_assessment_of_rule(target_goal_node_name))
                 if self.__ass.get_node_to_be_asked().get_line_type() == LineType.ITERATE:
                     self.__ass.set_aux_node_to_be_asked(node)
 
@@ -1220,8 +1261,9 @@ class InferenceEngine:
                                                  str(fact_value.get_value()),
                                                  fact_value.get_value_type(), self.__ass)
 
-    # this is to find a condition in a rule set with a given keyword string, that may contain multiple keywords
     def find_condition(self, keyword: str) -> list:
+        """ this is to find a condition in a rule set with a given keyword string, that may contain multiple keywords """
+
         initial_size = len(self.__nodeSet.get_sorted_node_list())
         condition_list: list = []
         question_list: list = []
@@ -1244,3 +1286,6 @@ class InferenceEngine:
                     condition_list.append(rule_name)
 
         return condition_list
+
+        
+        

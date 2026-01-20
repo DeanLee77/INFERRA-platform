@@ -11,3 +11,4 @@ from .metadata_line import MetadataLine
 # from .node import Node
 from .record import HistoryRecord
 from .value_conclusion_line import ValueConclusionLine
+from .meta_data import MetaData

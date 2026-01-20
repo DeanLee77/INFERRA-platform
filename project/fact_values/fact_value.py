@@ -20,22 +20,19 @@ class FactValue:
     def __init__(self, value=None, value_type=None):
         if (value is not None) and (value_type is not None):
             if value_type == FactValueType.DATE:
-                self.__value = datetime.strptime(value, "%d/%m/%Y")
                 self.__value_type = value_type
             elif isinstance(value, bool):
-                self.__value = value
                 self.__value_type = FactValueType.BOOLEAN
             elif isinstance(value, str) and re.match(r"false|true", value, re.IGNORECASE):
                 if re.match(r"false", value, re.IGNORECASE):
                     value = False
                 else:
                     value = True
-                self.__value = value
                 self.__value_type = FactValueType.BOOLEAN
             else:
                 self.__value_type = value_type
-                self.__value = value
             self.__default_value = value
+            self.__value = value
         elif value is not None:
             if isinstance(value, FactValue):
                 self.__value = value.get_value()
@@ -51,7 +48,7 @@ class FactValue:
                 self.__value = value
                 self.__value_type = FactValueType.BOOLEAN
             elif value_type is not None and value_type == FactValueType.DATE:
-                self.__value = datetime.strptime(value, "%d/%m/%Y")
+                self.__value = datetime.strptime(value, "%d/%m/%Y").strftime("%d/%m/%Y")
                 self.__value_type = value_type
             else:
                 self.__value = value

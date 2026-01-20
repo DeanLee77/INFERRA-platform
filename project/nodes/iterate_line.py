@@ -1,10 +1,11 @@
 import json
+from typing import Union
 from project.inference import AssessmentState, Assessment, InferenceEngine, TopologicalSort
 from project.loggers import Logger
 from project.nodes.node import Node
 from project.tokens import Token
 from project.nodes.node_set import NodeSet
-from project.nodes import ValueConclusionLine, ComparisonLine, ExprConclusionLine, Dependency, LineType, DependencyMatrix
+from project.nodes import ValueConclusionLine, ComparisonLine, ExprConclusionLine, Dependency, LineType, DependencyMatrix, MetaData
 from project.fact_values import FactValue, FactValueType
 
 
@@ -18,8 +19,8 @@ class IterateLine(Node):
     __givenListSize = 0
     __iterateIE = None
 
-    def __init__(self, parent_text: str, tokens: Token):
-        super().__init__(parent_text, tokens)
+    def __init__(self, id:int=None, parent_text: str=None, tokens: Token=None, meta_data: MetaData=None):
+        super().__init__(id=id, parent_text=parent_text, tokens=tokens, meta_data=meta_data)
         self._lineType = LineType.ITERATE
 
     def __repr__(self):
@@ -62,7 +63,7 @@ class IterateLine(Node):
                             next_nth_in_string + " " + self.get_variable_name() + " " + temp_child_node.get_node_name(),
                             temp_child_node.get_tokens())
                         temp_node_fact_value = temp_node.get_rhs()
-                        if temp_node_fact_value.get_value_type() == FactValueType.STRING:
+                        if temp_node_fact_value.get_value_type().value == FactValueType.STRING.value:
                             temp_fact_value = FactValue(
                                 next_nth_in_string + " " + self.get_variable_name() + " " +
                                 temp_node_fact_value.get_value(),
@@ -190,7 +191,7 @@ class IterateLine(Node):
         return self.__iterateNodeSet
 
     # this method is used when a givenList exists as a string
-    def iterate_feed_answers_with_json(self, given_json_string: [str or bytes], parent_node_set: NodeSet,
+    def iterate_feed_answers_with_json(self, given_json_string: Union[str,bytes], parent_node_set: NodeSet,
                                        parent_assessment_state: AssessmentState, assessment: Assessment) -> None:
 
         # givenJsonString has to be in same format as Example otherwise the engine would NOT be able to enable
@@ -242,8 +243,10 @@ class IterateLine(Node):
         if self.__iterateNodeSet is None:
             self.__iterateNodeSet = self.create_iterate_node_set(parent_node_set)
             self.__iterateIE = InferenceEngine(self.__iterateNodeSet)
-            if self.__iterateIE.get_assessment() is None:
-                self.__iterateIE.set_assessment(Assessment(self.__iterateNodeSet, self.get_node_name()))
+            
+            if self.__iterateIE.get_assessment_of_rule(self.get_node_name()) is None:
+                self.__iterateIE.add_assessment_into_assessment_list(Assessment(self.__iterateNodeSet, self.get_node_name()))
+                # self.__iterateIE.set_assessment(Assessment(self.__iterateNodeSet, self.get_node_name()))
 
         while self._nodeName not in self.__iterateIE.get_assessment_state().get_working_memory().keys():
             next_question_node: Node = self.get_iterate_next_question(parent_node_set, parent_assessment_state)
@@ -257,7 +260,7 @@ class IterateLine(Node):
                              [next_question_node.get_variable_name()]).strip()
 
                 self.__iterateIE.feed_answer_to_node(next_question_node, question, FactValue(answer),
-                                                     self.__iterateIE.get_assessment())
+                                                     self.__iterateIE.get_assessment_of_rule(self.get_node_name()))
 
             iterate_working_memory = self.__iterateIE.get_assessment_state().get_working_memory()
             parent_working_memory = parent_assessment_state.get_working_memory()
@@ -278,12 +281,15 @@ class IterateLine(Node):
             self.__iterateNodeSet = self.create_iterate_node_set(parent_node_set)
             self.__iterateIE = InferenceEngine(self.__iterateNodeSet)
 
-            if self.__iterateIE.get_assessment() is None:
-                self.__iterateIE.set_assessment(Assessment(self.__iterateNodeSet, self.get_node_name()))
+            self.__iterateIE.get_assessment_of_rule(self.get_node_name())
 
-        self.__iterateIE.get_assessment().set_node_to_be_asked(target_node)
+            if self.__iterateIE.get_assessment_of_rule(self.get_node_name()) is None:
+                self.__iterateIE.add_assessment_into_assessment_list(Assessment(self.__iterateNodeSet, self.get_node_name()))
+                # self.__iterateIE.set_assessment(Assessment(self.__iterateNodeSet, self.get_node_name()))
+
+        self.__iterateIE.get_assessment_of_rule(self.get_node_name()).set_node_to_be_asked(target_node)
         self.__iterateIE.feed_answer_to_node(target_node, question_name, node_value,
-                                             node_value_type, self.__iterateIE.get_assessment())
+                                             node_value_type, self.__iterateIE.get_assessment_of_rule(self.get_node_name()))
 
         iterate_working_memory = self.__iterateIE.get_assessment_state().get_working_memory()
         parent_working_memory = parent_ast.get_working_memory()
@@ -300,9 +306,10 @@ class IterateLine(Node):
         if self.__iterateNodeSet is None and self.__givenListSize != 0:
             self.__iterateNodeSet = self.create_iterate_node_set(parent_node_set)
             self.__iterateIE = InferenceEngine(self.__iterateNodeSet)
-
-            if self.__iterateIE.get_assessment() is None:
-                self.__iterateIE.set_assessment(Assessment(self.__iterateNodeSet, self.get_node_name()))
+            
+            if self.__iterateIE.get_assessment_of_rule(self.get_node_name()) is None:
+                self.__iterateIE.add_assessment_into_assessment_list(Assessment(self.__iterateNodeSet, self.get_node_name()))
+                # self.__iterateIE.set_assessment(Assessment(self.__iterateNodeSet, self.get_node_name()))
 
         first_iterate_question_node = parent_node_set.get_node_by_node_id(
             min(parent_node_set.get_dependency_matrix().get_to_child_dependency_list(self.get_node_id()))
@@ -314,7 +321,7 @@ class IterateLine(Node):
                 question_node = first_iterate_question_node
             else:
                 if not self.can_be_self_evaluated(parent_ast.get_working_memory()):
-                    question_node = self.__iterateIE.get_next_question(self.__iterateIE.get_assessment())
+                    question_node = self.__iterateIE.get_next_question(self.__iterateIE.get_assessment_of_rule(self.get_node_name()))
 
         return question_node
 

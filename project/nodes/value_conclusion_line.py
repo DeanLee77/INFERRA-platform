@@ -4,6 +4,7 @@ from project.nodes.node import Node
 from project.nodes.line_type import LineType
 from project.fact_values import FactValue
 from project.tokens import Token
+from project.nodes.meta_data import MetaData
 
 logging: Logger = Logger.get_logger(__name__)
 
@@ -27,8 +28,8 @@ class ValueConclusionLine(Node):
 
     __isPlainStatementFormat = False
 
-    def __init__(self, node_text: str=None, tokens: Token=None):
-        super().__init__(node_text, tokens)
+    def __init__(self, id: int=None, node_text: str=None, tokens: Token=None, meta_data: MetaData=None):
+        super().__init__(id=id, parent_text=node_text, tokens=tokens, meta_data=meta_data)
         self._lineType = LineType.VALUE_CONCLUSION
 
     def __repr__(self):

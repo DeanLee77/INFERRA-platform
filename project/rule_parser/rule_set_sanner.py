@@ -1,9 +1,13 @@
 import re
 from collections import deque
+from project.nodes import MetaData
 from project.inference import TopologicalSort
 from project.nodes.node_set import NodeSet
 from project.rule_parser import ILineReader
 from project.rule_parser import IScanFeeder
+from project.loggers import Logger
+
+logging: Logger = Logger.get_logger(__name__)
 
 
 class RuleSetScanner:
@@ -27,9 +31,11 @@ class RuleSetScanner:
         line_number = 0
 
         still_lines = True
+        new_meta_data = MetaData()
+        
         while still_lines:
             line = self.__line_reader.get_next_line()
-
+            
             if line == "":
                 still_lines = False
                 break
@@ -40,15 +46,18 @@ class RuleSetScanner:
                 line_trimmed = line.strip()
                 current_whitespace = 0
                 line_number = line_number + 1
-
                 # check the line
                 # is it empty?
                 if len(line) == 0:
                     parent_stack.clear()
-                elif line.strip()[0:2] == "//":
+                    new_meta_data = MetaData()
+                elif line_trimmed.startswith(('#', '//')) or not line_trimmed:
+
                     # this els if statement is to handle commenting in new line only
                     # handling commenting in rule text file needs enhancement later
-                    None
+                    logging.debug(f'Comment Line: {line_trimmed}')
+                    if MetaData.is_meta_data(line_trimmed) and len(parent_stack) == 0:
+                        new_meta_data.instantiate_attrs(line)
 
                 # does it begin with a white space?
                 elif line[0].isspace():
@@ -81,7 +90,7 @@ class RuleSetScanner:
                         temp_first_keywords_group = line_trimmed.replace(temp_line_trimmed, "").strip()
                         parent_stack.append(
                             temp_line_trimmed.strip())  # due to line_trimmed string contains keywords such as "AND", "OR", "AND KNOWN" or "OR KNOWN" so that it needs removing those keywords for the 'parentStack'
-
+                        
                         # is an indented child
                         self.__scan_feeder.handle_child(parent, temp_line_trimmed, temp_first_keywords_group,
                                                         line_number)
@@ -89,7 +98,7 @@ class RuleSetScanner:
                     # is a parent
                     parent_stack.clear()
                     parent = line_trimmed
-                    self.__scan_feeder.handle_parent(parent, line_number)
+                    self.__scan_feeder.handle_parent(parent, line_number, new_meta_data)
                     parent_stack.append(parent)
 
                 previous_whitespace = current_whitespace

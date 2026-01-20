@@ -20,7 +20,7 @@ class MetadataLine(Node):
     __name: str = None
 
     def __init__(self, node_text: str, tokens: Token):
-        super().__init__(node_text, tokens)
+        super().__init__(parent_text=node_text, tokens=tokens)
         self._lineType = LineType.META
 
     def initialisation(self, parent_text: str, tokens: Token):
@@ -53,7 +53,7 @@ class MetadataLine(Node):
         if self.__metaType == MetaType.FIXED:
             if temp_str == "IS":
                 if self.is_date(last_token_string):
-                    self._value = FactValue(datetime.strptime(temp_array[1], '%d/%m/%Y'), FactValueType.DATE)
+                    self._value = FactValue(datetime.strptime(temp_array[1], '%d/%m/%Y').strftime('%d/%m/%Y'), FactValueType.DATE)
                 elif self.is_double(last_token_string):
                     self._value = FactValue(float(temp_array[1]), FactValueType.DOUBLE)
                 elif self.is_integer(last_token_string):
@@ -87,7 +87,7 @@ class MetadataLine(Node):
                     value_list = list()
                     # temp_str_2 is date value
                     if Node.is_date(last_token_string):
-                        temp_value = FactValue(datetime.strptime(temp_str_2, '%d/%m/%Y'), FactValueType.DATE)
+                        temp_value = FactValue(datetime.strptime(temp_str_2, '%d/%m/%Y').strftime("%d/%m/%Y"), FactValueType.DATE)
                     # temp_str_2 is double value
                     elif Node.is_double(last_token_string):
                         temp_value = FactValue(float(temp_str_2), FactValueType.DOUBLE)
@@ -119,7 +119,7 @@ class MetadataLine(Node):
                         or FactValueType.STRING.value == temp_str:
                     self._value = FactValue(temp_str_2, FactValueType.STRING)
                 elif FactValueType.DATE.value == temp_str:
-                    self._value = FactValue(datetime.strptime(temp_str_2, '%d/%m/%Y'), FactValueType.DATE)
+                    self._value = FactValue(datetime.strptime(temp_str_2, '%d/%m/%Y').strftime("%d/%m/%Y"), FactValueType.DATE)
                 elif FactValueType.NUMBER.value == temp_str \
                         or FactValueType.INTEGER.value == temp_str:
                     self._value = FactValue(int(temp_str_2), FactValueType.INTEGER)
@@ -167,6 +167,7 @@ class MetadataLine(Node):
         for x in MetaType.get_all_meta_type():
             if x.value in parent_text:
                 self.__metaType = x
+                break
 
     def get_meta_type(self):
         return self.__metaType

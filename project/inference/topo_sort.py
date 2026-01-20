@@ -15,7 +15,7 @@ class TopologicalSort:
     # and delete it while topological sorting. Hence, this method needs to create copy of dependencyMatrix.
 
     @staticmethod
-    def bfs_topological_sort(node_dictionary: dict, node_id_dictionary: dict, dependency_matrix: [[]]) -> list:
+    def bfs_topological_sort(node_dictionary: dict, node_id_dictionary: dict, dependency_matrix: list[list[any]]) -> list:
         logging.info("bfs_topological_sort ...")
 
         sorted_list = list()
@@ -34,6 +34,7 @@ class TopologicalSort:
             node_id = node.get_node_id()
 
             for index in range(size_of_matrix):
+                
                 if (node_id is not index) and copy_of_dependency_matrix[node_id][index] != -1:
                     # this is to remove dependency from 'nodes' to child nodes with nodeId == 'i'
                     copy_of_dependency_matrix[node_id][index] = -1
@@ -53,7 +54,7 @@ class TopologicalSort:
             for j in range(size_of_matrix):
                 if (i != j) and copy_of_dependency_matrix[i][j] != -1:
                     check_dag = True
-                    logging.error("Rules are not DAG, if it is not DAG then rules cannot be sorted.")
+                    logging.error(f"Rules are not DAG, if it is not DAG then rules cannot be sorted. i: {i}, j: {j}")
                     break
 
         if check_dag:
@@ -65,12 +66,12 @@ class TopologicalSort:
 
     @staticmethod
     def filling_s_list(node_dictionary: dict, node_id_dictionary: dict,
-                       temp_list: list, dependency_matrix: [[]]) -> list:
+                       temp_list: list, dependency_matrix: list[list[any]]) -> list:
         size_of_matrix = len(dependency_matrix)
         for child_row in range(size_of_matrix):
             count = 0
             for parent_col in range(size_of_matrix):
-                if (dependency_matrix[parent_col][child_row] == -1) and (parent_col != child_row):
+                if (parent_col != child_row) and (dependency_matrix[parent_col][child_row] == -1) :
                     count = count + 1
                 else:
                     continue
@@ -83,7 +84,7 @@ class TopologicalSort:
         return temp_list
 
     @staticmethod
-    def create_copy_of_dependency_matrix(dependency_matrix: [[]], size_of_matrix: int) -> [[]]:
+    def create_copy_of_dependency_matrix(dependency_matrix: list[list[any]], size_of_matrix: int) -> list[list[any]]:
         copy_of_dependency_matrix = [[0 for x in range(size_of_matrix)] for y in range(size_of_matrix)]
         for parent_col in range(size_of_matrix):
             for child_row in range(size_of_matrix):
@@ -151,7 +152,7 @@ class TopologicalSort:
     #
 
     @staticmethod
-    def dfs_topological_sort(node_dictionary: dict, node_id_dictionary:     dict, dependency_matrix: [[]]) -> list:
+    def dfs_topological_sort(node_dictionary: dict, node_id_dictionary:     dict, dependency_matrix: list[list[any]]) -> list:
 
         sorted_list = list()
         copy_of_dependency_matrix = TopologicalSort.create_copy_of_dependency_matrix(dependency_matrix,
@@ -184,7 +185,7 @@ class TopologicalSort:
 
     @staticmethod
     def deepening(node_dictionary: dict, node_id_dictionary: dict,
-                  dependency_matrix: [[]], sorted_list: list,
+                  dependency_matrix: list[list[any]], sorted_list: list,
                   visited_list: list, child_id):
 
         child_id_list = list()
@@ -223,7 +224,7 @@ class TopologicalSort:
     #         		5.1.3.1 find the most positive rule, and add the rule into the 'sortedList'
     #
     @staticmethod
-    def dfs_topological_sort_with_record(node_dictionary: dict, node_id_dictionary: dict,dependency_matrix: [[]], record_dictionary_of_node: dict) -> list:
+    def dfs_topological_sort_with_record(node_dictionary: dict, node_id_dictionary: dict,dependency_matrix: list[list[any]], record_dictionary_of_node: dict) -> list:
         sorted_list = list()
         if (record_dictionary_of_node is None) or (len(record_dictionary_of_node) == 0):
             sorted_list = TopologicalSort.bfs_topological_sort(node_dictionary, node_id_dictionary, dependency_matrix)

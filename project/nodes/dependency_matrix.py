@@ -18,7 +18,7 @@ class DependencyMatrix:
     #
     # if there is no dependency then value is 0000000
 
-    __dependencyTwoDimensionList: [[]] = None
+    __dependencyTwoDimensionList: list[list[any]] = None
     __dependencyListSize: int = None
 
     def __repr__(self):
@@ -36,63 +36,73 @@ class DependencyMatrix:
 
     def get_to_child_dependency_list(self, node_id) -> list:
 
-        to_child_dependency_list = []
         target_node_dependency_list = self.__dependencyTwoDimensionList[node_id]
+        
+        return [
+            child_index
+            for child_index, value in enumerate(target_node_dependency_list)
+            if (
+                value != -1
+                and child_index != node_id
+            )
+        ]
 
-        for child_index in range(len(target_node_dependency_list)):
-            if (target_node_dependency_list[child_index] != -1) and (child_index != node_id):
-                to_child_dependency_list.append(child_index)
-
-        return to_child_dependency_list
 
     def get_or_to_child_dependency_list(self, node_id) -> list:
-        or_to_child_dependency_list = []
+    
         target_node_dependency_list = self.__dependencyTwoDimensionList[node_id]
         or_dependency = DependencyType.get_or()
+        
+        return [
+            child_index
+            for child_index, value in enumerate(target_node_dependency_list)
+            if (
+                value != -1
+                and child_index != node_id
+                and (value & or_dependency) == or_dependency
+            )
+        ]
 
-        for child_index in range(len(target_node_dependency_list)):
-            if (target_node_dependency_list[child_index] != -1) \
-                    and (child_index != node_id) \
-                    and ((target_node_dependency_list[child_index] & or_dependency) == or_dependency):
-                or_to_child_dependency_list.append(child_index)
-
-        return or_to_child_dependency_list
 
     def get_and_to_child_dependency_list(self, node_id) -> list:
-        and_to_child_dependency_list = []
+        
         target_node_dependency_list = self.__dependencyTwoDimensionList[node_id]
         and_dependency = DependencyType.get_and()
-
-        for child_index in range(len(target_node_dependency_list)):
-            if (target_node_dependency_list[child_index] != -1) \
-                    and (child_index != node_id) \
-                    and ((target_node_dependency_list[child_index] & and_dependency) == and_dependency):
-                and_to_child_dependency_list.append(child_index)
-
-        return and_to_child_dependency_list
+        
+        return [
+            child_index
+            for child_index, value in enumerate(target_node_dependency_list)
+            if(
+                value != -1
+                and child_index != node_id
+                and (value & and_dependency) == and_dependency
+            )
+        ]
+        
 
     def get_mandatory_to_child_dependency_list(self, node_id) -> list:
-        mandatory_child_dependency_list = []
+
         target_node_dependency_list = self.__dependencyTwoDimensionList[node_id]
         mandatory_dependency = DependencyType.get_mandatory()
 
-        for child_index in range(len(target_node_dependency_list)):
-            if (target_node_dependency_list[child_index] != -1) \
-                    and (child_index != node_id) \
-                    and ((target_node_dependency_list[child_index] & mandatory_dependency) == mandatory_dependency):
-                mandatory_child_dependency_list.append(child_index)
+        return [
+            child_index
+            for child_index, value in enumerate(target_node_dependency_list)
+            if (
+                value != -1 
+                and child_index != node_id 
+                and (value & mandatory_dependency) == mandatory_dependency
+            )
+        ]
 
-        return mandatory_child_dependency_list
 
     def get_from_parent_dependency_list(self, node_id) -> list:
+        return [
+            parent_index
+            for parent_index, row in enumerate(self.__dependencyTwoDimensionList)
+            if parent_index != node_id and row[node_id] != -1
+        ]
 
-        from_parent_dependency_list = []
-
-        for parent_index in range(len(self.__dependencyTwoDimensionList)):
-            if (parent_index != node_id) and (self.__dependencyTwoDimensionList[parent_index][node_id] != -1):
-                from_parent_dependency_list.append(parent_index)
-
-        return from_parent_dependency_list
 
     def has_mandatory_child_node(self, node_id) -> bool:
 

@@ -12,7 +12,7 @@ class Logger:
 
     today = date.today()
     d4 = today.strftime("%b-%d-%Y")
-    LOG_FILE = "Nadia-Engine "+d4+".log"
+    LOG_FILE = "Nadia-logging/Nadia-Engine "+d4+".log"
 
     @staticmethod
     def __get_console_handler():

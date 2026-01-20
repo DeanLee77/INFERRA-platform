@@ -1,5 +1,0 @@
-2024-02-12 13:58:48,861 :: project.nodes.node_set :: [INFO]  :: __init__ :: 28 :: NodeSet is generated
-2024-02-12 21:02:30,979 :: app :: [INFO]  :: find_rule_text_by_name :: 43 :: THIS IS RULE NAME: Wedding Planner
-2024-02-12 21:02:43,933 :: app :: [INFO]  :: find_rule_text_by_name :: 43 :: THIS IS RULE NAME: Wedding Planner
-2024-02-12 21:03:03,318 :: app :: [INFO]  :: find_rule_text_by_name :: 43 :: THIS IS RULE NAME: Complex Rule Demo
-2024-02-12 21:09:29,489 :: app :: [INFO]  :: find_rule_text_by_name :: 43 :: THIS IS RULE NAME: Testing Rule
