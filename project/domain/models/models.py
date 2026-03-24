@@ -39,12 +39,12 @@ class Rule(db.Model, SerializerMixin):
 
     def __init__(self, rule_name: str = None, rule_category: str = None,
                  rule_description: str = None,
-                 new_rule_files: list = [], new_rule_histories: list = []):
+                 new_rule_files: list = None, new_rule_histories: list = None):
         self.name = rule_name
         self.category = rule_category
         self.description = rule_description
-        self.rule_files = new_rule_files
-        self.rule_histories = new_rule_histories
+        self.rule_files = new_rule_files or []
+        self.rule_histories = new_rule_histories or []
 
     def serialize(self):
         d = Serializer.serialize(self)
@@ -54,19 +54,20 @@ class Rule(db.Model, SerializerMixin):
         self.rule_files.append(file)
 
     def get_the_latest_file(self):
-        if self.rule_files.all() is not None and len(self.rule_files.all()) > 0:
+        files = self.rule_files.all()
+        if files:
             # TODO this logic needs improvement due to timestamp comparison may not be the best way to get the lastest one
-            files_len = len(self.rule_files.all())
-            return self.rule_files.all()[files_len - 1]
+            return files[-1]
             # return max(self.rule_files.all(), key=attrgetter('created_date'))
         return None
 
     def get_the_latest_history(self):
-        if len(self.rule_files.all()) > 0 and len(self.rule_histories.all()) > 0:
+        files = self.rule_files.all()
+        histories = self.rule_histories.all()
+        if files and histories:
 
             ##TODO this logic needs improvement due to timestamp comparison may not be the best way to get the lastest one
-            histories_len = len(self.rule_histories.all())
-            return self.rule_histories.all()[histories_len - 1]
+            return histories[-1]
             # return max(self.rule_histories.all(), key=attrgetter('created_date'))
         return None
 

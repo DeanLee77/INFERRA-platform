@@ -78,8 +78,8 @@ class ValueConclusionLine(Node):
             elif len(list(filter(lambda c: c.find('IS IN LIST') != -1, list(self._tokens.get_tokens_list())))) > 0:
                 line_value = False
                 list_name = self.get_fact_value().get_value()
-                if working_memory[list_name] is not None:
-                    variable_value_from_working_memory = working_memory[self._variableName]
+                if working_memory.get(list_name) is not None:
+                    variable_value_from_working_memory = working_memory.get(self._variableName)
                     if variable_value_from_working_memory is not None:
                         line_value = \
                             len(list(filter(lambda fact_value: fact_value.get_value() \

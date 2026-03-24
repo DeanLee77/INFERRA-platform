@@ -107,6 +107,10 @@ class ComparisonLine(Node):
         else:
             working_memory_rhs_value = self.get_rhs()
 
+        if working_memory_lhs_value is None or working_memory_rhs_value is None:
+            logging.debug("Comparison '%s' could not be evaluated because one or more operands are missing", self.get_node_name())
+            return None
+
         # There will NOT be the case of that workingMemoryRhsValue is null because the nodes must be in following format;
         # - A = 12231 (int or double)
         # - A = Adam sandler (String)
@@ -176,10 +180,8 @@ class ComparisonLine(Node):
                 working_memory_rhs_value_str = str(eval(working_memory_rhs_value.get_value()))
             else:
                 working_memory_rhs_value_str = str(working_memory_rhs_value.get_value())
-            if (working_memory_rhs_value is not None) and (working_memory_lhs_value is not None):
-                script = "'" + str(working_memory_lhs_value.get_value()) \
-                         + "'" + self.__operatorString \
-                         + "'" + working_memory_rhs_value_str + "'"
+            script = "'" + str(working_memory_lhs_value.get_value()) \
+                     + "'" + self.__operatorString \
+                     + "'" + working_memory_rhs_value_str + "'"
 
-        if (working_memory_rhs_value is not None) and (working_memory_lhs_value is not None):
-            return FactValue(eval(script))
+        return FactValue(eval(script))

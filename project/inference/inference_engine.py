@@ -3,6 +3,7 @@ from datetime import *
 from project.fact_values import FactValue, FactValueType
 from project.inference import Assessment, AssessmentState
 from project.inference.assesments import Assessments
+from project.inference.question_resolver import QuestionResolver
 from project.nodes import ComparisonLine, ValueConclusionLine, DependencyType, LineType
 from project.nodes.node import Node
 from project.nodes.node_set import NodeSet
@@ -19,6 +20,7 @@ class InferenceEngine:
     __ass: Assessment
     __asses: Assessments
     __nodeFactList: list
+    __questionResolver: QuestionResolver
 
     def __init__(self, node_set: NodeSet = None):
         self.__nodeSet = node_set
@@ -27,8 +29,9 @@ class InferenceEngine:
         self.__ass = Assessment()
         self.__asses = Assessments()
         self.__nodeFactList = list()  # contains all rules set as a fact given by a user from a ruleList
+        self.__questionResolver = QuestionResolver(lambda _: None)
 
-        temp_fact_dict = node_set.get_fact_dictionary()
+        temp_fact_dict = node_set.get_fact_dictionary() if node_set is not None else {}
         temp_working_memory = self.__ast.get_working_memory()
 
         if len(temp_fact_dict) > 0:
@@ -258,6 +261,11 @@ class InferenceEngine:
 
                 elif not self.has_children(node_id) \
                         and target_node.get_node_name() in self.__ast.get_inclusive_list() \
+                        and self.__questionResolver.find_next_question_node(
+                            target_node,
+                            self.__ast.get_working_memory(),
+                            has_children=False,
+                        ) is not None \
                         and not self.can_evaluate(target_node):
                     ass.set_node_to_be_asked(target_node)
                     index_of_rule_to_be_asked: int = index

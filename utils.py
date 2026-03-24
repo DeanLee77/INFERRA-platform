@@ -17,7 +17,10 @@ else:
     ssl._create_default_https_context = _create_unverified_https_context
 
 from openai import OpenAI
-# import fitz  # PyMuPDF for PDFs
+try:
+    import fitz  # PyMuPDF for PDFs
+except ImportError:
+    fitz = None
 # import docx  # python-docx for Word (.docx)
 # import textract  # for old .doc
 import pypandoc, uuid, time, random
@@ -72,8 +75,12 @@ RULE_PROMPT_PATH = os.getenv("RULE_PROMPT_PATH", "nadia_prompt.md")
 def demo_file_loading(fileName: str):
     demo_file = f'Nadia-{fileName}'
     if demo_file:
-        with open(demo_file, "r") as file:
-            return file.read()
+        try:
+            with open(demo_file, "r", encoding="utf-8") as file:
+                return file.read()
+        except OSError as exc:
+            logging.exception("Unable to load demo file '%s': %s", demo_file, exc)
+            raise
 
 def preprocess_text(text):
     """Preprocess text to fix special characters and mathematical expressions"""
@@ -162,20 +169,29 @@ def load_nadia_guidance():
 
 def handle_pdf_file(file_path: str)  -> str:
     """Extract text from a PDF file using PyMuPDF"""
+    if fitz is None:
+        raise RuntimeError("PyMuPDF (fitz) is required for PDF conversion but is not installed")
+
+    doc = None
     try:
         doc = fitz.open(file_path)
         markdown_content = ""
         for page in doc:
             markdown_content += page.get_text() + "\n"
-        doc.close()
         return markdown_content
-    except:
-        logging.error("Failed to open PDF file.")
-        return f'[PDF extraction error: Unable to open PDF file.]'
+    except Exception as exc:
+        logging.exception("Failed to extract PDF content from '%s': %s", file_path, exc)
+        return '[PDF extraction error: Unable to open PDF file.]'
+    finally:
+        if doc is not None:
+            doc.close()
     
 # ---------- Convert PDF/Docx/Doc to md file ----------
 def convert_file_to_markdown(file_path: str, file_type: str) -> str:
     """Convert a document file to Markdown with special character processing"""
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File does not exist: {file_path}")
+
     # Determine format
     ext = os.path.splitext(file_path)[1].lower()
     if ext == '.pdf':
@@ -189,6 +205,7 @@ def convert_file_to_markdown(file_path: str, file_type: str) -> str:
     
     # Only use pypandoc for non-PDF files
     if ext != '.pdf':
+        temp_md_path = None
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.md') as temp_md:
             try:
                 pypandoc.convert_file(
@@ -216,10 +233,13 @@ def convert_file_to_markdown(file_path: str, file_type: str) -> str:
                     extra_args=['--wrap=none']
                 )
             temp_md_path = temp_md.name
-        
-        with open(temp_md_path, 'r', encoding='utf-8') as f:
-            markdown_content = f.read()
-        os.unlink(temp_md_path)
+
+        try:
+            with open(temp_md_path, 'r', encoding='utf-8') as f:
+                markdown_content = f.read()
+        finally:
+            if temp_md_path and os.path.exists(temp_md_path):
+                os.unlink(temp_md_path)
     
     # Apply special character fixes
     markdown_content = preprocess_text(markdown_content)
@@ -287,9 +307,8 @@ def transform_to_nadia_rules_stream_with_llm(markdown_content: str) -> Generator
             # Stream response for this chunk and collect output
             chunk_output = ""
             for resp_chunk in stream:
-                content = resp_chunk.choices[0].delta.content.trim()
+                content = resp_chunk.choices[0].delta.content
                 if content is not None:
-                    content = resp_chunk.choices[0].delta.content
                     yield content
                     chunk_output += content
             

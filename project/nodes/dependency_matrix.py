@@ -25,16 +25,20 @@ class DependencyMatrix:
         return json.dumps(self.__dict__)
 
     def __init__(self, dependency_two_dimension_list=None):
-        self.__dependencyTwoDimensionList = dependency_two_dimension_list
-        self.__dependencyListSize = len(dependency_two_dimension_list)
+        self.__dependencyTwoDimensionList = dependency_two_dimension_list or []
+        self.__dependencyListSize = len(self.__dependencyTwoDimensionList)
 
     def get_dependency_two_dimension_list(self) -> list:
         return self.__dependencyTwoDimensionList
 
     def get_dependency_type(self, parent_rule_id, child_rule_id) -> int:
+        if parent_rule_id < 0 or child_rule_id < 0:
+            raise IndexError("Dependency indexes cannot be negative")
         return self.__dependencyTwoDimensionList[parent_rule_id][child_rule_id]
 
     def get_to_child_dependency_list(self, node_id) -> list:
+        if node_id < 0 or node_id >= self.__dependencyListSize:
+            raise IndexError(f"node_id {node_id} is out of range")
 
         target_node_dependency_list = self.__dependencyTwoDimensionList[node_id]
         
@@ -49,6 +53,8 @@ class DependencyMatrix:
 
 
     def get_or_to_child_dependency_list(self, node_id) -> list:
+        if node_id < 0 or node_id >= self.__dependencyListSize:
+            raise IndexError(f"node_id {node_id} is out of range")
     
         target_node_dependency_list = self.__dependencyTwoDimensionList[node_id]
         or_dependency = DependencyType.get_or()
@@ -65,6 +71,8 @@ class DependencyMatrix:
 
 
     def get_and_to_child_dependency_list(self, node_id) -> list:
+        if node_id < 0 or node_id >= self.__dependencyListSize:
+            raise IndexError(f"node_id {node_id} is out of range")
         
         target_node_dependency_list = self.__dependencyTwoDimensionList[node_id]
         and_dependency = DependencyType.get_and()
@@ -81,6 +89,8 @@ class DependencyMatrix:
         
 
     def get_mandatory_to_child_dependency_list(self, node_id) -> list:
+        if node_id < 0 or node_id >= self.__dependencyListSize:
+            raise IndexError(f"node_id {node_id} is out of range")
 
         target_node_dependency_list = self.__dependencyTwoDimensionList[node_id]
         mandatory_dependency = DependencyType.get_mandatory()
@@ -97,6 +107,8 @@ class DependencyMatrix:
 
 
     def get_from_parent_dependency_list(self, node_id) -> list:
+        if node_id < 0 or node_id >= self.__dependencyListSize:
+            raise IndexError(f"node_id {node_id} is out of range")
         return [
             parent_index
             for parent_index, row in enumerate(self.__dependencyTwoDimensionList)

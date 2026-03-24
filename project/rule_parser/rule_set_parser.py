@@ -3,6 +3,7 @@ from abc import ABC
 from datetime import *
 from project.constants import DependencyTypeStringMatcher
 from project.nodes.iterate_line import IterateLine
+from project.nodes.dependency_builder import DependencyBuilder
 from project.nodes.node_set import NodeSet
 from project.rule_parser import IScanFeeder
 from project.tokens import Tokenizer
@@ -43,14 +44,14 @@ class RuleSetParser(IScanFeeder, ABC):
 
     def __init__(self):
         self.__node_set = NodeSet()
-        self.__dependency_list = []
+        self.__dependency_builder = DependencyBuilder()
         self.__match_types = LineType.get_all_values()
         logging.info("RuleSetParser is initiated")
 
     def create(self):
         self.__match_types = LineType.get_all_values()
         self.__node_set = NodeSet()
-        self.__dependency_list = []
+        self.__dependency_builder = DependencyBuilder()
     def handle_parent(self, parent_text, line_number, meta_data: MetaData) -> None:
         node_data = None
         next_node_id = len(self.__node_set.get_node_dictionary())
@@ -107,9 +108,11 @@ class RuleSetParser(IScanFeeder, ABC):
                                 if len(possible_parent_node_key_list) > 0:
                                     for item in possible_parent_node_key_list:
                                         # Dependency Type: OR
-                                        self.__dependency_list.append(
-                                            Dependency(self.__node_set.get_node_dictionary()[item], temp_node,
-                                                    DependencyType.get_or()))
+                                        self.__dependency_builder.add(
+                                            self.__node_set.get_node_dictionary()[item],
+                                            temp_node,
+                                            DependencyType.get_or(),
+                                        )
 
                                 if node_data.get_fact_value().get_value() == 'WARNING':
                                     self.handle_warning(parent_text)
@@ -139,9 +142,11 @@ class RuleSetParser(IScanFeeder, ABC):
 
                             if len(possible_parent_node_key_list) > 0:
                                 for item in possible_parent_node_key_list:
-                                    self.__dependency_list.append(
-                                        Dependency(self.__node_set.get_node_dictionary()[item], temp_node,
-                                                DependencyType.get_or()))  # Dependency Type: OR
+                                    self.__dependency_builder.add(
+                                        self.__node_set.get_node_dictionary()[item],
+                                        temp_node,
+                                        DependencyType.get_or(),
+                                    )  # Dependency Type: OR
 
                             if node_data.get_fact_value().get_value() == 'WARNING':
                                 self.handle_warning(parent_text)
@@ -242,9 +247,11 @@ class RuleSetParser(IScanFeeder, ABC):
                                             self.__node_set.get_node_dictionary().keys()))
                             if len(possible_child_node_key_list) > 0:
                                 for item in possible_child_node_key_list:
-                                    self.__dependency_list.append(
-                                        Dependency(temp_node, self.__node_set.get_node_dictionary()[item],
-                                                   DependencyType.get_or()))  # Dependency Type: OR
+                                    self.__dependency_builder.add(
+                                        temp_node,
+                                        self.__node_set.get_node_dictionary()[item],
+                                        DependencyType.get_or(),
+                                    )  # Dependency Type: OR
                             if node_data.get_fact_value().get_value() == "WARNING":
                                 self.handle_warning(child_text)
                         elif pattern_index == 1:  # comparison matcher
@@ -268,9 +275,11 @@ class RuleSetParser(IScanFeeder, ABC):
 
                             if len(possible_child_node_key_list) > 0:
                                 for item in possible_child_node_key_list:
-                                    self.__dependency_list.append(
-                                        Dependency(temp_node, self.__node_set.get_node_dictionary()[item],
-                                                   DependencyType.get_or()))  # Dependency Type: OR
+                                    self.__dependency_builder.add(
+                                        temp_node,
+                                        self.__node_set.get_node_dictionary()[item],
+                                        DependencyType.get_or(),
+                                    )  # Dependency Type: OR
 
                             if node_data.get_fact_value().get_value_type() == FactValueType.WARNING:
                                 self.handle_warning(parent_text)
@@ -294,7 +303,11 @@ class RuleSetParser(IScanFeeder, ABC):
                         self.__node_set.get_node_id_dictionary()[node_data.get_node_id()] = node_data.get_node_name()
                         break
 
-            self.__dependency_list.append(Dependency(self.__node_set.get_node(parent_text), node_data, dependency_type))
+            self.__dependency_builder.add(
+                self.__node_set.get_node(parent_text),
+                node_data,
+                dependency_type,
+            )
 
     def handle_list_item(self, parent_text: str, item_text: str, meta_type: MetaType) -> None:
         tokens = Tokenizer.get_tokens(item_text)
@@ -401,14 +414,15 @@ class RuleSetParser(IScanFeeder, ABC):
         return virtual_node_dictionary
 
     def create_dependency_matrix(self) -> DependencyMatrix:
-        self.__node_set.set_node_dictionary(self.handling_virtual_node(self.__dependency_list))
+        dependency_list = self.__dependency_builder.get_all_dependencies()
+        self.__node_set.set_node_dictionary(self.handling_virtual_node(dependency_list))
 
         # number of rule is not always matched with the last ruleId in Node
 
         number_of_rules = Node.get_static_node_id()
         dependency_matrix = [[-1] * number_of_rules for i in range(number_of_rules)]
 
-        for dp in self.__dependency_list:
+        for dp in dependency_list:
             parent_id = dp.get_parent_node().get_node_id()
             child_id = dp.get_child_node().get_node_id()
             dp_type = dp.get_dependency_type()

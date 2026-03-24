@@ -9,3 +9,4 @@ Nadia-Engine *.log
 *.lock
 Pipfile*
 project/.env
+.venv/

@@ -4,6 +4,9 @@ from project.tokens import Token
 from project.loggers import Logger
 
 
+logging: Logger = Logger.get_logger(__name__)
+
+
 class Tokenizer:
 
     # the order of Pattern in the array of 'matchPatterns' is extremely important because some patterns won't work
@@ -17,6 +20,9 @@ class Tokenizer:
 
     @classmethod
     def get_tokens(cls, text: str) -> Token:
+        if text is None:
+            raise ValueError("Tokenizer input text cannot be None")
+
         token_string_list = []
         token_list = []
         token_string = ''
@@ -39,12 +45,11 @@ class Tokenizer:
                         matched = True
                         break
                 except re.error as e:
-                    print(f"Regex error in pattern {cls.token_type[i]}: {e}")
+                    logging.exception("Regex error in pattern %s: %s", cls.token_type[i], e)
                     continue
 
             if not matched:
-                print(f"WARNING: No match found for remaining text: '{text}'")
-                print(f"Original input was: '{original_text}'")
+                logging.warning("No token match found for remaining text '%s' from original input '%s'", text, original_text)
                 token_string = "WARNING"
                 break
 
