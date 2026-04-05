@@ -1,109 +1,171 @@
-import re
+"""
+Fact Value Class.
+Represents a fact value with type information in PALOS analysis.
+Implements access levels and strong typing where appropriate.
+"""
 
+import re
 from datetime import datetime
+from typing import Optional, Any, Union
 from project.tokens import Tokenizer, TokenStringDictionary
 from project.fact_values.fact_value_type import FactValueType
 from project.loggers import Logger
 
-logging: Logger = Logger.get_logger(__name__)
-
+# Protected Module-Level Logger (Access Level: Protected)
+_logging: Logger = Logger.get_logger(__name__)
 
 class FactValue:
-    # type of this variable is FactValueType
-    __value_type: FactValueType = None
+    """
+    FactValue class encapsulates value and type information.
+    Implements private state with public accessors.
+    
+    Access Levels:
+    - Public: API methods for external use
+    - Protected: Internal helpers (single underscore)
+    - Private: Internal state (double underscore)
+    """
+    
+    # -------------------------------------------------------------------------
+    # Private Access Level: Instance Variables (Name Mangling)
+    # -------------------------------------------------------------------------
+    def __init__(self, value: Optional[Any] = None, value_type: Optional[FactValueType] = None):
+        """
+        Public Constructor: Initializes FactValue with value and type.
+        
+        Args:
+            value: The value to store (any type)
+            value_type: The FactValueType of the value
+        """
+        # Private instance variables (initialized in __init__ to avoid shared state)
+        self.__value_type: Optional[FactValueType] = None
+        self.__value: Optional[Any] = None
+        self.__default_value: Optional[Any] = None
+        
+        self._initialize_value(value, value_type)
 
-    # type of this variable is various.
-    # it could be string, int, float, list, dict, bool,
-    __value = None
-    __default_value = None
-
-    def __init__(self, value=None, value_type=None):
+    # -------------------------------------------------------------------------
+    # Protected Access Level: Internal Helpers (Single Underscore)
+    # -------------------------------------------------------------------------
+    def _initialize_value(self, value: Optional[Any], value_type: Optional[FactValueType]) -> None:
+        """
+        Protected Helper: Initializes value and type with logic.
+        
+        Args:
+            value: The value to store
+            value_type: The FactValueType of the value
+        """
         if (value is not None) and (value_type is not None):
-            if value_type == FactValueType.DATE:
-                self.__value_type = value_type
-            elif isinstance(value, bool):
-                self.__value_type = FactValueType.BOOLEAN
-            elif isinstance(value, str) and re.match(r"false|true", value, re.IGNORECASE):
-                if re.match(r"false", value, re.IGNORECASE):
-                    value = False
-                else:
-                    value = True
-                self.__value_type = FactValueType.BOOLEAN
-            else:
-                self.__value_type = value_type
-            self.__default_value = value
-            self.__value = value
+            self._set_value_with_type(value, value_type)
         elif value is not None:
-            if isinstance(value, FactValue):
-                self.__value = value.get_value()
-                self.__value_type = value.get_value_type()
-            elif isinstance(value, bool):
-                self.__value = value
-                self.__value_type = FactValueType.BOOLEAN
-            elif isinstance(value, str) and re.match(r"false|true", value, re.IGNORECASE):
-                if re.match(r"false", value, re.IGNORECASE):
-                    value = False
-                else:
-                    value = True
-                self.__value = value
-                self.__value_type = FactValueType.BOOLEAN
-            elif value_type is not None and value_type == FactValueType.DATE:
-                self.__value = datetime.strptime(value, "%d/%m/%Y").strftime("%d/%m/%Y")
-                self.__value_type = value_type
-            else:
-                self.__value = value
-                self.__value_type = TokenStringDictionary.find_fact_value_type(
-                    Tokenizer.get_tokens(str(value)).get_tokens_string())
-            self.__default_value = value
-        elif value is None and value_type is not None:
+            self._infer_value_type(value)
+        elif value_type is not None:
             self.__value_type = value_type
 
         if (value is not None) and (value_type is not None):
-            logging.info("Initialising FactValue with " + str(value) + ", type: " + self.__value_type.value)
+            _logging.info(f"Initialising FactValue with {str(value)}, type: {self.__value_type.value}")
 
-    # def __repr__(self):
-    #     return json.dumps(self.__dict__)
-    
-    # def __getstate__(self):
-    #     state = dict()  # Create a copy of the instance's attribute dictionary
+    def _set_value_with_type(self, value: Any, value_type: FactValueType) -> None:
+        """
+        Protected Helper: Sets value when type is explicitly provided.
+        
+        Args:
+            value: The value to store
+            value_type: The FactValueType of the value
+        """
+        if value_type == FactValueType.DATE:
+            self.__value_type = value_type
+        elif isinstance(value, bool):
+            self.__value_type = FactValueType.BOOLEAN
+        elif isinstance(value, str) and re.match(r"false|true", value, re.IGNORECASE):
+            value = False if re.match(r"false", value, re.IGNORECASE) else True
+            self.__value_type = FactValueType.BOOLEAN
+        else:
+            self.__value_type = value_type
+        
+        self.__default_value = value
+        self.__value = value
 
-    #     # Serialize specific attributes requiring special treatment
-    #     state["__value_type"] = self.__value_type.__getstate__() if self.__value_type != None else None
-    #     state["__value"] = self.__value
-    #     state["__default_value"] = self.__default_value
-    #     return state
+    def _infer_value_type(self, value: Any) -> None:
+        """
+        Protected Helper: Infers value type from the value itself.
+        
+        Args:
+            value: The value to infer type from
+        """
+        if isinstance(value, FactValue):
+            self.__value = value.get_value()
+            self.__value_type = value.get_value_type()
+        elif isinstance(value, bool):
+            self.__value = value
+            self.__value_type = FactValueType.BOOLEAN
+        elif isinstance(value, str) and re.match(r"false|true", value, re.IGNORECASE):
+            value = False if re.match(r"false", value, re.IGNORECASE) else True
+            self.__value = value
+            self.__value_type = FactValueType.BOOLEAN
+        elif self.__value_type is not None and self.__value_type == FactValueType.DATE:
+            self.__value = datetime.strptime(value, "%d/%m/%Y").strftime("%d/%m/%Y")
+            self.__value_type = self.__value_type
+        else:
+            self.__value = value
+            self.__value_type = TokenStringDictionary.find_fact_value_type(
+                Tokenizer.get_tokens(str(value)).get_tokens_string())
+        
+        self.__default_value = value
 
-    # def __setstate__(self, state):
-    #     # Deserialize specific attributes using the serialized data
-    #     self.__value_type = state["__value_type"]
-    #     self.__value = state["__value"]
-    #     self.__default_value = state["__default_value"]
-
-    #     # Remove the temporary keys from the instance
-    #     del state["__value_type"]
-    #     del state["__value"]
-    #     del state["__default_value"]
-    #     # Remove other temporary keys added during serialization
-
-    def get_value(self) -> any:
+    # -------------------------------------------------------------------------
+    # Public Access Level: API Methods (Getters)
+    # -------------------------------------------------------------------------
+    def get_value(self) -> Optional[Any]:
+        """
+        Public API: Returns the fact value.
+        
+        Returns:
+            The stored value or None
+        """
         return self.__value
 
-    def get_value_type(self) -> FactValueType:
+    def get_value_type(self) -> Optional[FactValueType]:
+        """
+        Public API: Returns the fact value type.
+        
+        Returns:
+            The FactValueType or None
+        """
         return self.__value_type
 
-    def set_default_value(self, default_value):
+    def get_default_value(self) -> Optional[Any]:
+        """
+        Public API: Returns the default value.
+        
+        Returns:
+            The default value or None
+        """
+        return self.__default_value
+
+    # -------------------------------------------------------------------------
+    # Public Access Level: API Methods (Setters)
+    # -------------------------------------------------------------------------
+    def set_default_value(self, default_value: Any) -> None:
+        """
+        Public API: Sets the default value.
+        
+        Args:
+            default_value: The default value to set
+        """
         self.__default_value = default_value
 
-    def get_default_value(self) -> any:
-        return self.__default_value
-    
-    # def serialize(self):
-    #     # Serialize the object's state to bytes using pickle
-    #     return pickle.dumps(self.__dict__)
-
-    # @classmethod
-    # def deserialize(cls, serialized):
-    #     # Deserialize the serialized data and create an instance of MyClass
-    #     obj = cls.__new__(cls)  # Create a new instance of the class
-    #     obj.__dict__.update(pickle.loads(serialized))  # Update object's state with deserialized data
-    #     return obj
+    # -------------------------------------------------------------------------
+    # Special Methods
+    # -------------------------------------------------------------------------
+    def __repr__(self) -> str:
+        """
+        Public API: String representation of the object.
+        
+        Returns:
+            JSON string representation
+        """
+        return json.dumps({
+            "value": self.__value,
+            "value_type": self.__value_type.value if self.__value_type else None,
+            "default_value": self.__default_value
+        })

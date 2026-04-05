@@ -1,38 +1,111 @@
-import json
+"""
+Dependency Module.
+Represents a single dependency relationship between two nodes.
+Implements access levels and strong typing where appropriate.
+"""
 
+import json
+from typing import Optional
 from project.loggers import Logger
 from project.nodes.node import Node
 
-logging: Logger = Logger.get_logger(__name__)
+# Protected Module-Level Logger (Access Level: Protected)
+_logger: Logger = Logger.get_logger(__name__)
 
 
 class Dependency:
-    __dependencyType = None # this variable is to store 'AND/OR' DependencyType between Nodes
-    __parent = None # this variable is to store a parent Node of this dependency
-    __child = None # this variable is to store a child Node of this dependency
-
+    """
+    Dependency represents a relationship between parent and child nodes.
+    Implements private state with public accessors.
+    
+    Access Levels:
+    - Public: API methods for external use
+    - Protected: Internal helpers (single underscore)
+    - Private: Internal state (double underscore)
+    """
+    
+    # -------------------------------------------------------------------------
+    # Private Access Level: Instance Variables (Name Mangling)
+    # -------------------------------------------------------------------------
     def __init__(self, parent: Node, child: Node, dependency_type: int):
-        self.__parent = parent
-        self.__child = child
-        self.__dependencyType = dependency_type
-        logging.info("Generating Dependency with : " + str(dependency_type) +
-                     ", Parent Text: " + str(parent.get_node_line()) +
-                     ", Child Text: " + str(child.get_node_line()))
+        """
+        Public Constructor: Initializes Dependency.
+        
+        Args:
+            parent: Parent node
+            child: Child node
+            dependency_type: Dependency type integer
+        """
+        # Private instance variables (initialized in __init__ to avoid shared state)
+        self.__dependency_type: int = dependency_type
+        self.__parent: Optional[Node] = parent
+        self.__child: Optional[Node] = child
+        
+        _logger.info(
+            "Generating Dependency with : " + str(dependency_type) +
+            ", Parent Text: " + str(parent.get_node_line()) +
+            ", Child Text: " + str(child.get_node_line())
+        )
 
-    def __repr__(self):
-        return json.dumps(self.__dict__)
-
-    def get_parent_node(self):
+    # -------------------------------------------------------------------------
+    # Public Access Level: API Methods (Getters)
+    # -------------------------------------------------------------------------
+    def get_parent_node(self) -> Optional[Node]:
+        """
+        Public API: Returns the parent node.
+        
+        Returns:
+            Parent Node or None
+        """
         return self.__parent
 
-    def set_parent_node(self, parent):
-        self.__parent = parent
-
-    def get_child_node(self):
+    def get_child_node(self) -> Optional[Node]:
+        """
+        Public API: Returns the child node.
+        
+        Returns:
+            Child Node or None
+        """
         return self.__child
 
-    def set_child_node(self, child):
+    def get_dependency_type(self) -> int:
+        """
+        Public API: Returns the dependency type.
+        
+        Returns:
+            Dependency type integer
+        """
+        return self.__dependency_type
+
+    # -------------------------------------------------------------------------
+    # Public Access Level: API Methods (Setters)
+    # -------------------------------------------------------------------------
+    def set_parent_node(self, parent: Node) -> None:
+        """
+        Public API: Sets the parent node.
+        
+        Args:
+            parent: Parent Node to set
+        """
+        self.__parent = parent
+
+    def set_child_node(self, child: Node) -> None:
+        """
+        Public API: Sets the child node.
+        
+        Args:
+            child: Child Node to set
+        """
         self.__child = child
 
-    def get_dependency_type(self):
-        return self.__dependencyType
+    # -------------------------------------------------------------------------
+    # Special Methods
+    # -------------------------------------------------------------------------
+    def __repr__(self) -> str:
+        """
+        Public API: String representation of the object.
+        
+        Returns:
+            JSON string representation
+        """
+        return json.dumps(self.__dict__)

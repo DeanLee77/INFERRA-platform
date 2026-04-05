@@ -1,36 +1,86 @@
-# nodes/dependency_builder.py
-from typing import List
+"""
+Dependency Builder Module.
+Collects parent-child dependency relationships during parsing
+and builds the final DynamicVectorisedDependencyMatrix.
+Implements access levels and strong typing where appropriate.
+"""
 
-from project.nodes import Node, Dependency, DependencyMatrix
+from typing import List, Optional
+from project.nodes import Node, Dependency
+from .dynamic_vectorised_dependency_matrix import DynamicVectorisedDependencyMatrix
 
 
 class DependencyBuilder:
     """
-    Collects parent-child dependency relationships during parsing
-    and builds the final DependencyMatrix.
-
-    Reduces size and complexity of RuleSetParser and NodeSet.
+    DependencyBuilder collects dependency relationships during parsing.
+    Implements private state with public accessors.
+    
+    Access Levels:
+    - Public: API methods for external use
+    - Protected: Internal helpers (single underscore)
+    - Private: Internal state (double underscore)
     """
-
+    
+    # -------------------------------------------------------------------------
+    # Private Access Level: Instance Variables (Name Mangling)
+    # -------------------------------------------------------------------------
     def __init__(self):
-        self._dependencies: List[Dependency] = []
+        """
+        Public Constructor: Initializes DependencyBuilder.
+        """
+        # Private instance variables (initialized in __init__ to avoid shared state)
+        self.__dependencies: List[Dependency] = []
+        self.__matrix: DynamicVectorisedDependencyMatrix = DynamicVectorisedDependencyMatrix()
 
+    # -------------------------------------------------------------------------
+    # Public Access Level: API Methods
+    # -------------------------------------------------------------------------
     def add(self, parent: Node, child: Node, dep_type: int) -> None:
-        """Record one dependency relationship"""
-        self._dependencies.append(Dependency(parent, child, dep_type))
+        """
+        Public API: Record one dependency relationship.
+        
+        Args:
+            parent: Parent node
+            child: Child node
+            dep_type: Dependency type integer
+        """
+        self.__dependencies.append(Dependency(parent, child, dep_type))
+        self.__matrix.add_dependency(
+            parent.get_node_id(),
+            child.get_node_id(),
+            dep_type
+        )
 
-    def build_matrix(self, total_nodes: int) -> DependencyMatrix:
-        """Convert collected dependencies into matrix format"""
-        matrix = [[-1 for _ in range(total_nodes)] for _ in range(total_nodes)]
-
-        for dep in self._dependencies:
-            p_id = dep.get_parent_node().get_node_id()
-            c_id = dep.get_child_node().get_node_id()
-            if 0 <= p_id < total_nodes and 0 <= c_id < total_nodes:
-                matrix[p_id][c_id] = dep.get_dependency_type()
-
-        return DependencyMatrix(matrix)
+    def build_matrix(self, total_nodes: Optional[int] = None) -> DynamicVectorisedDependencyMatrix:
+        """
+        Public API: Convert collected dependencies into vectorised format.
+        
+        Args:
+            total_nodes: Optional total node count
+            
+        Returns:
+            Built DynamicVectorisedDependencyMatrix
+        """
+        self.__matrix.build()
+        return self.__matrix
 
     def get_all_dependencies(self) -> List[Dependency]:
-        """For debugging / inspection"""
-        return self._dependencies.copy()
+        """
+        Public API: Get all dependencies for debugging/inspection.
+        
+        Returns:
+            Copy of all dependencies list
+        """
+        return self.__dependencies.copy()
+
+    # -------------------------------------------------------------------------
+    # Public Access Level: API Methods (Matrix Access)
+    # -------------------------------------------------------------------------
+    def get_matrix(self) -> DynamicVectorisedDependencyMatrix:
+        """
+        Public API: Get the dependency matrix.
+        
+        Returns:
+            DynamicVectorisedDependencyMatrix instance
+        """
+        return self.__matrix

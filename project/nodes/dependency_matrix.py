@@ -1,46 +1,86 @@
-import json
+"""
+Dependency Matrix Module.
+Manages dependency relationships between nodes in PALOS rule sets.
+Implements access levels and strong typing where appropriate.
+"""
 
+import json
+from typing import List, Any, Optional
 from project.nodes.dependency_type import DependencyType
 
 
 class DependencyMatrix:
-    # order of dependency type
-    # 1. MANDATORY
-    # 2. OPTIONAL
-    # 3. POSSIBLE
-    # 4. AND
-    # 5. OR
-    # 6. NOT
-    # 7. KNOWN
-    # int value will be '1' if any one of them is true case otherwise '0'
-    # for instance, if a rule is in 'MANDATORY AND NOT' dependency then
-    # dependency type value is '1001010'
-    #
-    # if there is no dependency then value is 0000000
+    """
+    DependencyMatrix stores dependency relationships in a 2D matrix format.
+    Implements private state with public accessors.
+    
+    Access Levels:
+    - Public: API methods for external use
+    - Protected: Internal helpers (single underscore)
+    - Private: Internal state (double underscore)
+    """
+    
+    # -------------------------------------------------------------------------
+    # Private Access Level: Instance Variables (Name Mangling)
+    # -------------------------------------------------------------------------
+    def __init__(self, dependency_two_dimension_list: Optional[List[List[Any]]] = None):
+        """
+        Public Constructor: Initializes DependencyMatrix.
+        
+        Args:
+            dependency_two_dimension_list: Optional 2D list of dependencies
+        """
+        # Private instance variables (initialized in __init__ to avoid shared state)
+        self.__dependency_two_dimension_list: List[List[Any]] = dependency_two_dimension_list or []
+        self.__dependency_list_size: int = len(self.__dependency_two_dimension_list)
 
-    __dependencyTwoDimensionList: list[list[any]] = None
-    __dependencyListSize: int = None
+    # -------------------------------------------------------------------------
+    # Public Access Level: API Methods (Getters)
+    # -------------------------------------------------------------------------
+    def get_dependency_two_dimension_list(self) -> List[List[Any]]:
+        """
+        Public API: Returns the 2D dependency list.
+        
+        Returns:
+            2D list of dependency relationships
+        """
+        return self.__dependency_two_dimension_list
 
-    def __repr__(self):
-        return json.dumps(self.__dict__)
-
-    def __init__(self, dependency_two_dimension_list=None):
-        self.__dependencyTwoDimensionList = dependency_two_dimension_list or []
-        self.__dependencyListSize = len(self.__dependencyTwoDimensionList)
-
-    def get_dependency_two_dimension_list(self) -> list:
-        return self.__dependencyTwoDimensionList
-
-    def get_dependency_type(self, parent_rule_id, child_rule_id) -> int:
+    def get_dependency_type(self, parent_rule_id: int, child_rule_id: int) -> int:
+        """
+        Public API: Gets dependency type between two rules.
+        
+        Args:
+            parent_rule_id: Parent rule ID
+            child_rule_id: Child rule ID
+            
+        Returns:
+            Dependency type integer
+            
+        Raises:
+            IndexError: If IDs are negative
+        """
         if parent_rule_id < 0 or child_rule_id < 0:
             raise IndexError("Dependency indexes cannot be negative")
-        return self.__dependencyTwoDimensionList[parent_rule_id][child_rule_id]
+        return self.__dependency_two_dimension_list[parent_rule_id][child_rule_id]
 
-    def get_to_child_dependency_list(self, node_id) -> list:
-        if node_id < 0 or node_id >= self.__dependencyListSize:
+    def get_to_child_dependency_list(self, node_id: int) -> List[int]:
+        """
+        Public API: Gets list of child node IDs for a given node.
+        
+        Args:
+            node_id: Node ID to check
+            
+        Returns:
+            List of child node IDs
+            
+        Raises:
+            IndexError: If node_id is out of range
+        """
+        if node_id < 0 or node_id >= self.__dependency_list_size:
             raise IndexError(f"node_id {node_id} is out of range")
 
-        target_node_dependency_list = self.__dependencyTwoDimensionList[node_id]
+        target_node_dependency_list = self.__dependency_two_dimension_list[node_id]
         
         return [
             child_index
@@ -51,12 +91,23 @@ class DependencyMatrix:
             )
         ]
 
-
-    def get_or_to_child_dependency_list(self, node_id) -> list:
-        if node_id < 0 or node_id >= self.__dependencyListSize:
+    def get_or_to_child_dependency_list(self, node_id: int) -> List[int]:
+        """
+        Public API: Gets list of OR-type child node IDs.
+        
+        Args:
+            node_id: Node ID to check
+            
+        Returns:
+            List of OR-type child node IDs
+            
+        Raises:
+            IndexError: If node_id is out of range
+        """
+        if node_id < 0 or node_id >= self.__dependency_list_size:
             raise IndexError(f"node_id {node_id} is out of range")
-    
-        target_node_dependency_list = self.__dependencyTwoDimensionList[node_id]
+
+        target_node_dependency_list = self.__dependency_two_dimension_list[node_id]
         or_dependency = DependencyType.get_or()
         
         return [
@@ -69,12 +120,23 @@ class DependencyMatrix:
             )
         ]
 
-
-    def get_and_to_child_dependency_list(self, node_id) -> list:
-        if node_id < 0 or node_id >= self.__dependencyListSize:
+    def get_and_to_child_dependency_list(self, node_id: int) -> List[int]:
+        """
+        Public API: Gets list of AND-type child node IDs.
+        
+        Args:
+            node_id: Node ID to check
+            
+        Returns:
+            List of AND-type child node IDs
+            
+        Raises:
+            IndexError: If node_id is out of range
+        """
+        if node_id < 0 or node_id >= self.__dependency_list_size:
             raise IndexError(f"node_id {node_id} is out of range")
         
-        target_node_dependency_list = self.__dependencyTwoDimensionList[node_id]
+        target_node_dependency_list = self.__dependency_two_dimension_list[node_id]
         and_dependency = DependencyType.get_and()
         
         return [
@@ -86,13 +148,24 @@ class DependencyMatrix:
                 and (value & and_dependency) == and_dependency
             )
         ]
+    
+    def get_mandatory_to_child_dependency_list(self, node_id: int) -> List[int]:
+        """
+        Public API: Gets list of MANDATORY-type child node IDs.
         
-
-    def get_mandatory_to_child_dependency_list(self, node_id) -> list:
-        if node_id < 0 or node_id >= self.__dependencyListSize:
+        Args:
+            node_id: Node ID to check
+            
+        Returns:
+            List of MANDATORY-type child node IDs
+            
+        Raises:
+            IndexError: If node_id is out of range
+        """
+        if node_id < 0 or node_id >= self.__dependency_list_size:
             raise IndexError(f"node_id {node_id} is out of range")
 
-        target_node_dependency_list = self.__dependencyTwoDimensionList[node_id]
+        target_node_dependency_list = self.__dependency_two_dimension_list[node_id]
         mandatory_dependency = DependencyType.get_mandatory()
 
         return [
@@ -105,17 +178,47 @@ class DependencyMatrix:
             )
         ]
 
-
-    def get_from_parent_dependency_list(self, node_id) -> list:
-        if node_id < 0 or node_id >= self.__dependencyListSize:
+    def get_from_parent_dependency_list(self, node_id: int) -> List[int]:
+        """
+        Public API: Gets list of parent node IDs for a given node.
+        
+        Args:
+            node_id: Node ID to check
+            
+        Returns:
+            List of parent node IDs
+            
+        Raises:
+            IndexError: If node_id is out of range
+        """
+        if node_id < 0 or node_id >= self.__dependency_list_size:
             raise IndexError(f"node_id {node_id} is out of range")
         return [
             parent_index
-            for parent_index, row in enumerate(self.__dependencyTwoDimensionList)
+            for parent_index, row in enumerate(self.__dependency_two_dimension_list)
             if parent_index != node_id and row[node_id] != -1
         ]
 
-
-    def has_mandatory_child_node(self, node_id) -> bool:
-
+    def has_mandatory_child_node(self, node_id: int) -> bool:
+        """
+        Public API: Checks if node has mandatory child nodes.
+        
+        Args:
+            node_id: Node ID to check
+            
+        Returns:
+            True if has mandatory children, False otherwise
+        """
         return len(self.get_mandatory_to_child_dependency_list(node_id)) > 0
+
+    # -------------------------------------------------------------------------
+    # Special Methods
+    # -------------------------------------------------------------------------
+    def __repr__(self) -> str:
+        """
+        Public API: String representation of the object.
+        
+        Returns:
+            JSON string representation
+        """
+        return json.dumps(self.__dict__)
