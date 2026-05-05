@@ -1,0 +1,113 @@
+> """
+> Layered Fact Store.
+> Provenance-tagged working-memory store implementing FactStorePort.
+> """
+  
+> import time
+> from typing import Callable, Dict, Optional, Set
+  
+> from src.domain.fact_values import FactValue
+> from src.domain.state.fact_source import FactSource
+  
+  
+> class LayeredFactStore:
+>     """
+>     Three-layer fact store: ASSERTED (user input), INFERRED (rule engine),
+>     SEMANTIC (ontology). Unified read view: ASSERTED > INFERRED > SEMANTIC.
+  
+>     Carries an `_overrides` set as a truth-maintenance hook — when an ASSERTED
+>     write covers an existing INFERRED entry, the name is recorded so consumers
+>     can re-derive or invalidate downstream conclusions without dumpster-diving
+>     through the layer dicts.
+>     """
+  
+>     def __init__(self, clock: Optional[Callable[[], float]] = None) -> None:
+>         self._asserted: Dict[str, FactValue] = {}
+>         self._inferred: Dict[str, FactValue] = {}
+>         self._semantic: Dict[str, FactValue] = {}
+>         self._timestamps: Dict[str, float] = {}
+>         self._overrides: Set[str] = set()
+>         self._clock: Callable[[], float] = clock if clock is not None else time.time
+  
+>     def _get_layer(self, source: FactSource) -> Dict[str, FactValue]:
+>         if source == FactSource.ASSERTED:
+>             return self._asserted
+>         if source == FactSource.INFERRED:
+>             return self._inferred
+>         return self._semantic
+  
+>     def get_unified_view(self) -> Dict[str, FactValue]:
+>         return {**self._semantic, **self._inferred, **self._asserted}
+  
+>     def set_fact(
+>         self,
+>         name: str,
+>         value: FactValue,
+>         source: FactSource = FactSource.ASSERTED,
+>     ) -> None:
+>         target = self._get_layer(source)
+>         target[name] = value
+>         self._timestamps[name] = self._clock()
+>         if source == FactSource.ASSERTED and name in self._inferred:
+>             self._overrides.add(name)
+  
+>     def remove_fact(self, name: str, source: Optional[FactSource] = None) -> None:
+>         if source is None:
+>             self._asserted.pop(name, None)
+>             self._inferred.pop(name, None)
+>             self._semantic.pop(name, None)
+>             self._overrides.discard(name)
+>             self._timestamps.pop(name, None)
+>             return
+>         layer = self._get_layer(source)
+>         layer.pop(name, None)
+>         if source == FactSource.ASSERTED:
+>             self._overrides.discard(name)
+>         if name not in self._asserted and name not in self._inferred and name not in self._semantic:
+>             self._timestamps.pop(name, None)
+  
+>     def invalidate_layer(self, source: FactSource) -> None:
+>         layer = self._get_layer(source)
+>         cleared = set(layer.keys())
+>         layer.clear()
+>         if source == FactSource.INFERRED:
+>             self._overrides.clear()
+>             self._rebuild_overrides()
+>         elif source == FactSource.ASSERTED:
+>             self._overrides -= cleared
+>         for name in cleared:
+>             if (
+>                 name not in self._asserted
+>                 and name not in self._inferred
+>                 and name not in self._semantic
+>             ):
+>                 self._timestamps.pop(name, None)
+  
+>     def _rebuild_overrides(self) -> None:
+>         self._overrides = {
+>             name
+>             for name in self._asserted
+>             if name in self._inferred
+>         }
+  
+>     def get_fact_sources(self, name: str) -> Set[FactSource]:
+>         sources: Set[FactSource] = set()
+>         if name in self._asserted:
+>             sources.add(FactSource.ASSERTED)
+>         if name in self._inferred:
+>             sources.add(FactSource.INFERRED)
+>         if name in self._semantic:
+>             sources.add(FactSource.SEMANTIC)
+>         return sources
+  
+>     def get_layer_snapshot(self, source: FactSource) -> Dict[str, FactValue]:
+>         return dict(self._get_layer(source))
+  
+>     def peek_in_layer(self, name: str, source: FactSource) -> Optional[FactValue]:
+>         return self._get_layer(source).get(name)
+  
+>     def get_changed_since(self, timestamp: float) -> Set[str]:
+>         return {name for name, ts in self._timestamps.items() if ts > timestamp}
+  
+>     def get_overrides(self) -> Set[str]:
+>         return set(self._overrides)

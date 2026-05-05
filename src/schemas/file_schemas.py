@@ -1,0 +1,19 @@
+"""
+Pydantic schemas for file API endpoints.
+"""
+
+from typing import Optional
+from pydantic import BaseModel, Field
+
+
+class ConversionResponse(BaseModel):
+    """Response for successful file conversion."""
+    success: bool = Field(True, description="Whether conversion was successful")
+    message: str = Field(..., description="Status message")
+
+
+class ConversionError(BaseModel):
+    """Error response for file conversion."""
+    success: bool = Field(False, description="Always False for errors")
+    error: str = Field(..., description="Error message")
+    detail: Optional[str] = Field(None, description="Additional error details")

@@ -1,0 +1,56 @@
+{
+  "node_id_gen_1k": {
+    "iterations": 200,
+    "avg_ms": 8.986,
+    "p50_ms": 8.093,
+    "p95_ms": 16.074,
+    "p99_ms": 25.662
+  },
+  "fact_store_set_1k": {
+    "iterations": 200,
+    "avg_ms": 4.781,
+    "p50_ms": 4.67,
+    "p95_ms": 7.706,
+    "p99_ms": 10.36
+  },
+  "unified_view_1k": {
+    "iterations": 200,
+    "avg_ms": 5.228,
+    "p50_ms": 4.487,
+    "p95_ms": 7.728,
+    "p99_ms": 11.917
+  },
+  "back_propagate_1k": {
+    "iterations": 200,
+    "avg_ms": 3.245,
+    "p50_ms": 2.867,
+    "p95_ms": 5.62,
+    "p99_ms": 8.975
+  },
+  "topo_sort_1k": {
+    "iterations": 200,
+    "avg_ms": 0.001,
+    "p50_ms": 0.001,
+    "p95_ms": 0.001,
+    "p99_ms": 0.002
+  },
+  "validation_100rules": {
+    "iterations": 200,
+    "avg_ms": 0.039,
+    "p50_ms": 0.029,
+    "p95_ms": 0.057,
+    "p99_ms": 0.454
+  },
+  "validation_cache_hit": {
+    "iterations": 200,
+    "avg_ms": 0.053,
+    "p50_ms": 0.029,
+    "p95_ms": 0.169,
+    "p99_ms": 0.657
+  },
+  "_metadata": {
+    "generated_at": "2026-05-04T17:25:57Z",
+    "python_version": "3.10",
+    "platform": "windows"
+  }
+}

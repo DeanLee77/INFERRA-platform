@@ -1,0 +1,240 @@
+"""
+Dependency Matrix Module.
+Manages dependency relationships between nodes in INFERRA rule sets.
+Implements access levels and strong typing where appropriate.
+"""
+
+import json
+from typing import List, Any, Optional
+from src.domain.nodes.dependency_type import DependencyType
+
+
+class DependencyMatrix:
+    """
+    DependencyMatrix stores dependency relationships in a 2D matrix format.
+    Implements private state with public accessors.
+    
+    Access Levels:
+    - Public: API methods for external use
+    - Protected: Internal helpers (single underscore)
+    - Private: Internal state (double underscore)
+    """
+    
+    # -------------------------------------------------------------------------
+    # Private Access Level: Instance Variables (Name Mangling)
+    # -------------------------------------------------------------------------
+    def __init__(self, dependency_two_dimension_list: Optional[List[List[Any]]] = None):
+        """
+        Public Constructor: Initializes DependencyMatrix.
+        
+        Args:
+            dependency_two_dimension_list: Optional 2D list of dependencies
+        """
+        # Private instance variables (initialized in __init__ to avoid shared state)
+        self.__dependency_two_dimension_list: List[List[Any]] = dependency_two_dimension_list or []
+        self.__dependency_list_size: int = len(self.__dependency_two_dimension_list)
+
+    # -------------------------------------------------------------------------
+    # Public Access Level: API Methods (Getters)
+    # -------------------------------------------------------------------------
+    def get_dependency_two_dimension_list(self) -> List[List[Any]]:
+        """
+        Public API: Returns the 2D dependency list.
+        
+        Returns:
+            2D list of dependency relationships
+        """
+        return self.__dependency_two_dimension_list
+
+    def get_dependency_type(self, parent_rule_id: int, child_rule_id: int) -> int:
+        """
+        Public API: Gets dependency type between two rules.
+        
+        Args:
+            parent_rule_id: Parent rule ID
+            child_rule_id: Child rule ID
+            
+        Returns:
+            Dependency type integer
+            
+        Raises:
+            IndexError: If IDs are negative
+        """
+        if parent_rule_id < 0 or child_rule_id < 0:
+            raise IndexError("Dependency indexes cannot be negative")
+        return self.__dependency_two_dimension_list[parent_rule_id][child_rule_id]
+
+    def get_to_child_dependency_list(self, node_id: int) -> List[int]:
+        """
+        Public API: Gets list of child node IDs for a given node.
+        
+        Args:
+            node_id: Node ID to check
+            
+        Returns:
+            List of child node IDs
+            
+        Raises:
+            IndexError: If node_id is out of range
+        """
+        if node_id < 0 or node_id >= self.__dependency_list_size:
+            raise IndexError(f"node_id {node_id} is out of range")
+
+        target_node_dependency_list = self.__dependency_two_dimension_list[node_id]
+        
+        return [
+            child_index
+            for child_index, value in enumerate(target_node_dependency_list)
+            if (
+                value != -1
+                and child_index != node_id
+            )
+        ]
+
+    def get_or_to_child_dependency_list(self, node_id: int) -> List[int]:
+        """
+        Public API: Gets list of OR-type child node IDs.
+        
+        Args:
+            node_id: Node ID to check
+            
+        Returns:
+            List of OR-type child node IDs
+            
+        Raises:
+            IndexError: If node_id is out of range
+        """
+        if node_id < 0 or node_id >= self.__dependency_list_size:
+            raise IndexError(f"node_id {node_id} is out of range")
+
+        target_node_dependency_list = self.__dependency_two_dimension_list[node_id]
+        or_dependency = DependencyType.get_or()
+        
+        return [
+            child_index
+            for child_index, value in enumerate(target_node_dependency_list)
+            if (
+                value != -1
+                and child_index != node_id
+                and (value & or_dependency) == or_dependency
+            )
+        ]
+
+    def get_and_to_child_dependency_list(self, node_id: int) -> List[int]:
+        """
+        Public API: Gets list of AND-type child node IDs.
+        
+        Args:
+            node_id: Node ID to check
+            
+        Returns:
+            List of AND-type child node IDs
+            
+        Raises:
+            IndexError: If node_id is out of range
+        """
+        if node_id < 0 or node_id >= self.__dependency_list_size:
+            raise IndexError(f"node_id {node_id} is out of range")
+        
+        target_node_dependency_list = self.__dependency_two_dimension_list[node_id]
+        and_dependency = DependencyType.get_and()
+        
+        return [
+            child_index
+            for child_index, value in enumerate(target_node_dependency_list)
+            if(
+                value != -1
+                and child_index != node_id
+                and (value & and_dependency) == and_dependency
+            )
+        ]
+    
+    def get_mandatory_to_child_dependency_list(self, node_id: int) -> List[int]:
+        """
+        Public API: Gets list of MANDATORY-type child node IDs.
+        
+        Args:
+            node_id: Node ID to check
+            
+        Returns:
+            List of MANDATORY-type child node IDs
+            
+        Raises:
+            IndexError: If node_id is out of range
+        """
+        if node_id < 0 or node_id >= self.__dependency_list_size:
+            raise IndexError(f"node_id {node_id} is out of range")
+
+        target_node_dependency_list = self.__dependency_two_dimension_list[node_id]
+        mandatory_dependency = DependencyType.get_mandatory()
+
+        return [
+            child_index
+            for child_index, value in enumerate(target_node_dependency_list)
+            if (
+                value != -1 
+                and child_index != node_id 
+                and (value & mandatory_dependency) == mandatory_dependency
+            )
+        ]
+
+    def get_from_parent_dependency_list(self, node_id: int) -> List[int]:
+        """
+        Public API: Gets list of parent node IDs for a given node.
+        
+        Args:
+            node_id: Node ID to check
+            
+        Returns:
+            List of parent node IDs
+            
+        Raises:
+            IndexError: If node_id is out of range
+        """
+        if node_id < 0 or node_id >= self.__dependency_list_size:
+            raise IndexError(f"node_id {node_id} is out of range")
+        return [
+            parent_index
+            for parent_index, row in enumerate(self.__dependency_two_dimension_list)
+            if parent_index != node_id and row[node_id] != -1
+        ]
+
+    def has_mandatory_child_node(self, node_id: int) -> bool:
+        """
+        Public API: Checks if node has mandatory child nodes.
+        
+        Args:
+            node_id: Node ID to check
+            
+        Returns:
+            True if has mandatory children, False otherwise
+        """
+        return len(self.get_mandatory_to_child_dependency_list(node_id)) > 0
+
+    def sparse_items(self):
+        """
+        Public API: Yields only non-(-1) entries from the dependency matrix.
+
+        Avoids O(n^2) full-matrix iteration for sparse rule sets where most
+        cells are -1 (no dependency). Each yielded item is
+        ((parent_id, child_id), dep_type).
+
+        Yields:
+            Tuple of ((parent_id: int, child_id: int), dep_type: int)
+        """
+        for pid, row in enumerate(self.__dependency_two_dimension_list):
+            for cid, value in enumerate(row):
+                if value != -1 and pid != cid:
+                    yield (pid, cid), value
+
+    # -------------------------------------------------------------------------
+    # Special Methods
+    # -------------------------------------------------------------------------
+    def __repr__(self) -> str:
+        """
+        Public API: String representation of the object.
+        
+        Returns:
+            JSON string representation
+        """
+        return json.dumps(self.__dict__)

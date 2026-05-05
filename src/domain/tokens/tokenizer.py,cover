@@ -1,0 +1,52 @@
+> import re
+> from typing import Optional
+> from src.shared.constants import TokenizerMatcherConstant
+> from src.domain.tokens.token import Token
+> from src.shared.loggers import Logger
+  
+> _logger: Logger = Logger.get_logger(__name__)
+  
+  
+> class Tokenizer:
+>     @staticmethod
+>     def get_tokens(text: str) -> Token:
+>         if not text or not text.strip():
+>             return Token()
+  
+>         tokens_list: list[str] = []
+>         tokens_string_list: list[str] = []
+>         remaining = text
+  
+>         matchers = TokenizerMatcherConstant.get_all_matcher()
+>         matcher_names = [e.name for e in TokenizerMatcherConstant.get_all_enums()]
+  
+>         while remaining:
+>             matched = False
+>             for idx, pattern_str in enumerate(matchers):
+>                 if idx >= len(matcher_names):
+!                     break
+>                 compiled = TokenizerMatcherConstant.get_compiled_matcher(matcher_names[idx])
+>                 if compiled is None:
+!                     try:
+!                         compiled = re.compile(pattern_str)
+!                     except re.error:
+!                         continue
+>                 match = compiled.match(remaining)
+>                 if match:
+>                     token_str = match.group(0)
+>                     if matcher_names[idx] != 'SPACE_MATCHER':
+>                         tokens_list.append(token_str.strip())
+>                         tokens_string_list.append(matcher_names[idx].replace('_MATCHER', '').replace('_NUMBER', '').replace('_', ' '))
+>                     remaining = remaining[len(token_str):]
+>                     matched = True
+>                     break
+  
+>             if not matched:
+>                 if remaining:
+>                     tokens_list.append(remaining[0])
+>                     remaining = remaining[1:]
+!                 else:
+!                     break
+  
+>         tokens_string = ' '.join(tokens_string_list) if tokens_string_list else ''
+>         return Token(tokens_list, tokens_string_list, tokens_string)

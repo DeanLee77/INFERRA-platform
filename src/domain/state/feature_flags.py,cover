@@ -1,0 +1,94 @@
+> """
+> Feature flag configuration for INFERRA.
+  
+> Phase 1 feature flags:
+> - USE_HYPERGRAPH: Use HyperAdjacencyGraph instead of DependencyMatrix (default: false)
+> - LEGACY_ITERATE: Use nested InferenceEngine for iterate (default: true)
+> - LAYERED_MEMORY: Use LayeredFactStore for working memory (default: true)
+  
+> Feature flags are start-of-session sticky — cannot flip mid-session.
+> """
+  
+> import os
+> from typing import Optional
+  
+  
+> class FeatureFlags:
+>     """
+>     Feature flag configuration for INFERRA.
+  
+>     Flags are read once at session start and remain fixed for the
+>     duration of that session. This ensures data consistency —
+>     flipping a flag mid-session could cause data incompatibilities
+>     (e.g., switching from matrix to graph mid-inference).
+>     """
+  
+>     def __init__(
+>         self,
+>         use_hypergraph: Optional[bool] = None,
+>         legacy_iterate: Optional[bool] = None,
+>         layered_memory: Optional[bool] = None,
+>         ml_optimized_dfs: Optional[bool] = None,
+>     ):
+>         self._use_hypergraph = use_hypergraph if use_hypergraph is not None else self._env_bool("USE_HYPERGRAPH", False)
+>         self._legacy_iterate = legacy_iterate if legacy_iterate is not None else self._env_bool("LEGACY_ITERATE", True)
+>         self._layered_memory = layered_memory if layered_memory is not None else self._env_bool("LAYERED_MEMORY", True)
+>         self._ml_optimized_dfs = ml_optimized_dfs if ml_optimized_dfs is not None else self._env_bool("ML_OPTIMIZED_DFS", False)
+>         self._frozen = False
+  
+>     @staticmethod
+>     def _env_bool(name: str, default: bool) -> bool:
+>         """Read a boolean from an environment variable."""
+>         val = os.environ.get(f"INFERRA_{name}", "").lower()
+>         if val in ("true", "1", "yes"):
+>             return True
+>         if val in ("false", "0", "no"):
+!             return False
+>         return default
+  
+>     @property
+>     def use_hypergraph(self) -> bool:
+>         return self._use_hypergraph
+  
+>     @property
+>     def legacy_iterate(self) -> bool:
+>         return self._legacy_iterate
+  
+>     @property
+>     def layered_memory(self) -> bool:
+>         return self._layered_memory
+  
+>     @property
+>     def ml_optimized_dfs(self) -> bool:
+>         return self._ml_optimized_dfs
+  
+>     def freeze(self) -> None:
+>         """Freeze flags for the current session. After freeze(), mutations are rejected."""
+>         self._frozen = True
+  
+>     def is_frozen(self) -> bool:
+>         """Check if flags are frozen for the current session."""
+>         return self._frozen
+  
+>     def snapshot(self) -> dict:
+>         """Return a snapshot of current flag values (for session metadata)."""
+>         return {
+>             "use_hypergraph": self._use_hypergraph,
+>             "legacy_iterate": self._legacy_iterate,
+>             "layered_memory": self._layered_memory,
+>             "ml_optimized_dfs": self._ml_optimized_dfs,
+>         }
+  
+  
+  # Module-level default flags
+> _default_flags: FeatureFlags = FeatureFlags()
+  
+  
+> def get_feature_flags() -> FeatureFlags:
+>     """Get the global feature flags instance."""
+>     return _default_flags
+  
+  
+> def reset_feature_flags(**overrides) -> FeatureFlags:
+>     """Create fresh feature flags (for testing or new sessions)."""
+>     return FeatureFlags(**overrides)

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>INFERRA AI Harness</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="harness">
+      <section class="control-rail">
+        <div class="brand">
+          <span class="mark">IH</span>
+          <div>
+            <strong>INFERRA AI Harness</strong>
+            <span>Deduction-first agent evaluation</span>
+          </div>
+        </div>
+        <label>
+          Scenario
+          <select id="scenarioSelect"></select>
+        </label>
+        <label>
+          Prompt
+          <textarea id="promptInput" spellcheck="false"></textarea>
+        </label>
+        <button id="runBtn" title="Run harness evaluation">Run Evaluation</button>
+      </section>
+
+      <section class="results">
+        <div class="score-row">
+          <output class="score" id="riskScore">0.00</output>
+          <output class="gate" id="gateAction">ready</output>
+          <output class="reason" id="gateReason">No run selected</output>
+        </div>
+        <div class="stage-strip" id="stageStrip"></div>
+        <canvas id="traceCanvas" width="1080" height="520" aria-label="Harness provenance trace"></canvas>
+        <div class="split">
+          <pre id="matrixOutput"></pre>
+          <pre id="provOutput"></pre>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

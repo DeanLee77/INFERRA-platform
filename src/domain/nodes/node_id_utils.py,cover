@@ -1,0 +1,87 @@
+> import hashlib
+> import threading
+> from typing import Dict, Optional, Set
+  
+  
+> class _ParseContext:
+>     """Per-session collision tracker for deterministic node ID generation.
+  
+>     Thread-safe: each session owns its own context, avoiding cross-session
+>     contamination from the previous module-level global dict.
+>     """
+  
+>     def __init__(self) -> None:
+>         self._active_ids: Dict[str, str] = {}
+  
+>     def generate_node_id(
+>         self,
+>         module_path: str,
+>         rule_name: str,
+>         line_number: int,
+>         variable_name: str,
+>     ) -> str:
+>         content = f"{module_path}:{rule_name}:{line_number}:{variable_name}"
+>         base_id = hashlib.sha256(content.encode()).hexdigest()[:16]
+  
+>         existing = self._active_ids.get(base_id)
+>         if existing is None:
+>             self._active_ids[base_id] = content
+>             return base_id
+>         if existing == content:
+>             return base_id
+  
+>         counter = 1
+>         while True:
+>             candidate = f"{base_id}:{counter}"
+>             existing = self._active_ids.get(candidate)
+>             if existing is None:
+>                 self._active_ids[candidate] = content
+>                 return candidate
+>             if existing == content:
+!                 return candidate
+>             counter += 1
+  
+>     def reset(self) -> None:
+>         self._active_ids.clear()
+  
+>     def validate_no_existing_collisions(self, persisted_session_ids: Set[str]) -> None:
+>         overlap = set(self._active_ids.keys()) & persisted_session_ids
+>         if overlap:
+>             raise ValueError(f"Hash ID collision with persisted sessions: {overlap}")
+  
+  
+> _local: threading.local = threading.local()
+  
+  
+> def _get_context() -> _ParseContext:
+>     if not hasattr(_local, "parse_context"):
+>         _local.parse_context = _ParseContext()
+>     return _local.parse_context
+  
+  
+> def generate_node_id(
+>     module_path: str, rule_name: str, line_number: int, variable_name: str
+> ) -> str:
+>     """Deterministic 16-char hex ID (64-bit entropy).
+  
+>     Same inputs always return the same ID within a parse session. Two distinct
+>     inputs that share the same 16-char SHA-256 prefix get a monotonic counter
+>     suffix appended so node identity remains unique without sacrificing
+>     determinism across re-parses of the same input.
+  
+>     Thread-safe: each thread maintains its own collision tracker via
+>     threading.local, so concurrent parses never corrupt each other.
+>     """
+>     return _get_context().generate_node_id(
+>         module_path, rule_name, line_number, variable_name
+>     )
+  
+  
+> def reset_parse_context() -> None:
+>     """Clear active IDs. Call at the start of each RuleSetParser.scan() to isolate sessions."""
+>     _get_context().reset()
+  
+  
+> def validate_no_existing_collisions(persisted_session_ids: Set[str]) -> None:
+>     """Start-up guard: raises ValueError if any newly-generated ID overlaps a persisted session."""
+>     _get_context().validate_no_existing_collisions(persisted_session_ids)

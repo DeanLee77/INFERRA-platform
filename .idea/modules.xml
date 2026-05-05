@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/Nadia-PyRest.iml" filepath="$PROJECT_DIR$/.idea/Nadia-PyRest.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/Inferra-PyRest.iml" filepath="$PROJECT_DIR$/.idea/Inferra-PyRest.iml" />
     </modules>
   </component>
 </project>

@@ -1,0 +1,237 @@
+> """
+> HyperAdjacencyGraph Module.
+> Adjacency-list graph with cycle-protected back-propagation.
+  
+> Provides the core data structure for INFERRA's dependency traversal,
+> replacing the legacy 2D dependency matrix with a sparse, name-based
+> adjacency representation. Back-propagation uses BFS with visited-set
+> and max-iteration guards to detect cyclic dependencies at runtime.
+  
+> Implements DependencyGraphPort using primitive types for the port contract,
+> while also exposing a richer typed API via add_dependency_group() with
+> DependencyType enum and DependencyGroup NamedTuple.
+> """
+  
+> from collections import deque
+> from typing import Deque, Dict, Optional, Set, Tuple
+  
+> from src.domain.graph.dependency_group import DependencyGroup
+> from src.domain.graph.dependency_type import DependencyType
+> from src.ports.dependency_graph_port import DependencyGraphPort
+> from src.shared.loggers import Logger
+  
+> _logger: Logger = Logger.get_logger(__name__)
+  
+  
+> class CyclicGraphError(RuntimeError):
+>     """Raised when back-propagation detects a likely cyclic dependency."""
+>     pass
+  
+  
+> class HyperAdjacencyGraph(DependencyGraphPort):
+>     """
+>     Sparse, name-based adjacency graph with hyper-edge support.
+  
+>     Children are stored as lists of DependencyGroup tuples (immutable
+>     NamedTuple), enabling multi-child edges with shared dependency types.
+>     Parents are stored as a reverse-lookup dict for efficient back-propagation.
+  
+>     Topological sort cache is invalidated on every mutation.
+>     """
+  
+>     def __init__(self) -> None:
+>         self._children: Dict[str, Tuple[DependencyGroup, ...]] = {}
+>         self._parents: Dict[str, Set[str]] = {}
+>         self._topo_cache: Optional[Tuple[str, ...]] = None
+  
+      # -------------------------------------------------------------------------
+      # Public API: Mutation
+      # -------------------------------------------------------------------------
+  
+>     def add_dependency_group(
+>         self,
+>         parent: str,
+>         dep_type: DependencyType = DependencyType.AND,
+>         children: Optional[Set[str]] = None,
+>     ) -> None:
+>         """
+>         Add a dependency group from parent to a set of children.
+  
+>         Args:
+>             parent: Parent node name
+>             dep_type: Dependency type (enum or int from port contract)
+>             children: Set of child node names
+>         """
+>         if children is None:
+!             children = set()
+          # Support both DependencyType enum and raw int (port contract)
+>         if isinstance(dep_type, int) and not isinstance(dep_type, DependencyType):
+>             dep_type = DependencyType(dep_type)
+>         group = DependencyGroup(dep_type, frozenset(children))
+>         existing = list(self._children.get(parent, ()))
+>         existing.append(group)
+>         self._children[parent] = tuple(existing)
+>         for child in children:
+>             self._parents.setdefault(child, set()).add(parent)
+>         self._topo_cache = None
+  
+      # -------------------------------------------------------------------------
+      # Public API: Queries (DependencyGraphPort contract — primitive types)
+      # -------------------------------------------------------------------------
+  
+>     def get_parent_edges(self, node_name: str) -> Set[str]:
+>         """Return the set of parent node names for the given node."""
+>         return set(self._parents.get(node_name, set()))
+  
+>     def get_child_groups(self, node_name: str) -> Tuple[Tuple[int, Tuple[str, ...]], ...]:
+>         """
+>         Return dependency groups as primitive tuples (port contract).
+  
+>         Each group is (dep_type: int, children: tuple of str).
+>         """
+>         groups = self._children.get(node_name, ())
+>         return tuple(
+>             (int(g.dep_type), tuple(sorted(g.children)))
+>             for g in groups
+>         )
+  
+      # -------------------------------------------------------------------------
+      # Public API: Rich typed queries (domain-level convenience)
+      # -------------------------------------------------------------------------
+  
+>     def get_typed_child_groups(self, node_name: str) -> Tuple[DependencyGroup, ...]:
+>         """Return DependencyGroup NamedTuples for domain-level consumers."""
+>         return self._children.get(node_name, ())
+  
+>     def has_node(self, node_name: str) -> bool:
+>         """Check whether a node name exists in the graph (as parent or child)."""
+>         return node_name in self._children or node_name in self._parents
+  
+>     def all_node_names(self) -> Set[str]:
+>         """Return all node names known to the graph."""
+>         names: Set[str] = set(self._children.keys())
+>         names.update(self._parents.keys())
+>         return names
+  
+      # -------------------------------------------------------------------------
+      # Public API: Back-propagation (BFS with cycle guard)
+      # -------------------------------------------------------------------------
+  
+>     def back_propagate(self, changed_node: str, max_steps: int = 0) -> Deque[str]:
+>         """
+>         BFS back-propagation from a changed node to all affected parents.
+  
+>         Includes cyclic-graph protection: a visited set prevents re-visiting
+>         nodes, and a max-iteration guard raises CyclicGraphError when the
+>         traversal exceeds the limit.
+  
+>         Args:
+>             changed_node: Name of the node that changed
+>             max_steps: Maximum BFS steps (0 = auto-compute from graph size)
+  
+>         Returns:
+>             Deque of unique parent node names in BFS visit order
+  
+>         Raises:
+>             CyclicGraphError: If traversal exceeds max_steps
+>         """
+>         if max_steps == 0:
+              # 2x total nodes is a safe upper bound for DAG traversal
+>             max_steps = max(len(self._parents) * 2, 1)
+  
+>         visited: Set[str] = set()
+>         queued: Set[str] = {changed_node}
+>         queue: Deque[str] = deque([changed_node])
+>         evaluated: Deque[str] = deque()
+>         steps = 0
+  
+>         while queue:
+>             current = queue.popleft()
+>             if current in visited:
+!                 continue
+>             visited.add(current)
+>             steps += 1
+  
+>             if steps > max_steps:
+>                 raise CyclicGraphError(
+>                     f"Back-propagation exceeded {max_steps} steps — "
+>                     f"possible cyclic graph"
+>                 )
+  
+>             for parent_name in self.get_parent_edges(current):
+>                 if parent_name not in visited and parent_name not in queued:
+>                     queued.add(parent_name)
+>                     queue.append(parent_name)
+>                     evaluated.append(parent_name)
+  
+>         return evaluated
+  
+      # -------------------------------------------------------------------------
+      # Public API: Topological sort (Kahn's algorithm)
+      # -------------------------------------------------------------------------
+  
+>     def topological_sort(self) -> Tuple[str, ...]:
+>         """
+>         Return nodes in topological order using Kahn's algorithm.
+  
+>         Result is cached until the next mutation. Returns an empty tuple
+>         if the graph contains a cycle.
+  
+>         Returns:
+>             Tuple of node names in topological order
+>         """
+>         if self._topo_cache is not None:
+>             return self._topo_cache
+  
+          # Build in-degree map
+>         all_names = self.all_node_names()
+>         in_degree: Dict[str, int] = {name: 0 for name in all_names}
+>         for name in all_names:
+>             for group in self.get_typed_child_groups(name):
+>                 for child in group.children:
+>                     if child in in_degree:
+>                         in_degree[child] += 1
+  
+          # Seed with zero in-degree nodes
+>         queue: Deque[str] = deque(
+>             name for name, deg in in_degree.items() if deg == 0
+>         )
+>         result: list = []
+  
+>         while queue:
+>             node = queue.popleft()
+>             result.append(node)
+>             for group in self.get_typed_child_groups(node):
+>                 for child in group.children:
+>                     if child in in_degree:
+>                         in_degree[child] -= 1
+>                         if in_degree[child] == 0:
+>                             queue.append(child)
+  
+>         if len(result) != len(all_names):
+              # Cycle detected — clear cache and return empty
+>             _logger.error("Cyclic graph detected during topological sort")
+>             self._topo_cache = ()
+>             return ()
+  
+>         self._topo_cache = tuple(result)
+>         return self._topo_cache
+  
+      # -------------------------------------------------------------------------
+      # Public API: Utility
+      # -------------------------------------------------------------------------
+  
+>     def clear(self) -> None:
+>         """Remove all nodes and edges from the graph."""
+>         self._children.clear()
+>         self._parents.clear()
+>         self._topo_cache = None
+  
+>     def __len__(self) -> int:
+>         return len(self.all_node_names())
+  
+>     def __repr__(self) -> str:
+!         return (
+!             f"HyperAdjacencyGraph(nodes={len(self)}, "
+!             f"edges={sum(len(g.children) for groups in self._children.values() for g in groups)})"
+!         )

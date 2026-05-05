@@ -1,0 +1,9 @@
+> from dataclasses import dataclass
+> from typing import Optional
+  
+  
+> @dataclass
+> class UpdateRuleDetails:
+>     new_rule_name: str = ""
+>     old_rule_name: str = ""
+>     new_rule_category: str = ""

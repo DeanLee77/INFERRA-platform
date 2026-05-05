@@ -1,0 +1,45 @@
+import os
+from typing import Optional
+
+from openai import OpenAI
+from src.config import settings
+from src.shared.loggers import Logger
+
+_logger: Logger = Logger.get_logger(__name__)
+
+
+class LLMClient:
+    _instance: Optional['LLMClient'] = None
+    _client: Optional[OpenAI] = None
+    _model: Optional[str] = None
+    _timeout: float = 30.0
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialize()
+        return cls._instance
+
+    def _initialize(self):
+        base_url = settings.ZAI_BASE_URL
+        api_key = settings.ZAI_API_KEY
+        self._model = settings.ZAI_MODEL
+        self._timeout = settings.LLM_TIMEOUT
+
+        if not base_url or not api_key or not self._model:
+            _logger.warning("LLM client not configured: missing ZAI_BASE_URL, ZAI_API_KEY, or ZAI_MODEL")
+            return
+
+        self._client = OpenAI(base_url=base_url, api_key=api_key)
+
+    @property
+    def client(self) -> Optional[OpenAI]:
+        return self._client
+
+    @property
+    def model(self) -> Optional[str]:
+        return self._model
+
+    @property
+    def timeout(self) -> float:
+        return self._timeout

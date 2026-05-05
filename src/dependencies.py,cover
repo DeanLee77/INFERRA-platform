@@ -1,0 +1,91 @@
+> """
+> Dependency Injection Module.
+> Provides FastAPI dependencies for services and repositories.
+> """
+  
+> from functools import lru_cache
+> from typing import Generator
+  
+> from fastapi import Depends
+> from sqlalchemy.orm import Session
+  
+> from src.adapters.outbound.persistence.database import get_db
+> from src.adapters.outbound.persistence.rule_repository import RuleRepositoryImpl
+> from src.adapters.outbound.session.in_memory_session_store import InMemorySessionStore
+> from src.ports.rule_repository_port import RuleRepositoryPort
+> from src.ports.session_store_port import SessionStorePort
+> from src.domain.inference.session_service import InferenceSessionService
+  
+  
+  # =============================================================================
+  # Singleton instances (cached via lru_cache)
+  # =============================================================================
+  
+> @lru_cache()
+> def get_session_store() -> SessionStorePort:
+>     """
+>     Get the singleton session store instance.
+      
+>     Uses in-memory storage by default. For production with multiple
+>     workers, replace with Redis-backed implementation.
+      
+>     Returns:
+>         SessionStorePort instance
+>     """
+>     return InMemorySessionStore()
+  
+  
+> def get_inference_session_service(
+>     session_store: SessionStorePort = Depends(get_session_store)
+> ) -> InferenceSessionService:
+>     """
+>     Get the inference session service instance.
+      
+>     Singleton behaviour is inherited from get_session_store(),
+>     which is @lru_cache-decorated and returns the same SessionStorePort
+>     every call. InferenceSessionService itself is stateless (delegates
+>     to the store), so a fresh construction per call is safe and avoids
+>     the stale-closure / cross-session contamination risks of lru_cache
+>     on a dependency-injected function.
+      
+>     Args:
+>         session_store: The session storage backend
+          
+>     Returns:
+>         InferenceSessionService instance
+>     """
+!     return InferenceSessionService(session_store)
+  
+  
+  # =============================================================================
+  # Request-scoped dependencies
+  # =============================================================================
+  
+> def get_rule_repository(
+>     db: Session = Depends(get_db)
+> ) -> RuleRepositoryPort:
+>     """
+>     Get a rule repository instance with database session.
+      
+>     This is request-scoped - each request gets its own database session.
+      
+>     Args:
+>         db: SQLAlchemy database session
+          
+>     Returns:
+>         RuleRepositoryPort instance
+>     """
+>     return RuleRepositoryImpl(db)
+  
+  
+  # =============================================================================
+  # Utility functions for testing
+  # =============================================================================
+  
+> def reset_singletons() -> None:
+>     """
+>     Reset all singleton caches.
+      
+>     Use this in tests to ensure clean state between tests.
+>     """
+!     get_session_store.cache_clear()

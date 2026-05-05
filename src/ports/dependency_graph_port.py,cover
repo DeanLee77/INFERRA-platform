@@ -1,0 +1,119 @@
+> """
+> Dependency Graph Port Module.
+> Abstract interface for dependency graph operations.
+  
+> Uses only primitive types to avoid circular imports with domain.graph.
+> """
+  
+> from abc import ABCMeta, abstractmethod
+> from collections import deque
+> from typing import Deque, Set, Tuple
+  
+  
+> class DependencyGraphPort(metaclass=ABCMeta):
+>     """
+>     Abstract interface for a dependency graph.
+  
+>     Defines the contract for graph traversal and back-propagation.
+>     Implementations must support cycle-protected traversal and
+>     topological sorting.
+  
+>     The port uses primitive types (str, int, Set, Tuple) rather than
+>     domain value objects to avoid circular imports. Adapters translate
+>     between port-level primitives and domain-level types.
+>     """
+  
+>     @abstractmethod
+>     def add_dependency_group(
+>         self,
+>         parent: str,
+>         dep_type: int,
+>         children: Set[str],
+>     ) -> None:
+>         """
+>         Add a dependency group from parent to a set of children.
+  
+>         Args:
+>             parent: Parent node name
+>             dep_type: Dependency type bit flag (int)
+>             children: Set of child node names
+>         """
+!         pass
+  
+>     @abstractmethod
+>     def get_parent_edges(self, node_name: str) -> Set[str]:
+>         """
+>         Return the set of parent node names for the given node.
+  
+>         Args:
+>             node_name: Node name to query
+  
+>         Returns:
+>             Set of parent node names
+>         """
+!         pass
+  
+>     @abstractmethod
+>     def get_child_groups(self, node_name: str) -> Tuple[Tuple[int, Tuple[str, ...]], ...]:
+>         """
+>         Return the dependency groups from this node as primitive tuples.
+  
+>         Each group is (dep_type: int, children: tuple of str).
+  
+>         Args:
+>             node_name: Node name to query
+  
+>         Returns:
+>             Tuple of (dep_type, children_tuple) tuples
+>         """
+!         pass
+  
+>     @abstractmethod
+>     def back_propagate(self, changed_node: str, max_steps: int = 0) -> Deque[str]:
+>         """
+>         BFS back-propagation from a changed node to all affected parents.
+  
+>         Args:
+>             changed_node: Name of the node that changed
+>             max_steps: Maximum BFS steps (0 = auto-compute)
+  
+>         Returns:
+>             Deque of parent node names in BFS visit order
+  
+>         Raises:
+>             CyclicGraphError: If traversal exceeds max_steps
+>         """
+!         pass
+  
+>     @abstractmethod
+>     def topological_sort(self) -> Tuple[str, ...]:
+>         """
+>         Return nodes in topological order.
+  
+>         Returns:
+>             Tuple of node names in topological order
+>         """
+!         pass
+  
+>     @abstractmethod
+>     def all_node_names(self) -> Set[str]:
+>         """
+>         Return all node names known to the graph.
+  
+>         Returns:
+>             Set of all node name strings
+>         """
+!         pass
+  
+>     @abstractmethod
+>     def has_node(self, node_name: str) -> bool:
+>         """
+>         Check whether a node name exists in the graph.
+  
+>         Args:
+>             node_name: Node name to check
+  
+>         Returns:
+>             True if the node exists
+>         """
+!         pass

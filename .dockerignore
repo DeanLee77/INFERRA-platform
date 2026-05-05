@@ -1,0 +1,9 @@
+.git
+.pytest_cache
+.hypothesis
+.venv
+__pycache__
+*.pyc
+.coverage
+htmlcov
+frontends/*/node_modules

@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/)",
+      "Bash(python -m pytest tests/adapters/outbound/persistence/test_rule_repository.py::TestRuleRepositoryImpl::test_find_id_by_name_found -v)",
+      "Bash(python -m pytest tests/adapters/inbound/http/routes/test_inference_router.py::TestInferenceRouter::test_view_summary -v)",
+      "Bash(python -m pytest tests/domain/ tests/services/ -v --tb=short)",
+      "Bash(python -m pytest tests/domain/ tests/services/ --tb=short -q)",
+      "Bash(python -m pytest tests/domain/state/ tests/domain/inference/test_assessment_state_layered.py -v)",
+      "Bash(python -m pytest tests/ --tb=no -q)",
+      "Bash(python -m pytest tests/domain/state/ -v)",
+      "Bash(python -m pytest tests/ --cov=src --cov-report=term --cov-fail-under=0 -q)",
+      "Bash(python -m pytest tests/ --tb=short -q)",
+      "Bash(python -m pytest tests/integration/test_feature_flag_flip.py -v)",
+      "Bash(python -m pytest tests/integration/test_feature_flag_flip.py::TestLegacyIterateDispatch::test_dispatch_helper_picks_legacy_path_when_flag_true -v)"
+    ]
+  },
+  "spinnerTipsEnabled": true,
+  "prefersReducedMotion": false
+}

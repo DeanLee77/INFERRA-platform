@@ -1,0 +1,116 @@
+"""
+Matrix-to-HyperGraph Adapter Module.
+Adapts the legacy DependencyMatrix to HyperAdjacencyGraph for zero-downtime migration.
+
+Uses sparse iteration to avoid O(n²) traversal on large sparse matrices,
+and a content-hash memoization guard to skip redundant rebuilds.
+"""
+
+import hashlib
+import json
+from typing import Dict, Optional, Tuple
+
+from src.domain.graph.dependency_group import DependencyGroup
+from src.domain.graph.dependency_type import DependencyType
+from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
+from src.domain.nodes.dependency_matrix import DependencyMatrix
+from src.shared.loggers import Logger
+
+_logger: Logger = Logger.get_logger(__name__)
+
+
+class MatrixToHyperGraphAdapter(HyperAdjacencyGraph):
+    """
+    Adapts the legacy DependencyMatrix to a HyperAdjacencyGraph.
+
+    Matrix format contract: DependencyMatrix.get_dependency_two_dimension_list()
+    returns a dense 2D list where matrix[pid][cid] = dep_type (-1 = no
+    dependency). Row/column indices map to node names via node_dict.
+
+    For sparse rule sets, _sparse_items() iterates only over non -1 entries
+    to avoid O(n²) work.
+
+    Memoization guard: _rebuild() is skipped if the matrix content hash
+    hasn't changed since the last build.
+    """
+
+    def __init__(
+        self,
+        legacy_matrix: DependencyMatrix,
+        node_dict: Dict[int, str],
+    ) -> None:
+        super().__init__()
+        self._matrix = legacy_matrix
+        self._id_map = node_dict
+        self._matrix_hash: Optional[str] = None
+        self._rebuild()
+
+    # -------------------------------------------------------------------------
+    # Public API: Rebuild
+    # -------------------------------------------------------------------------
+
+    def rebuild(self) -> None:
+        """
+        Public API: Re-derive the graph from the legacy matrix.
+
+        Skips rebuild if the matrix content hash hasn't changed (memoization guard).
+        """
+        self._rebuild()
+
+    # -------------------------------------------------------------------------
+    # Protected Helpers
+    # -------------------------------------------------------------------------
+
+    def _rebuild(self) -> None:
+        """
+        Protected Helper: Rebuild the hypergraph from the legacy matrix.
+
+        Uses sparse_items() to iterate only over non-(-1) entries, avoiding
+        O(n²) traversal for sparse rule sets where most cells are -1.
+        Memoization guard: skips rebuild if the matrix hash is unchanged.
+        """
+        current_hash = self._compute_matrix_hash()
+        if current_hash == self._matrix_hash:
+            return
+        self._matrix_hash = current_hash
+
+        self.clear()
+
+        if isinstance(self._id_map, dict):
+            for runtime_id, node_name in sorted(self._id_map.items()):
+                if node_name is not None:
+                    self.register_node(str(node_name), {"runtime_id": runtime_id})
+
+        children_for_type: Dict[Tuple[str, int], set] = {}
+        for (pid, cid), dep_type in self._matrix.sparse_items():
+            parent_name = self._id_map.get(pid)
+            child_name = self._id_map.get(cid)
+            if parent_name is None or child_name is None:
+                continue
+            key = (parent_name, dep_type)
+            children_for_type.setdefault(key, set()).add(child_name)
+
+        for (parent_name, dep_type_val), child_set in children_for_type.items():
+            self.add_dependency_group(
+                parent=parent_name,
+                dep_type=DependencyType(dep_type_val),
+                children=child_set,
+            )
+
+    def _compute_matrix_hash(self) -> str:
+        """
+        Protected Helper: Compute a content hash of the matrix for memoization.
+
+        Uses json.dumps() for deterministic serialization instead of repr(),
+        which can produce different output for the same data depending on
+        Python version or object identity.
+
+        Returns:
+            MD5 hex digest of the matrix's JSON serialization
+        """
+        matrix_2d = self._matrix.get_dependency_two_dimension_list()
+        try:
+            matrix_json = json.dumps(matrix_2d)
+        except TypeError:
+            matrix_json = "__non_serializable_matrix__"
+        return hashlib.md5(matrix_json.encode()).hexdigest()

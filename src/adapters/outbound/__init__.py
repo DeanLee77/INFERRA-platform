@@ -1,0 +1,9 @@
+"""Outbound adapters package."""
+from .session import InMemorySessionStore
+
+# Note: RuleRepositoryImpl can be imported directly:
+# from src.adapters.outbound.persistence.rule_repository import RuleRepositoryImpl
+
+__all__ = [
+    "InMemorySessionStore",
+]

@@ -1,0 +1,130 @@
+> """
+> Fact Store Port Module.
+> Structural interface (Protocol) for layered working-memory persistence.
+  
+> Uses typing.Protocol (PEP 544) for structural subtyping — implementations
+> don't need to inherit from this class, they just need to satisfy the
+> method signatures. This aligns with hexagonal architecture's port concept
+> where the port is a behavioural contract, not an inheritance hierarchy.
+> """
+  
+> from typing import Dict, Optional, Protocol, Set, runtime_checkable
+  
+> from src.domain.fact_values import FactValue
+> from src.domain.state import FactSource
+  
+  
+> @runtime_checkable
+> class FactStorePort(Protocol):
+>     """
+>     Structural interface for a layered fact store.
+  
+>     Defines the contract for working-memory persistence with provenance
+>     tagging via FactSource. Implementations should preserve a unified
+>     read view in which ASSERTED beats INFERRED beats SEMANTIC on collisions.
+  
+>     Note: This is a Protocol (structural typing). Concrete implementations
+>     do NOT need to inherit from this class — they just need to implement
+>     all the methods defined here. Use @runtime_checkable for isinstance()
+>     checks when needed.
+>     """
+  
+>     def get_unified_view(self) -> Dict[str, FactValue]:
+>         """
+>         Return a merged snapshot of all layers (ASSERTED > INFERRED > SEMANTIC).
+  
+>         The returned dict is a fresh copy; mutations do not affect the store.
+>         """
+-         ...
+  
+>     def set_fact(
+>         self,
+>         name: str,
+>         value: FactValue,
+>         source: FactSource = FactSource.ASSERTED,
+>     ) -> None:
+>         """
+>         Write a fact into the specified layer.
+  
+>         Args:
+>             name: Fact key
+>             value: FactValue to store
+>             source: Target FactSource layer (defaults to ASSERTED)
+>         """
+-         ...
+  
+>     def remove_fact(self, name: str, source: Optional[FactSource] = None) -> None:
+>         """
+>         Remove a fact. Without a source, removes from every layer.
+  
+>         Args:
+>             name: Fact key
+>             source: Optional FactSource layer to target
+>         """
+-         ...
+  
+>     def invalidate_layer(self, source: FactSource) -> None:
+>         """
+>         Re-tract every fact in the specified layer.
+  
+>         Args:
+>             source: FactSource layer to clear
+>         """
+-         ...
+  
+>     def get_fact_sources(self, name: str) -> Set[FactSource]:
+>         """
+>         Return the set of layers that hold this fact.
+  
+>         Args:
+>             name: Fact key
+  
+>         Returns:
+>             Set of FactSource values
+>         """
+-         ...
+  
+>     def get_layer_snapshot(self, source: FactSource) -> Dict[str, FactValue]:
+>         """
+>         Return a fresh dict copy of a single layer's contents.
+  
+>         Args:
+>             source: FactSource layer to read
+  
+>         Returns:
+>             Dict of fact name -> FactValue for that layer
+>         """
+-         ...
+  
+>     def peek_in_layer(self, name: str, source: FactSource) -> Optional[FactValue]:
+>         """
+>         Look up a single fact within a specific layer without copying the layer.
+  
+>         Args:
+>             name: Fact key
+>             source: FactSource layer to search
+  
+>         Returns:
+>             FactValue if present in that layer, None otherwise
+>         """
+-         ...
+  
+>     def get_changed_since(self, timestamp: float) -> Set[str]:
+>         """
+>         Return the set of fact names whose last-write timestamp is strictly greater than `timestamp`.
+  
+>         Args:
+>             timestamp: Unix epoch seconds
+  
+>         Returns:
+>             Set of fact names changed since that point
+>         """
+-         ...
+  
+>     def get_overrides(self) -> Set[str]:
+>         """
+>         Return the set of fact names where an ASSERTED entry currently overrides an INFERRED entry.
+  
+>         Truth-maintenance helper exposing the override-tracking state.
+>         """
+-         ...

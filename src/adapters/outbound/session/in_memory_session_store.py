@@ -1,0 +1,172 @@
+"""
+In-Memory Session Store Module.
+Thread-safe in-memory storage for inference sessions.
+"""
+
+import threading
+from datetime import datetime, timedelta
+from typing import Dict, Optional, List
+
+from src.domain.exceptions import ConcurrentModificationError
+from src.ports.session_store_port import SessionStorePort
+from src.domain.inference.session import InferenceSession
+from src.shared.loggers import Logger
+
+_logger: Logger = Logger.get_logger(__name__)
+
+
+class InMemorySessionStore(SessionStorePort):
+    """
+    Thread-safe in-memory session store.
+    
+    Suitable for single-process deployments. For multi-process or
+    distributed deployments, use a Redis-backed implementation instead.
+    
+    Features:
+        - Thread-safe operations using RLock
+        - TTL-based session expiration
+        - Session access tracking via touch()
+    
+    Example:
+        store = InMemorySessionStore()
+        session = InferenceSession(...)
+        store.save(session)
+        retrieved = store.get(session.session_id)
+    """
+    
+    def __init__(self):
+        """Initialize the in-memory session store."""
+        self._sessions: Dict[str, InferenceSession] = {}
+        self._lock = threading.RLock()
+        _logger.info("InMemorySessionStore initialized")
+    
+    def get(self, session_id: str) -> Optional[InferenceSession]:
+        """
+        Retrieve a session by its ID.
+        
+        Args:
+            session_id: The unique session identifier
+            
+        Returns:
+            InferenceSession if found, None otherwise
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session:
+                session.touch()
+                _logger.debug(f"Session retrieved and touched: {session_id}")
+            return session
+    
+    def save(self, session: InferenceSession) -> None:
+        """
+        Save or update a session.
+        
+        Args:
+            session: The session to save
+        """
+        if not session or not session.session_id:
+            raise ValueError("Session must have a valid session_id")
+        
+        with self._lock:
+            existing = self._sessions.get(session.session_id)
+            if existing is not None:
+                current_version = int(getattr(existing, "version", 0))
+                incoming_version = int(getattr(session, "version", 0))
+                if existing is not session and incoming_version != current_version:
+                    raise ConcurrentModificationError(
+                        f"Session {session.session_id} was modified by another writer "
+                        f"(expected version {incoming_version}, found {current_version})"
+                    )
+                session.version = current_version + 1
+            else:
+                session.version = max(int(getattr(session, "version", 0)), 0)
+            self._sessions[session.session_id] = session
+            _logger.info(f"Session saved: {session.session_id} (rule={session.rule_name}, target={session.target_node_name})")
+    
+    def delete(self, session_id: str) -> bool:
+        """
+        Delete a session by its ID.
+        
+        Args:
+            session_id: The unique session identifier
+            
+        Returns:
+            True if session was deleted, False if not found
+        """
+        with self._lock:
+            if session_id in self._sessions:
+                del self._sessions[session_id]
+                _logger.info(f"Session deleted: {session_id}")
+                return True
+            _logger.debug(f"Session not found for deletion: {session_id}")
+            return False
+    
+    def exists(self, session_id: str) -> bool:
+        """
+        Check if a session exists.
+        
+        Args:
+            session_id: The unique session identifier
+            
+        Returns:
+            True if session exists, False otherwise
+        """
+        with self._lock:
+            return session_id in self._sessions
+    
+    def list_sessions(self) -> List[str]:
+        """
+        List all active session IDs.
+        
+        Returns:
+            List of session IDs
+        """
+        with self._lock:
+            return list(self._sessions.keys())
+    
+    def clear_expired(self, max_age_seconds: int) -> int:
+        """
+        Remove sessions that have exceeded the maximum age.
+        
+        Args:
+            max_age_seconds: Maximum session age in seconds
+            
+        Returns:
+            Number of sessions removed
+        """
+        cutoff = datetime.utcnow() - timedelta(seconds=max_age_seconds)
+        expired_ids = []
+        
+        with self._lock:
+            for session_id, session in self._sessions.items():
+                if session.last_accessed < cutoff:
+                    expired_ids.append(session_id)
+            
+            for session_id in expired_ids:
+                del self._sessions[session_id]
+        
+        if expired_ids:
+            _logger.info(f"Cleared {len(expired_ids)} expired sessions (max_age={max_age_seconds}s)")
+        
+        return len(expired_ids)
+    
+    def clear_all(self) -> None:
+        """
+        Remove all sessions.
+        
+        Useful for testing or shutdown cleanup.
+        """
+        with self._lock:
+            count = len(self._sessions)
+            self._sessions.clear()
+            _logger.info(f"Cleared all {count} sessions")
+    
+    def count(self) -> int:
+        """
+        Get the number of active sessions.
+        
+        Returns:
+            Number of sessions in the store
+        """
+        with self._lock:
+            return len(self._sessions)

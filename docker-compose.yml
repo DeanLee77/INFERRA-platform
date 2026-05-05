@@ -1,0 +1,97 @@
+services:
+  api:
+    build: .
+    environment:
+      INFERRA_REDIS_SESSION_STORE: "true"
+      INFERRA_ABDUCTION_ENABLED: "true"
+      INFERRA_INDUCTION_PIPELINE: "true"
+      INFERRA_REASONING_ROUTER: "true"
+      INFERRA_OBSERVABILITY_ENABLED: "true"
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      FUSEKI_URL: http://fuseki:3030/inferra
+      FUSEKI_USER: admin
+      FUSEKI_PASSWORD: admin
+      OTEL_SERVICE_NAME: inferra-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      SQLALCHEMY_DATABASE_URI: postgresql://inferra:inferra@postgres:5432/inferra
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      fuseki:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/live', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build: .
+    command: celery -A src.tasks.celery_app.app worker --loglevel=INFO
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      FUSEKI_URL: http://fuseki:3030/inferra
+      FUSEKI_USER: admin
+      FUSEKI_PASSWORD: admin
+      SQLALCHEMY_DATABASE_URI: postgresql://inferra:inferra@postgres:5432/inferra
+    depends_on:
+      redis:
+        condition: service_healthy
+      fuseki:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.96.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  fuseki:
+    image: stain/jena-fuseki
+    environment:
+      ADMIN_PASSWORD: admin
+      FUSEKI_DATASET_1: inferra
+      TDB: "2"
+    volumes:
+      - inferra-fuseki-data:/fuseki
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: inferra
+      POSTGRES_PASSWORD: inferra
+      POSTGRES_DB: inferra
+    volumes:
+      - inferra-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inferra -d inferra"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  inferra-fuseki-data:
+  inferra-postgres-data:
