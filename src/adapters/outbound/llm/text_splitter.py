@@ -1,0 +1,117 @@
+import re
+from typing import List
+
+
+def split_content(content: str, max_size: int = 7500) -> List[str]:
+    content = re.sub(r'\r\n?', '\n', content)
+    content = re.sub(r' {2,}', ' ', content)
+    content = re.sub(r'(?<!^)(#+\s)', r'\n\n\1', content)
+    content = re.sub(r'(Section\s+\d+[A-Z]*\s*—\s*[^\n]*)', r'\n\n\1\n', content)
+    content = re.sub(r'(Part\s+[IVX\d]+—[^\n]*)', r'\n\n\1\n', content)
+    content = re.sub(r'(Division\s+\d+[^\n]*)', r'\n\n\1\n', content)
+    content = re.sub(r'(Schedule\s+\d+[^\n]*)', r'\n\n\1\n', content)
+    content = re.sub(r'(Clause\s+\d+[^\n]*)', r'\n\n\1\n', content)
+    content = re.sub(r'(Endnote\s+\d+[^\n]*)', r'\n\n\1\n', content)
+    content = re.sub(r'(Note:\s*[^\n]*)', r'\n\n\1\n', content)
+    content = re.sub(r'(Example\s*\d*:\s*[^\n]*)', r'\n\n\1\n', content)
+    content = re.sub(r'(?<=\n)---(?=\n)', r'\n---\n', content)
+
+    unit_patterns = [
+        r'^#+\s', r'^Section\s+\d+[A-Z]*\s*—', r'^Part\s+[IVX\d]+—',
+        r'^Division\s+\d+', r'^Schedule\s+\d+', r'^Clause\s+\d+',
+        r'^Endnote\s+\d+', r'^Note:', r'^Example\s*\d*:', r'^---\s*$',
+    ]
+    unit_regex = re.compile('|'.join(unit_patterns), re.MULTILINE | re.IGNORECASE)
+
+    lines = content.split('\n')
+    units = []
+    current_unit = []
+    in_table = False
+
+    for line in lines:
+        line_stripped = line.strip()
+        is_table_row = line_stripped.startswith('|') and line_stripped.endswith('|') and '|' in line_stripped[1:-1]
+        is_table_separator = re.match(r'^\|[-|: ]*(\|[-|: ]*)*\|$', line_stripped) is not None
+
+        if is_table_row or is_table_separator:
+            if not in_table:
+                if current_unit:
+                    unit_text = '\n'.join(current_unit).strip()
+                    if unit_text:
+                        units.append(unit_text)
+                    current_unit = []
+                in_table = True
+            current_unit.append(line)
+        else:
+            if in_table:
+                if len(current_unit) >= 2:
+                    unit_text = '\n'.join(current_unit).strip()
+                    if unit_text:
+                        units.append(unit_text)
+                current_unit = []
+                in_table = False
+            current_unit.append(line)
+
+    if current_unit:
+        unit_text = '\n'.join(current_unit).strip()
+        if unit_text:
+            units.append(unit_text)
+
+    chunks = []
+    current_chunk_units = []
+    current_len = 0
+
+    for unit in units:
+        unit_len = len(unit) + 2
+        if current_len + unit_len > max_size and current_chunk_units:
+            chunks.append('\n\n'.join(current_chunk_units).strip())
+            current_chunk_units = []
+            current_len = 0
+        if unit_len > max_size:
+            internal_chunks = _split_large_unit(unit, max_size)
+            chunks.extend(internal_chunks)
+        else:
+            current_chunk_units.append(unit)
+            current_len += unit_len
+
+    if current_chunk_units:
+        chunks.append('\n\n'.join(current_chunk_units).strip())
+
+    return [c for c in chunks if c.strip()]
+
+
+def _split_large_unit(unit: str, max_size: int) -> List[str]:
+    lines = unit.split('\n')
+    sub_chunks = []
+    current_sub = []
+    current_sub_len = 0
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        line_len = len(line) + 1
+        if current_sub_len + line_len > max_size and current_sub:
+            split_point = None
+            for j in range(len(current_sub) - 1, -1, -1):
+                prev_line = current_sub[j].strip()
+                if not prev_line:
+                    split_point = j + 1
+                    break
+                if prev_line.endswith('.') or prev_line.endswith('!') or prev_line.endswith('?'):
+                    split_point = j + 1
+                    break
+            if split_point is None:
+                split_point = len(current_sub)
+            sub_text = '\n'.join(current_sub[:split_point]).strip()
+            if sub_text:
+                sub_chunks.append(sub_text)
+            current_sub = current_sub[split_point:]
+            current_sub_len = sum(len(l) + 1 for l in current_sub)
+        else:
+            current_sub.append(line)
+            current_sub_len += line_len
+            i += 1
+    if current_sub:
+        final_sub = '\n'.join(current_sub).strip()
+        if final_sub:
+            sub_chunks.append(final_sub)
+    return sub_chunks

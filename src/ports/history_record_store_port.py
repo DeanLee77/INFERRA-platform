@@ -1,0 +1,71 @@
+"""
+History Record Store Port.
+Abstract interface for evaluation history persistence.
+
+Phase 1 ships with InMemoryHistoryRecordStore.
+Phase 2 will add a SQLAlchemy-backed implementation.
+"""
+
+from abc import ABCMeta, abstractmethod
+from typing import Dict, Optional
+
+from src.domain.nodes.record import HistoryRecord
+
+
+class HistoryRecordStorePort(metaclass=ABCMeta):
+    """
+    Abstract interface for storing and retrieving node evaluation history.
+
+    The store maps (rule_name, node_name) -> HistoryRecord, allowing the
+    ML-optimized DFS to look up historical true/false counts and reorder
+    child traversal accordingly.
+    """
+
+    @abstractmethod
+    def get_records(self, rule_name: str) -> Dict[str, HistoryRecord]:
+        """
+        Retrieve all history records for a given rule.
+
+        Args:
+            rule_name: The rule to look up records for.
+
+        Returns:
+            Dict mapping node name -> HistoryRecord. Empty dict if no records.
+        """
+        pass  # pragma: no cover
+
+    @abstractmethod
+    def get_record(self, rule_name: str, node_name: str) -> Optional[HistoryRecord]:
+        """
+        Retrieve a single node's history record.
+
+        Args:
+            rule_name: The rule the node belongs to.
+            node_name: The node name to look up.
+
+        Returns:
+            HistoryRecord if found, None otherwise.
+        """
+        pass  # pragma: no cover
+
+    @abstractmethod
+    def update_record(self, rule_name: str, record: HistoryRecord) -> None:
+        """
+        Store or update a history record for a node.
+
+        Args:
+            rule_name: The rule the node belongs to.
+            record: The HistoryRecord to store.
+        """
+        pass  # pragma: no cover
+
+    @abstractmethod
+    def clear(self, rule_name: Optional[str] = None) -> None:
+        """
+        Clear records. If rule_name is provided, clear only that rule's records.
+        Otherwise clear all records.
+
+        Args:
+            rule_name: Optional rule name to scope the deletion.
+        """
+        pass  # pragma: no cover

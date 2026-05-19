@@ -1,0 +1,18 @@
+{
+  "phase": 3,
+  "captured_at": "2026-05-06T00:00:00Z",
+  "regression_threshold_pct": 10,
+  "scenarios": {
+    "convergence_loop_no_deltas": {
+      "p95_ms": 25,
+      "iterations_median": 2
+    },
+    "prov_o_generation": {
+      "p95_ms": 50,
+      "avg_triple_count": 45
+    },
+    "summary_enrichment": {
+      "p95_ms": 50
+    }
+  }
+}

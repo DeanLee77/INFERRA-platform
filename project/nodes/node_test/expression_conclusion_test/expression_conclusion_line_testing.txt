@@ -1,3 +1,0 @@
-number of drinks the person consumes a week IS CALC ( number of drinks the person consumes an hour * hours of drinks a day * (5-1)) & number of drinks the person consumes a week & ( number of drinks the person consumes an hour * hours of drinks a day * (5-1))
-yearly period of service by 6/04/1994 IS CALC (6/04/1994 - enlistment date) & yearly period of service by 6/04/1994 & (6/04/1994 - enlistment date)
-yearly period of service IS CALC (discharge date - enlistment date) & yearly period of service & (discharge date - enlistment date)

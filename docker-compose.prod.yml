@@ -1,0 +1,171 @@
+# Local production overlay.
+# Usage:
+#   bash secrets/init-secrets.sh
+#   docker compose --env-file secrets/.env.prod.local -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# This is a local production rehearsal target. Commercial deployment should
+# replace these local files with the platform secret manager.
+
+services:
+  api:
+    restart: unless-stopped
+    environment:
+      INFERRA_ENV: production
+      INFERRA_LOG_LEVEL: INFO
+      INFERRA_AUTH_ENABLED: ${INFERRA_AUTH_ENABLED:-true}
+      INFERRA_API_KEY_FILE: /run/secrets/inferra_api_key
+      INFERRA_JWT_SECRET_FILE: /run/secrets/inferra_jwt_secret
+      INFERRA_CSRF_TOKEN_FILE: /run/secrets/inferra_csrf_token
+      INFERRA_ABDUCTION_ADAPTER: ${INFERRA_ABDUCTION_ADAPTER:-z3}
+      INFERRA_LLM_ABDUCTION_MAX_HYPOTHESES: ${INFERRA_LLM_ABDUCTION_MAX_HYPOTHESES:-5}
+      REDIS_HOST: redis
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      REDIS_URL: ""
+      CELERY_BROKER_URL: ""
+      CELERY_RESULT_BACKEND: ""
+      FUSEKI_PASSWORD_FILE: /run/secrets/fuseki_admin_password
+      ZAI_API_KEY_FILE: /run/secrets/zai_api_key
+      SQLALCHEMY_DATABASE_URI: postgresql://${POSTGRES_USER:-inferra}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/inferra
+    secrets:
+      - inferra_api_key
+      - inferra_jwt_secret
+      - inferra_csrf_token
+      - redis_password
+      - fuseki_admin_password
+      - zai_api_key
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 2048M
+        reservations:
+          cpus: "1.0"
+          memory: 512M
+
+  worker:
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      REDIS_URL: ""
+      CELERY_BROKER_URL: ""
+      CELERY_RESULT_BACKEND: ""
+      FUSEKI_PASSWORD_FILE: /run/secrets/fuseki_admin_password
+      ZAI_API_KEY_FILE: /run/secrets/zai_api_key
+      SQLALCHEMY_DATABASE_URI: postgresql://${POSTGRES_USER:-inferra}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/inferra
+    secrets:
+      - redis_password
+      - fuseki_admin_password
+      - zai_api_key
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1024M
+
+  redis:
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        printf 'appendonly yes\nmaxmemory 1gb\nmaxmemory-policy allkeys-lru\nrequirepass %s\n' "$$(cat /run/secrets/redis_password)" > /tmp/redis.conf
+        exec redis-server /tmp/redis.conf
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$(cat /run/secrets/redis_password)\" --no-auth-warning ping"]
+    secrets:
+      - redis_password
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1280M
+
+  postgres:
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ""
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1024M
+
+  fuseki:
+    restart: unless-stopped
+    environment:
+      ADMIN_PASSWORD: ${FUSEKI_PASSWORD:?FUSEKI_PASSWORD required}
+    secrets:
+      - fuseki_admin_password
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1024M
+
+  otel-collector:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  prometheus:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  loki:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  promtail:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  grafana:
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ""
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+    secrets:
+      - grafana_admin_password
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+secrets:
+  redis_password:
+    file: ./secrets/redis_password.txt
+  inferra_api_key:
+    file: ./secrets/inferra_api_key.txt
+  inferra_jwt_secret:
+    file: ./secrets/inferra_jwt_secret.txt
+  inferra_csrf_token:
+    file: ./secrets/inferra_csrf_token.txt
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  fuseki_admin_password:
+    file: ./secrets/fuseki_admin_password.txt
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password.txt
+  zai_api_key:
+    file: ./secrets/zai_api_key.txt

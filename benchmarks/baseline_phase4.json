@@ -1,0 +1,18 @@
+{
+  "phase": 4,
+  "captured_at": "2026-05-06T00:00:00Z",
+  "regression_threshold_pct": 10,
+  "scenarios": {
+    "session_store_round_trip": {
+      "p95_ms": 300,
+      "lost_update_rate_pct": 0
+    },
+    "llm_goal_mapping_fallback": {
+      "p95_ms": 2000,
+      "fallback_rate_pct_max": 10
+    },
+    "health_check_extended": {
+      "p95_ms": 300
+    }
+  }
+}

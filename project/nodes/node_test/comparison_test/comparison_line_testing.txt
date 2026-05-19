@@ -1,4 +1,0 @@
-person passport type = "Australian" -person passport type:=:"Australian"
-person passport issued country = "Australia"-person passport issued country:=:"Australia"
-person age >18 -person age:>:18
-a number of countries the person has travelled so far >= 40 -a number of countries the person has travelled so far:>=:40

@@ -1,0 +1,62 @@
+groups:
+  - name: inferra-production
+    rules:
+      - alert: InferraApiDown
+        expr: up{job="inferra-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: INFERRA API scrape target is down
+          description: Prometheus cannot scrape the INFERRA API for more than one minute.
+
+      - alert: InferraFusekiSyncFailures
+        expr: increase(inferra_fuseki_sync_total{status=~"error|failure|failed"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          component: fuseki
+        annotations:
+          summary: Fuseki sync failures detected
+          description: One or more RDF/Fuseki sync operations failed in the last five minutes.
+
+      - alert: InferraInductionFailures
+        expr: increase(inferra_induction_total{status=~"error|failure|failed"}[10m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          component: induction
+        annotations:
+          summary: Induction pipeline failures detected
+          description: One or more induction operations failed in the last ten minutes.
+
+      - alert: InferraAbductionErrorRateHigh
+        expr: rate(inferra_abduction_total{status="error"}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: abduction
+        annotations:
+          summary: Abduction error rate is high
+          description: Abduction errors are exceeding the operational warning threshold.
+
+      - alert: InferraLlmErrorRatioHigh
+        expr: sum(rate(inferra_llm_call_total{status="error"}[5m])) / clamp_min(sum(rate(inferra_llm_call_total[5m])), 1) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+          component: llm
+        annotations:
+          summary: LLM error ratio is high
+          description: More than ten percent of LLM orchestration calls are failing.
+
+      - alert: InferraSemanticCacheHitRateLow
+        expr: inferra_semantic_cache_hit_rate < 0.20
+        for: 10m
+        labels:
+          severity: info
+          component: ontology
+        annotations:
+          summary: Semantic cache hit rate is low
+          description: The semantic cache hit rate stayed below twenty percent for ten minutes.

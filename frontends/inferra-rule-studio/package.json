@@ -1,0 +1,11 @@
+{
+  "name": "inferra-rule-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/ruleStudioCore.test.js",
+    "check": "node --check src/ruleStudioCore.js && node --check src/app.js",
+    "serve": "python -m http.server 4173"
+  }
+}

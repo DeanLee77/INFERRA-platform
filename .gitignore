@@ -1,0 +1,58 @@
+# IDE
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*,cover
+
+# Logs
+Nadia-logging/
+*.log
+
+# Legacy directories (can be removed manually)
+app/
+
+# Environment
+.env
+.env.local
+
+# Lock files (using pyproject.toml only)
+*.lock
+Pipfile*
+
+# docs
+docs/ 
+AGENTS.md
+
+# legacy frontend
+frontends/

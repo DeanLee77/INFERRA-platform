@@ -1,0 +1,705 @@
+"""
+Rule Set Parser Module.
+Parses rule sets and builds node dependency structures.
+Implements access levels and strong typing where appropriate.
+"""
+
+import re
+import warnings
+from abc import ABC
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+from src.domain.graph.dependency import Dependency
+from src.domain.graph.graph_dependency_builder import GraphDependencyBuilder
+from src.domain.graph.dependency_type import DependencyType
+from src.domain.nodes.expression_conclusion_line import ExprConclusionLine
+from src.domain.nodes.iterate_line import IterateLine
+from src.domain.nodes.line_type import LineType
+from src.domain.nodes.meta_type import MetaType
+from src.domain.nodes.metadata_line import MetadataLine
+from src.domain.nodes.node_set import NodeSet
+from src.domain.nodes import node_id_utils
+from src.domain.fact_values import FactValue, FactValueType
+from src.domain.nodes.node import Node
+from src.domain.nodes.comparison_line import ComparisonLine
+from src.domain.nodes.meta_data import MetaData
+from src.domain.nodes.value_conclusion_line import ValueConclusionLine
+from src.domain.rule_parser.dependency_type_string_matcher import DependencyTypeStringMatcher
+from src.domain.rule_parser.i_scan_feeder import IScanFeeder
+from src.domain.rule_parser.line_matcher_constant import LineMatcherConstant
+from src.domain.tokens import Tokenizer
+from src.infrastructure.logging_config import get_logger
+from src.ports.dependency_graph_port import DependencyGraphPort
+
+# Protected Module-Level Logger (Access Level: Protected)
+_logger = get_logger(__name__)
+
+
+class RuleSetParser(IScanFeeder, ABC):
+    """
+    RuleSetParser parses rule sets and builds node dependency structures.
+    Implements private state with public accessors.
+    
+    Access Levels:
+    - Public: API methods for external use
+    - Protected: Internal helpers (single underscore)
+    - Private: Internal state (double underscore)
+    """
+    
+    # -------------------------------------------------------------------------
+    # Private Access Level: Instance Variables (Name Mangling)
+    # -------------------------------------------------------------------------
+    def __init__(self):
+        """
+        Public Constructor: Initializes RuleSetParser.
+        """
+        # Private instance variables (initialized in __init__ to avoid shared state)
+        self.__node_set: NodeSet = NodeSet()
+        self.__dependencies: List[Dependency] = []
+        self.__match_types: List[str] = LineType.get_all_values()
+        self.__source_name: str = "__unknown_module__"
+        
+        _logger.info("RuleSetParser is initiated")
+
+    # -------------------------------------------------------------------------
+    # Public Access Level: API Methods (Initialization)
+    # -------------------------------------------------------------------------
+    def create(self) -> None:
+        """
+        Public API: Creates/resets the parser.
+
+        Clears the node-ID collision tracker so each scan starts with a fresh
+        parse context. Without this, IDs from a previous parse would force
+        collision suffixes onto identical nodes in the next scan.
+        """
+        node_id_utils.reset_parse_context()
+        self.__match_types = LineType.get_all_values()
+        self.__node_set = NodeSet()
+        self.__dependencies = []
+        self.__node_set.set_node_set_name(self.__source_name)
+
+    def get_node_set(self) -> NodeSet:
+        """
+        Public API: Returns the node set.
+        
+        Returns:
+            NodeSet object
+        """
+        return self.__node_set
+
+    def set_node_set(self, ns: NodeSet) -> None:
+        """
+        Public API: Sets the node set.
+        
+        Args:
+            ns: NodeSet object to set
+        """
+        self.__node_set = ns
+
+    def set_source_name(self, source_name: str) -> None:
+        """
+        Public API: Sets the source module/rule name for deterministic node IDs.
+
+        Args:
+            source_name: Rule/module name
+        """
+        self.__source_name = source_name or "__unknown_module__"
+        self.__node_set.set_node_set_name(self.__source_name)
+
+    def get_source_name(self) -> str:
+        """
+        Public API: Returns the current source module/rule name.
+
+        Returns:
+            Source module name
+        """
+        return self.__source_name
+
+    # -------------------------------------------------------------------------
+    # Public Access Level: API Methods (IScanFeeder Implementation)
+    # -------------------------------------------------------------------------
+    def handle_parent(self, parent_text: str, line_number: int, meta_data: MetaData) -> None:
+        """
+        Public API: Handles parent rule text.
+        
+        Args:
+            parent_text: Parent rule text
+            line_number: Line number in source file
+            meta_data: Metadata for the rule
+        """
+        node_data = None
+        next_node_id = self.__node_set.get_next_node_id()
+        
+        if parent_text in self.__node_set.get_node_dictionary().keys():
+            node_data = self.__node_set.get_node_dictionary()[parent_text]
+        
+        if node_data is None:
+            tokens = Tokenizer.get_tokens(parent_text)
+            line_match_patterns = [
+                LineMatcherConstant.VALUE_CONCLUSION_MATCHER.value,
+                LineMatcherConstant.EXPRESSION_CONCLUSION_MATCHER.value,
+                LineMatcherConstant.WARNING_MATCHER.value
+            ]
+            
+            first_word = tokens.get_tokens_list()[0].split()[0]
+            if first_word in (MetaType.FIXED.value, MetaType.INPUT.value):
+                node_data = MetadataLine(node_text=parent_text, tokens=tokens)
+                if node_data.get_fact_value().get_value() == 'WARNING':
+                    self.handle_warning(parent_text)
+                self._parent_node_data_set(node_data, line_number, meta_data)
+            else:
+                for i in range(len(line_match_patterns)):
+                    pattern = re.compile(line_match_patterns[i])
+                    match = pattern.match(tokens.get_tokens_string())
+                    
+                    if match:
+                        if i == 2:  # warning matcher
+                            self.handle_warning(parent_text)
+                        elif i == 0:  # value conclusion matcher
+                            node_data = ValueConclusionLine(next_node_id, parent_text, tokens, meta_data)
+                            self._handle_value_conclusion_node(node_data, parent_text)
+                        elif i == 1:  # expr conclusion matcher
+                            node_data = ExprConclusionLine(next_node_id, parent_text, tokens, meta_data)
+                            self._handle_expr_conclusion_node(node_data, parent_text)
+                        else:
+                            self.handle_warning(parent_text)
+                        
+                        self._parent_node_data_set(node_data, line_number, meta_data)
+                        break
+
+    def handle_child(self, parent_text: str, child_text: str, 
+                    first_key_words_group: str, line_number: int) -> None:
+        """
+        Public API: Handles child rule text.
+        
+        Args:
+            parent_text: Parent rule text
+            child_text: Child rule text
+            first_key_words_group: First keywords group
+            line_number: Line number in source file
+        """
+        dependency_type = 0
+        
+        if re.match(r"(ITEM)(.*)", child_text):
+            self._handle_item_child(parent_text, child_text, first_key_words_group, line_number)
+        else:
+            dependency_type = self._determine_dependency_type(first_key_words_group)
+            self._handle_statement_child(parent_text, child_text, dependency_type, line_number)
+
+    def handle_list_item(self, parent_text: str, item_text: str, meta_type: MetaType) -> None:
+        """
+        Public API: Handles list item text.
+        
+        Args:
+            parent_text: Parent rule text
+            item_text: List item text
+            meta_type: Metadata type
+        """
+        tokens = Tokenizer.get_tokens(item_text)
+        fv = None
+        
+        if tokens.get_tokens_string() == "Da":
+            fact_value_in_date = datetime.strptime(item_text, '%d/%m/%Y').strftime("%d/%m/%Y")
+            fv = FactValue(fact_value_in_date, FactValueType.DATE)
+        elif tokens.get_tokens_string() == "De":
+            fv = FactValue(float(item_text), FactValueType.DOUBLE)
+        elif tokens.get_tokens_string() == "No":
+            fv = FactValue(int(item_text), FactValueType.INTEGER)
+        elif tokens.get_tokens_string() == "Ha":
+            fv = FactValue(item_text, FactValueType.HASH)
+        elif tokens.get_tokens_string() == "Url":
+            fv = FactValue(item_text, FactValueType.URL)
+        elif tokens.get_tokens_string() == "Id":
+            fv = FactValue(item_text, FactValueType.GUID)
+        elif re.match(r"(F|f)(A|a)(L|l)(S|s)(E|e)", item_text) or \
+             re.match(r"(T|t)(R|r)(U|u)(E|e)", item_text):
+            fv = FactValue(item_text, FactValueType.BOOLEAN)
+        else:
+            fv = FactValue(item_text)
+        
+        string_to_get_fact_value = (parent_text[5: parent_text.index("AS ")]).strip()
+        
+        if meta_type == MetaType.INPUT:
+            fact_value = self.__node_set.get_input_dictionary().get(string_to_get_fact_value)
+            if fact_value is None or fact_value.get_value_type() != FactValueType.LIST:
+                fact_value = FactValue(list(), FactValueType.LIST)
+                self.__node_set.get_input_dictionary()[string_to_get_fact_value] = fact_value
+            fact_value.get_value().append(fv)
+        elif meta_type == MetaType.FIXED:
+            fact_value = self.__node_set.get_fact_dictionary().get(string_to_get_fact_value)
+            if fact_value is None or fact_value.get_value_type() != FactValueType.LIST:
+                fact_value = FactValue(list(), FactValueType.LIST)
+                self.__node_set.get_fact_dictionary()[string_to_get_fact_value] = fact_value
+            fact_value.get_value().append(fv)
+
+    def handle_warning(self, parent_text: str) -> str:
+        """
+        Public API: Handles warning messages.
+        
+        Args:
+            parent_text: Rule text that caused warning
+            
+        Returns:
+            Warning message string
+        """
+        warning_text = f"{parent_text}: rule format is not matched. Please check the format again"
+        _logger.warning(warning_text)
+        return warning_text
+
+    def create_dependency_graph(self) -> DependencyGraphPort:
+        dependency_list = list(self.__dependencies)
+        self.__node_set.set_node_dictionary(self._handling_virtual_node(dependency_list))
+
+        graph_builder = GraphDependencyBuilder()
+
+        for node in self.__node_set.get_node_dictionary().values():
+            node_name = node.get_node_name()
+            if not node_name:
+                continue
+            metadata = {"module": self.__source_name}
+            stable_id = node.get_stable_node_id()
+            if isinstance(stable_id, str) and stable_id:
+                metadata["stable_id"] = stable_id
+            node_id = getattr(node, "_node_id", None)
+            if isinstance(node_id, int):
+                graph_builder.register_node(node_id, node_name, metadata)
+            else:
+                graph_builder.graph.register_node(node_name, metadata)
+
+        for dp in dependency_list:
+            graph_builder.add_dependencies_from_nodes(
+                dp.get_parent_node(),
+                dp.get_child_node(),
+                dp.get_dependency_type(),
+            )
+
+        self.__node_set.set_graph(graph_builder.graph)
+        return graph_builder.graph
+
+    def create_dependency_matrix(self) -> Any:
+        warnings.warn(
+            "RuleSetParser.create_dependency_matrix() is deprecated; use "
+            "create_dependency_graph() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        from src.domain.graph.graph_to_matrix_adapter import GraphToMatrixAdapter
+
+        return GraphToMatrixAdapter(self.create_dependency_graph())
+
+    # -------------------------------------------------------------------------
+    # Protected Access Level: Internal Helpers (Single Underscore)
+    # -------------------------------------------------------------------------
+    def _add_dependency(self, parent: Node, child: Node, dependency_type: int) -> None:
+        """
+        Protected Helper: Record a parser dependency without the legacy builder.
+
+        Graph construction happens in create_dependency_graph(); the returned
+        dependency matrix is now a compatibility view only.
+        """
+        self.__dependencies.append(Dependency(parent, child, dependency_type))
+
+    def _parent_node_data_set(self, node_data: Node, line_number: int, 
+                             meta_data: Optional[MetaData] = None) -> None:
+        """
+        Protected Helper: Sets parent node data.
+        
+        Args:
+            node_data: Node data to set
+            line_number: Line number
+            meta_data: Optional metadata
+        """
+        node_data.set_node_line(line_number)
+        if meta_data is not None:
+            node_data.set_meta_data(meta_data)
+        
+        if node_data.get_line_type() == LineType.META:
+            if node_data.get_meta_type() == MetaType.INPUT:
+                self.__node_set.get_input_dictionary()[
+                    node_data.get_variable_name()] = node_data.get_fact_value()
+            elif node_data.get_meta_type() == MetaType.FIXED:
+                self.__node_set.get_fact_dictionary()[
+                    node_data.get_variable_name()] = node_data.get_fact_value()
+        else:
+            node_data.refresh_stable_node_id(self.__source_name)
+            self._apply_debug_label(node_data)
+            self.__node_set.register_node(node_data)
+
+    def _apply_debug_label(self, node_data: Node) -> None:
+        """
+        Protected Helper: Tags a node with a human-readable debug label.
+
+        Args:
+            node_data: Node to label
+        """
+        identifier = node_data.get_variable_name() or node_data.get_node_name() or "__anonymous__"
+        line_number = node_data.get_node_line() if node_data.get_node_line() is not None else 0
+        node_data.set_debug_label(f"{self.__source_name}:{line_number}:{identifier}")
+
+    def _handle_value_conclusion_node(self, node_data: ValueConclusionLine, parent_text: str) -> None:
+        """
+        Protected Helper: Handles value conclusion node.
+        
+        Args:
+            node_data: ValueConclusionLine node
+            parent_text: Parent text
+        """
+        variable_name = node_data.get_variable_name()
+        temp_node = node_data
+        
+        possible_parent_node_key_list = list(filter(
+            lambda key: re.match(r"^\s*" + re.escape(variable_name) + r"\s*$", key)
+            or re.search(r"[<>=]\s*" + re.escape(variable_name) + r"\s*$", key)
+            or re.match(r"^\s*" + re.escape(variable_name) + r"\s*[<>=]+\s*.+$", key)
+            or re.match(r"\b" + re.escape(variable_name) + r"\b(.*(IS IN LIST).*)+", key),
+            self.__node_set.get_node_dictionary().keys()
+        ))
+        
+        if len(possible_parent_node_key_list) > 0:
+            for item in possible_parent_node_key_list:
+                self._add_dependency(
+                    self.__node_set.get_node_dictionary()[item],
+                    temp_node,
+                    DependencyType.get_or()
+                )
+        
+        if node_data.get_fact_value().get_value() == 'WARNING':
+            self.handle_warning(parent_text)
+
+    def _handle_expr_conclusion_node(self, node_data: ExprConclusionLine, parent_text: str) -> None:
+        """
+        Protected Helper: Handles expression conclusion node.
+        
+        Args:
+            node_data: ExprConclusionLine node
+            parent_text: Parent text
+        """
+        variable_name = node_data.get_variable_name()
+        temp_node = node_data
+        
+        possible_parent_node_key_list = list(filter(
+            lambda key: re.match(r"(.+)(\s[<>=]+\s?)\b" + variable_name + r"\b", key)
+            or re.match(r"\b" + variable_name + r"\b(\s*[<>=]+.*)+", key)
+            or re.match(r"^\s*" + re.escape(variable_name) + r"\s*$", key)
+            or re.match(r"\b" + variable_name + r"\b(.*(IS IN LIST).*)+", key),
+            self.__node_set.get_node_dictionary().keys()
+        ))
+        
+        if len(possible_parent_node_key_list) > 0:
+            for item in possible_parent_node_key_list:
+                self._add_dependency(
+                    self.__node_set.get_node_dictionary()[item],
+                    temp_node,
+                    DependencyType.get_or()
+                )
+        
+        if node_data.get_fact_value().get_value() == 'WARNING':
+            self.handle_warning(parent_text)
+
+    def _handle_item_child(self, parent_text: str, child_text: str, 
+                          first_key_words_group: str, line_number: int) -> None:
+        """
+        Protected Helper: Handles item child.
+        
+        Args:
+            parent_text: Parent text
+            child_text: Child text
+            first_key_words_group: First keywords group
+            line_number: Line number
+        """
+        if not re.match(r"(.*)(AS LIST)", parent_text):
+            self.handle_warning(child_text)
+            return
+        
+        child_text = child_text.replace("ITEM", "", 1).strip()
+        meta_type = None
+        
+        if re.match(r"^(INPUT)(.*)", parent_text):
+            meta_type = MetaType.INPUT
+        elif re.match(r"^(FIXED)(.*)", parent_text):
+            meta_type = MetaType.FIXED
+        
+        self.handle_list_item(parent_text, child_text, meta_type)
+
+    def _determine_dependency_type(self, first_key_words_group: str) -> int:
+        """
+        Protected Helper: Determines dependency type from keywords.
+        
+        Args:
+            first_key_words_group: First keywords group
+            
+        Returns:
+            Dependency type integer
+        """
+        dependency_type = 0
+        
+        if re.match(r"^(AND\s?)(.*)", first_key_words_group):
+            dependency_type = self._handle_not_known_man_opt_pos(first_key_words_group,
+                                                                DependencyType.get_and())
+        elif re.match(r"^(OR\s?)(.*)", first_key_words_group):
+            dependency_type = self._handle_not_known_man_opt_pos(first_key_words_group,
+                                                                DependencyType.get_or())
+        elif re.match(r"^(WANTS)", first_key_words_group):
+            dependency_type = self._handle_not_known_man_opt_pos(first_key_words_group,
+                                                                DependencyType.get_or())
+        elif re.match(r"^(NEEDS)", first_key_words_group):
+            dependency_type = DependencyType.get_mandatory() | DependencyType.get_and()
+        
+        return dependency_type
+
+    def _handle_statement_child(self, parent_text: str, child_text: str, 
+                               dependency_type: int, line_number: int) -> None:
+        """
+        Protected Helper: Handles statement child.
+        
+        Args:
+            parent_text: Parent text
+            child_text: Child text
+            dependency_type: Dependency type
+            line_number: Line number
+        """
+        node_data = None
+        next_node_id = self.__node_set.get_next_node_id()
+        
+        if child_text in self.__node_set.get_node_dictionary().keys():
+            node_data = self.__node_set.get_node_dictionary()[child_text]
+        
+        tokens = Tokenizer.get_tokens(child_text)
+        
+        if node_data is None:
+            match_patterns = [
+                (LineMatcherConstant.COMPARISON_MATCHER.value, "comparison"),
+                (LineMatcherConstant.ITERATE_MATCHER.value, "iterate"),
+                (LineMatcherConstant.EXPRESSION_CONCLUSION_MATCHER.value, "expression"),
+                (LineMatcherConstant.VALUE_CONCLUSION_MATCHER.value, "value"),
+                (LineMatcherConstant.WARNING_MATCHER.value, "warning"),
+            ]
+            
+            for pattern, line_kind in match_patterns:
+                match = re.match(pattern, tokens.get_tokens_string())
+                
+                if match:
+                    if line_kind == "warning":
+                        self.handle_warning(child_text)
+                    elif line_kind == "value":
+                        node_data = ValueConclusionLine(next_node_id, child_text, tokens)
+                        self._handle_child_value_conclusion(node_data)
+                    elif line_kind == "comparison":
+                        node_data = ComparisonLine(next_node_id, child_text, tokens)
+                        self._handle_child_comparison(node_data)
+                    elif line_kind == "iterate":
+                        node_data = IterateLine(next_node_id, child_text, tokens)
+                    elif line_kind == "expression":
+                        node_data = ExprConclusionLine(next_node_id, child_text, tokens)
+                    else:
+                        self.handle_warning(child_text)
+                    
+                    if node_data:
+                        node_data.set_node_line(line_number)
+                        node_data.refresh_stable_node_id(self.__source_name)
+                        self._apply_debug_label(node_data)
+                        self.__node_set.register_node(node_data)
+                    break
+        
+        if node_data:
+            parent_node = self.__node_set.get_node_dictionary().get(parent_text)
+            if parent_node is None:
+                self.handle_warning(parent_text)
+                return
+            self._add_dependency(
+                parent_node,
+                node_data,
+                dependency_type
+            )
+
+    def _handle_child_value_conclusion(self, node_data: ValueConclusionLine) -> None:
+        """
+        Protected Helper: Handles child value conclusion node.
+        
+        Args:
+            node_data: ValueConclusionLine node
+        """
+        temp_node = node_data
+        possible_child_node_key_list = list(filter(
+            lambda key: re.match(r"^(" + temp_node.get_variable_name() + r")(\\s+(IS(?!(\\s+IN\\s+LIST))).*)*$", key)
+            or re.match(r"^\b" + temp_node.get_variable_name() + r"\b(\s+(IS(?!(\s+CALC))).*)*$", key),
+            self.__node_set.get_node_dictionary().keys()
+        ))
+        
+        if len(possible_child_node_key_list) > 0:
+            for item in possible_child_node_key_list:
+                self._add_dependency(
+                    temp_node,
+                    self.__node_set.get_node_dictionary()[item],
+                    DependencyType.get_or()
+                )
+        
+        if node_data.get_fact_value().get_value() == "WARNING":
+            self.handle_warning(node_data.get_node_name())
+
+    def _handle_child_comparison(self, node_data: ComparisonLine) -> None:
+        """
+        Protected Helper: Handles child comparison node.
+        
+        Args:
+            node_data: ComparisonLine node
+        """
+        rhs_type = node_data.get_rhs().get_value_type()
+        rhs_string = node_data.get_rhs().get_value()
+        lhs_string = node_data.get_lhs()
+        temp_node = node_data
+        
+        if rhs_type == FactValueType.STRING:
+            possible_child_node_key_list = list(filter(
+                lambda key: re.match(r"^\b" + lhs_string + r"\b(\s+(IS(?!(\s+IN\s+LIST))).*)*$", key)
+                or re.match(r"^\b" + rhs_string + r"\b(\s+(IS(?!(\s+IN\s+LIST))).*)*$", key)
+                or re.match(r"^\b" + lhs_string + r"\b(\s+(IS(?!(\s+CALC))).*)*$", key)
+                or re.match(r"^\b" + rhs_string + r"\b(\s+(IS(?!(\s+CALC))).*)*$", key),
+                self.__node_set.get_node_dictionary().keys()
+            ))
+        else:
+            possible_child_node_key_list = list(filter(
+                lambda key: re.match(r"^\b" + lhs_string + r"\b(\s+(IS(?!(\s+IN\s+LIST))).*)*$", key)
+                or re.match(r"^\b" + lhs_string + r"\b(\s+(IS(?!(\s+CALC))).*)*$", key),
+                self.__node_set.get_node_dictionary().keys()
+            ))
+        
+        if len(possible_child_node_key_list) > 0:
+            for item in possible_child_node_key_list:
+                self._add_dependency(
+                    temp_node,
+                    self.__node_set.get_node_dictionary()[item],
+                    DependencyType.get_or()
+                )
+        
+        if node_data.get_fact_value().get_value_type() == FactValueType.WARNING:
+            self.handle_warning(node_data.get_node_name())
+
+    def _handling_virtual_node(self, dependency_list: List[Dependency]) -> Dict[str, Node]:
+        """
+        Protected Helper: Creates virtual nodes for AND/OR combinations.
+        
+        Args:
+            dependency_list: List of dependencies
+            
+        Returns:
+            Dictionary of virtual nodes
+        """
+        virtual_node_dictionary = {}
+        
+        for each_node in list(self.__node_set.get_node_dictionary().values()):
+            virtual_node_dictionary[each_node.get_node_name()] = each_node
+            temp_dependency_list = list(filter(
+                lambda dp: each_node.get_node_name() == dp.get_parent_node().get_node_name(),
+                dependency_list
+            ))
+            
+            and_dependency = 0
+            mandatory_and_dependency = 0
+            or_dependency = 0
+            
+            if len(temp_dependency_list) != 0:
+                for dp in temp_dependency_list:
+                    if dp.get_dependency_type() & DependencyType.get_and() == DependencyType.get_and():
+                        and_dependency = and_dependency + 1
+                        if dp.get_dependency_type() == (DependencyType.get_mandatory() | DependencyType.get_and()):
+                            mandatory_and_dependency = mandatory_and_dependency + 1
+                    elif dp.get_dependency_type() & DependencyType.get_or() == DependencyType.get_or():
+                        or_dependency = or_dependency + 1
+                
+                has_and_or = and_dependency > 0 and or_dependency > 0
+                
+                if has_and_or:
+                    parent_node_of_virtual_node_name = each_node.get_node_name()
+                    node_line_type = each_node.get_line_type()
+                    next_node_id = self.get_node_set().get_next_node_id()
+                    virtual_node_name_text = "VirtualNode-" + parent_node_of_virtual_node_name
+                    
+                    if node_line_type == LineType.EXPR_CONCLUSION:
+                        virtual_node = ExprConclusionLine(id=next_node_id, parent_text=virtual_node_name_text,
+                                                         tokens=Tokenizer.get_tokens(virtual_node_name_text))
+                    else:
+                        virtual_node = ValueConclusionLine(id=next_node_id, node_text=virtual_node_name_text,
+                                                          tokens=Tokenizer.get_tokens(virtual_node_name_text))
+                    
+                    virtual_node.set_node_line(each_node.get_node_line() or 0)
+                    virtual_node.refresh_stable_node_id(self.__source_name)
+                    self._apply_debug_label(virtual_node)
+                    self.__node_set.register_node(virtual_node)
+                    virtual_node_dictionary[virtual_node_name_text] = virtual_node
+                    
+                    if mandatory_and_dependency > 0:
+                        dependency_list.append(
+                            Dependency(each_node, virtual_node,
+                                      (DependencyType.get_mandatory() | DependencyType.get_or()))
+                        )
+                    else:
+                        dependency_list.append(Dependency(each_node, virtual_node, DependencyType.get_or()))
+                    
+                    for dp in list(filter(
+                        lambda each_dp: each_dp.get_dependency_type() == DependencyType.get_and() or
+                                       each_dp.get_dependency_type() == (DependencyType.get_mandatory() | DependencyType.get_and()),
+                        temp_dependency_list
+                    )):
+                        dp.set_parent_node(virtual_node)
+        
+        return virtual_node_dictionary
+
+    def _get_dependency_matrix_size(self, dependency_list: List[Dependency]) -> int:
+        """
+        Protected Helper: Calculates dependency matrix size from runtime node IDs.
+
+        Args:
+            dependency_list: List of dependencies
+
+        Returns:
+            Matrix dimension size
+        """
+        runtime_ids = [
+            node_id
+            for node_id in (
+                getattr(node, "_node_id", None)
+                for node in self.__node_set.get_node_dictionary().values()
+            )
+            if isinstance(node_id, int)
+        ]
+
+        for dependency in dependency_list:
+            parent_node = dependency.get_parent_node()
+            child_node = dependency.get_child_node()
+            parent_id = getattr(parent_node, "_node_id", None)
+            child_id = getattr(child_node, "_node_id", None)
+
+            if isinstance(parent_id, int):
+                runtime_ids.append(parent_id)
+
+            if isinstance(child_id, int):
+                runtime_ids.append(child_id)
+
+        if len(runtime_ids) == 0:
+            return 0
+
+        return max(runtime_ids) + 1
+
+    def _handle_not_known_man_opt_pos(self, first_token_string: str, dependency_type: int) -> int:
+        """
+        Protected Helper: Handles NOT, KNOWN, MANDATORY, OPTIONAL, POSSIBLE modifiers.
+        
+        Args:
+            first_token_string: First token string
+            dependency_type: Base dependency type
+            
+        Returns:
+            Combined dependency type
+        """
+        DependencyType.populating_dependency()
+        
+        if dependency_type != -1:
+            dependency_type_matcher = DependencyTypeStringMatcher.get_all_line_matchers()
+            for index in range(len(dependency_type_matcher)):
+                regex = re.compile(dependency_type_matcher[index])
+                match = regex.match(first_token_string)
+                if match:
+                    dependency_type = dependency_type | DependencyType.get_dependency_array()[index]
+        
+        return dependency_type
