@@ -12,18 +12,15 @@ correlation_id) are propagated via structlog context vars.
 
 import re
 import uuid
-from typing import Callable
 
 import structlog
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import Response
+from starlette.datastructures import Headers, MutableHeaders
 
 _CORRELATION_ID_MAX_LENGTH = 128
 _CORRELATION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-_\.]+$")
 
 
-class CorrelationIdMiddleware(BaseHTTPMiddleware):
+class CorrelationIdMiddleware:
     """
     Injects a correlation_id into every request for end-to-end tracing.
 
@@ -35,8 +32,16 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
     - Returns X-Correlation-ID in the response header
     """
 
-    async def dispatch(self, request: Request, call_next: Callable[..., Response]) -> Response:
-        raw_id = request.headers.get("X-Correlation-ID", "")
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        raw_id = headers.get("X-Correlation-ID", "")
         if raw_id and (
             len(raw_id) > _CORRELATION_ID_MAX_LENGTH
             or not _CORRELATION_ID_PATTERN.match(raw_id)
@@ -50,9 +55,13 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(correlation_id=correlation_id)
 
+        async def send_with_correlation_id(message) -> None:
+            if message["type"] == "http.response.start":
+                response_headers = MutableHeaders(scope=message)
+                response_headers["X-Correlation-ID"] = correlation_id
+            await send(message)
+
         try:
-            response = await call_next(request)
-            response.headers["X-Correlation-ID"] = correlation_id
-            return response
+            await self.app(scope, receive, send_with_correlation_id)
         finally:
             structlog.contextvars.clear_contextvars()

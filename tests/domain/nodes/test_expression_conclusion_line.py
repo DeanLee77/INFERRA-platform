@@ -162,7 +162,7 @@ class TestExprConclusionLineSelfEvaluate:
 
     def test_self_evaluate_fallback_path(self):
         ecl = _make_ecl()
-        ecl.set_equation(FactValue("x ++ y", FactValueType.STRING))
+        ecl.set_equation(FactValue("x + ( y", FactValueType.STRING))
         ecl._variable_name = "result"
         ecl._node_name = "test_node"
         working_memory = {

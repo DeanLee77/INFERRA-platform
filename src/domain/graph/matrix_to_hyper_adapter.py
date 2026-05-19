@@ -8,15 +8,16 @@ and a content-hash memoization guard to skip redundant rebuilds.
 
 import hashlib
 import json
+import warnings
 from typing import Dict, Optional, Tuple
 
 from src.domain.graph.dependency_group import DependencyGroup
 from src.domain.graph.dependency_type import DependencyType
 from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
-from src.domain.nodes.dependency_matrix import DependencyMatrix
-from src.shared.loggers import Logger
+from src.domain.graph.dependency_matrix import DependencyMatrix
+from src.infrastructure.logging_config import get_logger
 
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class MatrixToHyperGraphAdapter(HyperAdjacencyGraph):
@@ -44,6 +45,18 @@ class MatrixToHyperGraphAdapter(HyperAdjacencyGraph):
         self._id_map = node_dict
         self._matrix_hash: Optional[str] = None
         self._rebuild()
+
+    @classmethod
+    def from_legacy_list(
+        cls,
+        legacy_matrix: list,
+        node_dict: Dict[int, str],
+    ) -> "MatrixToHyperGraphAdapter":
+        """Build an adapter from a legacy 2D dependency matrix list."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            matrix = DependencyMatrix(legacy_matrix)
+        return cls(matrix, node_dict)
 
     # -------------------------------------------------------------------------
     # Public API: Rebuild
@@ -114,3 +127,10 @@ class MatrixToHyperGraphAdapter(HyperAdjacencyGraph):
         except TypeError:
             matrix_json = "__non_serializable_matrix__"
         return hashlib.md5(matrix_json.encode()).hexdigest()
+
+
+def legacy_matrix_from_list(legacy_matrix: list) -> DependencyMatrix:
+    """Build a legacy DependencyMatrix inside the sanctioned matrix adapter."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        return DependencyMatrix(legacy_matrix)

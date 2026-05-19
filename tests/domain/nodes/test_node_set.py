@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.domain.fact_values import FactValue
-from src.domain.nodes.dependency_matrix import DependencyMatrix
+from src.domain.graph.dependency_matrix import DependencyMatrix
 from src.domain.nodes.line_type import LineType
 from src.domain.nodes.node import Node
 from src.domain.nodes.node_set import NodeSet
@@ -180,18 +180,19 @@ class TestNodeSetTransferFactDictionary:
 class TestNodeSetHasChildren:
     def test_has_children_true(self):
         ns = NodeSet()
-        dep_matrix = MagicMock(spec=DependencyMatrix)
-        dep_matrix.get_to_child_dependency_list.return_value = [1, 2]
-        ns._NodeSet__dependency_matrix = dep_matrix
+        ns.set_node_id_dictionary({0: "parent", 1: "a", 2: "b"})
+        ns.get_graph().register_node("parent", {"runtime_id": 0})
+        ns.get_graph().register_node("a", {"runtime_id": 1})
+        ns.get_graph().register_node("b", {"runtime_id": 2})
+        ns.get_graph().add_dependency_group("parent", 1, {"a", "b"})
         has, children = ns._has_children(0)
         assert has is True
         assert children == [1, 2]
 
     def test_has_children_false(self):
         ns = NodeSet()
-        dep_matrix = MagicMock(spec=DependencyMatrix)
-        dep_matrix.get_to_child_dependency_list.return_value = []
-        ns._NodeSet__dependency_matrix = dep_matrix
+        ns.set_node_id_dictionary({0: "parent"})
+        ns.get_graph().register_node("parent", {"runtime_id": 0})
         has, children = ns._has_children(0)
         assert has is False
         assert children == []
@@ -200,24 +201,36 @@ class TestNodeSetHasChildren:
 class TestNodeSetHasParents:
     def test_has_parents_true(self):
         ns = NodeSet()
-        dep_matrix = MagicMock(spec=DependencyMatrix)
-        dep_matrix.get_from_parent_dependency_list.return_value = [0]
-        ns._NodeSet__dependency_matrix = dep_matrix
+        ns.set_node_id_dictionary({0: "parent", 1: "child"})
+        ns.get_graph().register_node("parent", {"runtime_id": 0})
+        ns.get_graph().register_node("child", {"runtime_id": 1})
+        ns.get_graph().add_dependency_group("parent", 1, {"child"})
         has, parents = ns._has_parents(1)
         assert has is True
         assert parents == [0]
 
     def test_has_parents_false(self):
         ns = NodeSet()
-        dep_matrix = MagicMock(spec=DependencyMatrix)
-        dep_matrix.get_from_parent_dependency_list.return_value = []
-        ns._NodeSet__dependency_matrix = dep_matrix
+        ns.set_node_id_dictionary({1: "child"})
+        ns.get_graph().register_node("child", {"runtime_id": 1})
         has, parents = ns._has_parents(1)
         assert has is False
         assert parents == []
 
 
 class TestNodeSetSetDependencyMatrix:
+    def test_get_dependency_matrix_emits_deprecation_warning(self):
+        ns = NodeSet()
+
+        with pytest.warns(DeprecationWarning, match="get_dependency_matrix"):
+            ns.get_dependency_matrix()
+
+    def test_set_dependency_matrix_emits_deprecation_warning(self):
+        ns = NodeSet()
+
+        with pytest.warns(DeprecationWarning, match="set_dependency_matrix"):
+            ns.set_dependency_matrix([[-1]])
+
     def test_set_from_list(self):
         ns = NodeSet()
         ns.set_dependency_matrix([[-1, 1], [0, -1]])
@@ -228,7 +241,7 @@ class TestNodeSetSetDependencyMatrix:
         ns = NodeSet()
         dm = DependencyMatrix([[-1]])
         ns.set_dependency_matrix(dm)
-        assert ns.get_dependency_matrix() is dm
+        assert ns.get_dependency_matrix().get_dependency_two_dimension_list() == [[-1]]
 
 
 class TestNodeSetRepr:

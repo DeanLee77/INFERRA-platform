@@ -2,6 +2,7 @@
 Tests for the RuleService.
 """
 
+import json
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -10,6 +11,8 @@ from src.domain.exceptions import RuleValidationError
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
 from src.domain.models import RuleEntity, RuleFileEntity
+from src.domain.models.rule_file_payload import PAYLOAD_TYPE
+from src.domain.nodes.node_set import NodeSet
 from src.services.rule_validation_service import RuleValidationService
 
 
@@ -113,12 +116,18 @@ class TestRuleService:
 
         result = rule_service.save_converted_rule(
             "Converted Rule", "Category", "Description",
-            "INPUT age AS NUMBER\nage > 18\n",
+            GRAPH_RULE_TEXT,
         )
 
         assert result == mock_rule
         mock_rule_repository.create_rule.assert_called_once()
         mock_rule_repository.create_rule_file.assert_called_once()
+        _, file_payload = mock_rule_repository.create_rule_file.call_args.args
+        stored = RuleFileEntity(files=bytes(file_payload))
+        assert stored.decode_files() == GRAPH_RULE_TEXT
+        graph_payload = json.loads(stored.decode_graph_json())
+        assert graph_payload["schema_version"] == 1
+        assert graph_payload["nodes"]
     
     def test_create_rule_file_success(self, rule_service, mock_rule_repository):
         """Test creating a rule file."""
@@ -139,6 +148,12 @@ class TestRuleService:
         
         with pytest.raises(LookupError, match="was not found"):
             rule_service.create_rule_file("NonExistent", "content")
+
+    def test_get_rule_tree_data_returns_text_after_parser_validation(self, rule_service, mock_rule_repository):
+        mock_file = RuleFileEntity(file_id=1, rule_id=1, files=GRAPH_RULE_TEXT.encode("utf-8"))
+        mock_rule_repository.find_rule_text_by_rule_name.return_value = mock_file
+
+        assert rule_service.get_rule_tree_data("Test Rule") == GRAPH_RULE_TEXT
     
     def test_get_history_for_ml_inference_success(self, rule_service, mock_rule_repository):
         """Test getting history for ML inference."""
@@ -184,6 +199,34 @@ class TestRuleService:
             mock_scanner.return_value.scan_rule_set.assert_called_once()
             mock_scanner.return_value.establish_node_set.assert_called_once()
 
+    def test_build_rule_set_parser_merges_imports_before_parsing(self, rule_service, mock_rule_repository):
+        """Imported declarations are visible to the runtime parser."""
+        root_file = RuleFileEntity(file_id=1, rule_id=1, files=IMPORT_ROOT_RULE_TEXT.encode("utf-8"))
+        imported_file = RuleFileEntity(file_id=2, rule_id=2, files=IMPORT_COMMON_RULE_TEXT.encode("utf-8"))
+
+        def find_rule_text(name):
+            return imported_file if name == "common_rule" else root_file
+
+        mock_rule_repository.find_rule_text_by_rule_name.side_effect = find_rule_text
+
+        with patch("src.services.rule_service.RuleSetReader") as mock_reader, \
+             patch("src.services.rule_service.RuleSetParser") as mock_parser, \
+             patch("src.services.rule_service.RuleSetScanner") as mock_scanner:
+
+            mock_parser_instance = MagicMock()
+            mock_parser_instance.get_node_set.return_value.get_sorted_node_list.return_value = [MagicMock()]
+            mock_parser.return_value = mock_parser_instance
+
+            result = rule_service.build_rule_set_parser("root_rule")
+
+            assert result == mock_parser_instance
+            merged_text = mock_reader.return_value.set_file_with_text.call_args.args[0]
+            assert "INPUT imported age AS NUMBER" in merged_text
+            assert "eligible for imported benefit" in merged_text
+            assert "IMPORT: common_rule" not in merged_text
+            mock_scanner.return_value.scan_rule_set.assert_called_once()
+            mock_scanner.return_value.establish_node_set.assert_called_once()
+
     def test_save_session_history_persists_history_through_repository(self, rule_service, mock_rule_repository):
         """Test saving session history via the service layer."""
         mock_rule = RuleEntity(rule_id=7, name="Test Rule", category="Test", description="Desc")
@@ -218,6 +261,20 @@ class TestRuleService:
 # =============================================================================
 
 VALID_RULE_TEXT = "INPUT age AS NUMBER\nage > 18\n"
+GRAPH_RULE_TEXT = (
+    "INPUT claimant has service AS BOOLEAN\n"
+    "eligible for benefit\n"
+    "    AND claimant has service\n"
+)
+IMPORT_ROOT_RULE_TEXT = (
+    "IMPORT: common_rule\n"
+    "eligible for imported benefit\n"
+    "    AND imported age >= minimum imported age\n"
+)
+IMPORT_COMMON_RULE_TEXT = (
+    "INPUT imported age AS NUMBER\n"
+    "FIXED minimum imported age IS 18\n"
+)
 INVALID_RULE_TEXT_DUPLICATE = "INPUT x AS NUMBER\nINPUT x AS NUMBER\n"
 INVALID_RULE_TEXT_CYCLE = "INPUT a AS NUMBER\nINPUT b AS NUMBER\na IS CALC b + 1\nb IS CALC a + 1\n"
 INVALID_RULE_TEXT_EMPTY = ""
@@ -239,6 +296,49 @@ class TestValidationGateSaveConvertedRule:
         assert result == mock_rule
         mock_rule_repository.create_rule.assert_called_once()
         mock_rule_repository.create_rule_file.assert_called_once()
+
+    def test_imported_declarations_satisfy_save_validation(self, rule_service, mock_rule_repository):
+        """A root rule can persist with declarations supplied by IMPORT modules."""
+        mock_rule = RuleEntity(rule_id=1, name="root_rule", category="cat", description="desc")
+        imported_file = RuleFileEntity(file_id=2, rule_id=2, files=IMPORT_COMMON_RULE_TEXT.encode("utf-8"))
+        mock_rule_repository.create_rule.return_value = 1
+        mock_rule_repository.find_rule_by_rule_name.return_value = mock_rule
+        mock_rule_repository.find_rule_text_by_rule_name.return_value = imported_file
+
+        result = rule_service.save_converted_rule(
+            "root_rule", "cat", "desc", IMPORT_ROOT_RULE_TEXT,
+        )
+
+        assert result == mock_rule
+        mock_rule_repository.create_rule.assert_called_once()
+        mock_rule_repository.create_rule_file.assert_called_once()
+        _, file_payload = mock_rule_repository.create_rule_file.call_args.args
+        stored = RuleFileEntity(files=bytes(file_payload))
+        assert stored.decode_files() == IMPORT_ROOT_RULE_TEXT
+
+        graph_payload = json.loads(stored.decode_graph_json())
+        node_names = {node["name"] for node in graph_payload["nodes"]}
+        assert "imported age >= minimum imported age" in node_names
+        assert "eligible for imported benefit" in node_names
+        assert "IMPORT: common_rule" not in node_names
+
+    def test_missing_import_blocks_save_with_structured_error(self, rule_service, mock_rule_repository):
+        """Missing imports fail before repository writes and surface a precise code."""
+        mock_rule_repository.find_rule_text_by_rule_name.return_value = None
+
+        with pytest.raises(RuleValidationError) as exc_info:
+            rule_service.save_converted_rule(
+                "root_rule",
+                "cat",
+                "desc",
+                "IMPORT: missing_rule\n"
+                "eligible for imported benefit\n"
+                "    AND imported age >= minimum imported age\n",
+            )
+
+        assert any(error.code == "UNRESOLVED_IMPORT" for error in exc_info.value.errors)
+        mock_rule_repository.create_rule.assert_not_called()
+        mock_rule_repository.create_rule_file.assert_not_called()
 
     def test_duplicate_declaration_blocked(self, rule_service, mock_rule_repository):
         """Rule with duplicate INPUT declarations is blocked before persistence."""
@@ -287,6 +387,40 @@ class TestValidationGateSaveConvertedRule:
         assert result == mock_rule
         mock_rule_repository.create_rule.assert_called_once()
 
+    def test_bypass_validation_still_keeps_decoded_rule_text_stable(self, rule_service, mock_rule_repository):
+        mock_rule = RuleEntity(rule_id=1, name="legacy", category="cat", description="desc")
+        mock_rule_repository.create_rule.return_value = 1
+        mock_rule_repository.find_rule_by_rule_name.return_value = mock_rule
+
+        rule_service.save_converted_rule(
+            "legacy",
+            "cat",
+            "desc",
+            "some garbage text",
+            bypass_validation=True,
+        )
+
+        _, file_payload = mock_rule_repository.create_rule_file.call_args.args
+        stored = RuleFileEntity(files=bytes(file_payload))
+        assert stored.decode_files() == "some garbage text"
+
+    def test_encode_rule_file_requires_graph_for_valid_persistence(self, rule_service):
+        parser = MagicMock()
+        parser.get_node_set.return_value.get_graph.return_value = None
+        rule_service._parse_rule_text = MagicMock(return_value=parser)
+
+        with pytest.raises(ValueError, match="dependency graph"):
+            rule_service._encode_rule_file("rule text", "rule", require_graph=True)
+
+    def test_encode_rule_file_can_fall_back_for_bypass_migration(self, rule_service):
+        parser = MagicMock()
+        parser.get_node_set.return_value.get_graph.return_value = None
+        rule_service._parse_rule_text = MagicMock(return_value=parser)
+
+        assert rule_service._encode_rule_file("rule text", "rule", require_graph=False) == bytearray(
+            b"rule text"
+        )
+
     def test_error_carries_rule_name(self, rule_service, mock_rule_repository):
         """RuleValidationError carries the rule name for traceability."""
         with pytest.raises(RuleValidationError) as exc_info:
@@ -323,6 +457,11 @@ class TestValidationGateCreateRuleFile:
 
         assert result is not None
         mock_rule_repository.create_rule_file.assert_called_once()
+        _, file_payload = mock_rule_repository.create_rule_file.call_args.args
+        payload = json.loads(bytes(file_payload).decode("utf-8"))
+        assert payload["type"] == PAYLOAD_TYPE
+        assert payload["rule_text"] == VALID_RULE_TEXT
+        assert payload["graph"]["schema_version"] == 1
 
     def test_invalid_rule_file_blocked(self, rule_service, mock_rule_repository):
         """Invalid rule text is blocked before persistence."""
@@ -360,6 +499,68 @@ class TestValidationGateCreateRuleFile:
 
         with pytest.raises(LookupError, match="was not found"):
             rule_service.create_rule_file("NonExistent", VALID_RULE_TEXT)
+
+
+class TestValidationWaivers:
+    def test_save_converted_rule_stores_when_all_errors_are_waived(self, rule_service, mock_rule_repository):
+        mock_rule = RuleEntity(rule_id=1, name="waived", category="cat", description="desc")
+        mock_rule_repository.create_rule.return_value = 1
+        mock_rule_repository.find_rule_by_rule_name.return_value = mock_rule
+        rule_service._encode_rule_file = MagicMock(return_value=bytearray(b"stored"))
+
+        result = rule_service.save_converted_rule(
+            "waived",
+            "cat",
+            "desc",
+            INVALID_RULE_TEXT_DUPLICATE,
+            waived_error_ids=["DUPLICATE_DECLARATION:x"],
+        )
+
+        assert result == mock_rule
+        mock_rule_repository.create_rule_file.assert_called_once()
+
+    def test_save_converted_rule_rejects_unknown_waiver_id(self, rule_service, mock_rule_repository):
+        with pytest.raises(RuleValidationError) as exc_info:
+            rule_service.save_converted_rule(
+                "bad_waiver",
+                "cat",
+                "desc",
+                INVALID_RULE_TEXT_DUPLICATE,
+                waived_error_ids=["DUPLICATE_DECLARATION:x", "UNKNOWN:ghost"],
+            )
+
+        assert exc_info.value.unknown_waiver_ids == ["UNKNOWN:ghost"]
+        mock_rule_repository.create_rule.assert_not_called()
+
+    def test_save_converted_rule_rejects_partial_waiver(self, rule_service, mock_rule_repository):
+        rule_text = "INPUT a AS NUMBER\nINPUT a AS NUMBER\nINPUT b AS NUMBER\nINPUT b AS NUMBER\n"
+
+        with pytest.raises(RuleValidationError) as exc_info:
+            rule_service.save_converted_rule(
+                "partial_waiver",
+                "cat",
+                "desc",
+                rule_text,
+                waived_error_ids=["DUPLICATE_DECLARATION:a"],
+            )
+
+        assert [error.waiver_id for error in exc_info.value.errors] == ["DUPLICATE_DECLARATION:b"]
+        mock_rule_repository.create_rule.assert_not_called()
+
+    def test_create_rule_file_stores_when_all_errors_are_waived(self, rule_service, mock_rule_repository):
+        mock_file = RuleFileEntity(file_id=1, rule_id=1, files=b"stored")
+        mock_rule_repository.find_id_by_name.return_value = 1
+        mock_rule_repository.find_rule_text_by_rule_name.return_value = mock_file
+        rule_service._encode_rule_file = MagicMock(return_value=bytearray(b"stored"))
+
+        result = rule_service.create_rule_file(
+            "waived_file",
+            INVALID_RULE_TEXT_DUPLICATE,
+            waived_error_ids=["DUPLICATE_DECLARATION:x"],
+        )
+
+        assert result == "stored"
+        mock_rule_repository.create_rule_file.assert_called_once()
 
 
 class TestValidationGateNotAppliedToCreateRule:
@@ -573,6 +774,32 @@ class TestGetTargetNodeNames:
         mock_parser.return_value = mock_parser_instance
         result = rule_service.get_target_node_names("Test Rule")
         assert result == ["target_node"]
+
+    def test_get_parentless_nodes_falls_back_to_runtime_root_without_graph(self, rule_service):
+        root = MagicMock()
+        root._node_id = 0
+        child = MagicMock()
+        child._node_id = 1
+        node_set = NodeSet()
+        node_set.set_sorted_node_list([child, root])
+        node_set.set_graph(None)
+
+        assert rule_service._get_parentless_nodes(node_set) == [root]
+
+    def test_get_parentless_nodes_sorts_by_node_runtime_id_when_graph_has_no_id(self, rule_service):
+        node_a = MagicMock()
+        node_a._node_id = 7
+        node_b = MagicMock()
+        node_b._node_id = 2
+        graph = MagicMock()
+        graph.has_node.return_value = True
+        graph.get_parent_edges.return_value = set()
+        graph.lookup_by_name.return_value = None
+        node_set = MagicMock()
+        node_set.get_graph.return_value = graph
+        node_set.get_node_dictionary.return_value = {"a": node_a, "b": node_b}
+
+        assert rule_service._get_parentless_nodes(node_set) == [node_b, node_a]
 
 
 class TestGetHistoryForMlInferenceEdgeCases:

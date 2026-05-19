@@ -1,0 +1,23 @@
+[importlinter]
+root_package = src
+
+[importlinter:contract:domain_must_not_import_adapters]
+name = Domain layer must not import adapters
+type = forbidden
+source_modules =
+    src.domain
+forbidden_modules =
+    src.adapters
+allow_indirect_imports = True
+
+[importlinter:contract:ports_must_not_import_runtime_layers]
+name = Ports must not import adapters, infrastructure, services, or app entrypoints
+type = forbidden
+source_modules =
+    src.ports
+forbidden_modules =
+    src.adapters
+    src.infrastructure
+    src.services
+    src.main
+allow_indirect_imports = True

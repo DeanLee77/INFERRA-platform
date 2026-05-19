@@ -7,12 +7,11 @@ Implements access levels and strong typing where appropriate.
 import json
 import warnings
 from typing import Any, Dict, List, Optional, Tuple
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 from src.domain.nodes.node import Node
-from src.domain.nodes.dependency_matrix import DependencyMatrix
 from src.domain.nodes.meta_data import MetaData
 
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class NodeSet:
@@ -42,8 +41,7 @@ class NodeSet:
         self.__stable_node_id_dictionary: Dict[str, str] = dict()
         self.__sorted_node_list: List[Node] = []
         self.__default_goal_node: Optional[Node] = None
-        self.__dependency_matrix: DependencyMatrix = DependencyMatrix([[]])
-        self.__matrix_explicit: bool = False
+        self.__legacy_dependency_matrix_payload: Optional[Any] = None
         self.__graph: Optional[Any] = None  # HyperAdjacencyGraph (lazy import)
         self._ensure_graph()
         
@@ -52,25 +50,37 @@ class NodeSet:
     # -------------------------------------------------------------------------
     # Public Access Level: API Methods (Getters)
     # -------------------------------------------------------------------------
-    def get_dependency_matrix(self) -> DependencyMatrix:
+    def get_dependency_matrix(self) -> Any:
         """
-        Public API: Returns a legacy dependency matrix view.
+        Deprecated API: Returns a legacy dependency matrix view.
 
         Phase 2.5 keeps this method for compatibility, but graph-backed
         NodeSets derive the matrix on demand from the canonical graph.
+
+        .. deprecated:: Phase 2.5
+            Use get_graph() / DependencyGraphPort instead. Matrix views are
+            compatibility-only and must not be used by runtime code.
         
         Returns:
-            DependencyMatrix object
+            Matrix-like object
         """
-        if (
-            self.__graph is not None
-            and not self.__matrix_explicit
-            and (len(self.__graph.all_node_names()) > 0 or any(True for _ in self.__graph.edges()))
+        warnings.warn(
+            "NodeSet.get_dependency_matrix() is deprecated for runtime use; use get_graph() "
+            "or DependencyGraphPort instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if self.__graph is not None and (
+            len(self.__graph.all_node_names()) > 0
+            or any(True for _ in self.__graph.edges())
+            or self.__legacy_dependency_matrix_payload is None
         ):
-            from src.domain.graph.graph_to_matrix_adapter import GraphToMatrixAdapter
+            return self._matrix_view_from_graph()
 
-            return GraphToMatrixAdapter(self.__graph)
-        return self.__dependency_matrix
+        if self.__legacy_dependency_matrix_payload is not None:
+            return self._legacy_matrix_payload()
+
+        return self._matrix_view_from_graph()
 
     def get_node_set_name(self) -> str:
         """
@@ -163,25 +173,34 @@ class NodeSet:
             graph: HyperAdjacencyGraph instance
         """
         self.__graph = graph
-        self.__matrix_explicit = False
+        self.__legacy_dependency_matrix_payload = None
 
     # -------------------------------------------------------------------------
     # Public Access Level: API Methods (Setters)
     # -------------------------------------------------------------------------
     def set_dependency_matrix(self, dependency_matrix: Any) -> None:
         """
-        Public API: Sets the dependency matrix.
+        Deprecated API: Sets a legacy dependency matrix payload.
+
+        .. deprecated:: Phase 2.5
+            Use set_graph() with HyperAdjacencyGraph instead. This method only
+            exists to adapt legacy matrix payloads into the canonical graph.
         
         Args:
-            dependency_matrix: DependencyMatrix or list to set
+            dependency_matrix: legacy matrix-like object or 2D list to adapt
         """
-        if isinstance(dependency_matrix, list):
-            self.__dependency_matrix = DependencyMatrix(dependency_matrix)
-        elif isinstance(dependency_matrix, DependencyMatrix):
-            self.__dependency_matrix = dependency_matrix
-        else:
+        warnings.warn(
+            "NodeSet.set_dependency_matrix() is deprecated; use set_graph() with "
+            "HyperAdjacencyGraph instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if not isinstance(dependency_matrix, list) and not hasattr(
+            dependency_matrix,
+            "get_dependency_two_dimension_list",
+        ):
             return
-        self.__matrix_explicit = True
+        self.__legacy_dependency_matrix_payload = dependency_matrix
         self._derive_graph_from_matrix()
 
     def set_node_set_name(self, node_set_name: str) -> None:
@@ -205,6 +224,7 @@ class NodeSet:
         if len(node_id_dictionary) == 0:
             _logger.debug("node_id_dictionary has no items")
         self.__node_id_dictionary = node_id_dictionary
+        self._derive_graph_from_matrix()
 
     def set_stable_node_id_dictionary(self, stable_node_id_dictionary: Dict[str, str]) -> None:
         """
@@ -341,7 +361,7 @@ class NodeSet:
 
     def add_node(self, node: Node, metadata: Optional[Dict[str, Any]] = None) -> None:
         nid = getattr(node, '_node_id', None)
-        if not isinstance(nid, int):
+        if not isinstance(nid, int) or nid in self.__node_id_dictionary:
             node._node_id = self.get_next_node_id()
             node._node_unique_id = node._node_id
         self.register_node(node, metadata)
@@ -421,7 +441,7 @@ class NodeSet:
     def rebuild_dependency_groups(self) -> None:
         self._ensure_graph()
         self._rebuild_graph_edges()
-        self.__matrix_explicit = False
+        self.__legacy_dependency_matrix_payload = None
 
     def _rebuild_graph_edges(self) -> None:
         """Reconstruct graph edges from node dependency metadata."""
@@ -463,14 +483,36 @@ class NodeSet:
 
     def _derive_graph_from_matrix(self) -> None:
         """Refresh the canonical graph from an explicitly assigned legacy matrix."""
-        if not self.__node_id_dictionary:
+        if self.__legacy_dependency_matrix_payload is None or not self.__node_id_dictionary:
             return
         from src.domain.graph.matrix_to_hyper_adapter import MatrixToHyperGraphAdapter
 
-        self.__graph = MatrixToHyperGraphAdapter(
-            self.__dependency_matrix,
-            dict(self.__node_id_dictionary),
-        )
+        payload = self.__legacy_dependency_matrix_payload
+        if isinstance(payload, list):
+            self.__graph = MatrixToHyperGraphAdapter.from_legacy_list(
+                payload,
+                dict(self.__node_id_dictionary),
+            )
+        else:
+            self.__graph = MatrixToHyperGraphAdapter(
+                payload,
+                dict(self.__node_id_dictionary),
+            )
+        self.__legacy_dependency_matrix_payload = None
+
+    def _matrix_view_from_graph(self) -> Any:
+        self._ensure_graph()
+        from src.domain.graph.graph_to_matrix_adapter import GraphToMatrixAdapter
+
+        return GraphToMatrixAdapter(self.__graph)
+
+    def _legacy_matrix_payload(self) -> Any:
+        payload = self.__legacy_dependency_matrix_payload
+        if isinstance(payload, list):
+            from src.domain.graph.matrix_to_hyper_adapter import legacy_matrix_from_list
+
+            return legacy_matrix_from_list(payload)
+        return payload
 
     # -------------------------------------------------------------------------
     # Protected Access Level: Internal Helpers (Single Underscore)
@@ -485,7 +527,18 @@ class NodeSet:
         Returns:
             Tuple of (has_children, children_index_list)
         """
-        children_list = self.__dependency_matrix.get_to_child_dependency_list(node_id)
+        children_list: List[int] = []
+        if self.__graph is not None:
+            node_name = self.__graph.lookup_by_id(node_id)
+            if node_name is not None:
+                children_list = [
+                    child_id
+                    for child_id in (
+                        self.__graph.lookup_by_name(child)
+                        for child in self.__graph.get_children_flat(node_name)
+                    )
+                    if child_id is not None
+                ]
         return len(children_list) > 0, children_list
 
     def _has_parents(self, node_id: int) -> Tuple[bool, List[int]]:
@@ -498,7 +551,18 @@ class NodeSet:
         Returns:
             Tuple of (has_parents, parents_index_list)
         """
-        parents_list = self.__dependency_matrix.get_from_parent_dependency_list(node_id)
+        parents_list: List[int] = []
+        if self.__graph is not None:
+            node_name = self.__graph.lookup_by_id(node_id)
+            if node_name is not None:
+                parents_list = [
+                    parent_id
+                    for parent_id in (
+                        self.__graph.lookup_by_name(parent)
+                        for parent in self.__graph.get_parent_edges(node_name)
+                    )
+                    if parent_id is not None
+                ]
         return len(parents_list) > 0, parents_list
 
     # -------------------------------------------------------------------------

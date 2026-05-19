@@ -14,6 +14,8 @@ from typing import List, Optional, Tuple
 
 import structlog
 
+from src.infrastructure.secrets import read_secret
+
 try:
     import requests as _requests
 
@@ -206,7 +208,7 @@ def _format_object(value: str) -> str:
 
 def _auth() -> Optional[Tuple[str, str]]:
     username = os.environ.get("FUSEKI_USER", "admin")
-    password = os.environ.get("FUSEKI_PASSWORD") or os.environ.get("ADMIN_PASSWORD", "admin")
+    password = read_secret("FUSEKI_PASSWORD") or read_secret("ADMIN_PASSWORD", "admin")
     if not username:
         return None
     return (username, password)

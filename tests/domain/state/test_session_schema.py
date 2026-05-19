@@ -218,6 +218,17 @@ class TestMigrateSessionPhase5:
         migrate_session(data, from_version=0)
         assert data == original_data
 
+    def test_unknown_fact_source_defaults_to_inferred(self):
+        data = {
+            "metadata": {"schema_version": 4},
+            "fact_sources": {"future_fact": "FUTURE_SOURCE", "known_fact": "ASSERTED"},
+        }
+
+        result = migrate_session(data, from_version=4)
+
+        assert result["fact_sources"]["future_fact"] == "INFERRED"
+        assert result["fact_sources"]["known_fact"] == "ASSERTED"
+
 
 class TestMigrateSessionCurrentVersion:
     def test_already_current_version_no_op(self):
@@ -240,11 +251,13 @@ class TestReconstructIterationState:
                 "iterate_score": "INFERRED",
                 "eligible": "INFERRED",
                 "iterate_age": "INFERRED",
+                "iterate_future": "FUTURE_SOURCE",
             },
         }
         result = _reconstruct_iteration_state(data)
         assert "iterate_score" in result
         assert "iterate_age" in result
+        assert "iterate_future" in result
         assert "eligible" not in result
         assert result["iterate_score"] == {"status": "unknown", "progress": {}}
 

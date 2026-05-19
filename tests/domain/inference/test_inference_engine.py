@@ -11,7 +11,7 @@ from src.domain.inference.assessment_state import AssessmentState
 from src.domain.nodes.node import Node
 from src.domain.nodes.node_set import NodeSet
 from src.domain.nodes.line_type import LineType
-from src.domain.nodes.dependency_type import DependencyType
+from src.domain.graph.dependency_type import DependencyType
 from src.domain.nodes.comparison_line import ComparisonLine
 from src.domain.nodes.value_conclusion_line import ValueConclusionLine
 from src.domain.state.fact_source import FactSource

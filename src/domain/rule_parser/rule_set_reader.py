@@ -7,10 +7,10 @@ Implements access levels and strong typing where appropriate.
 import io
 from typing import Optional, Union, List
 from src.domain.rule_parser.i_line_reader import ILineReader
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 
 # Protected Module-Level Logger (Access Level: Protected)
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class RuleSetReader(ILineReader):

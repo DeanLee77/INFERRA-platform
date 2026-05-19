@@ -10,10 +10,11 @@ each time.
 Phase 2.5 (WS-3): One-way bridge from graph to matrix.
 """
 
+import warnings
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
-from src.domain.nodes.dependency_matrix import DependencyMatrix
+from src.domain.graph.dependency_matrix import DependencyMatrix
 
 
 class GraphToMatrixAdapter(DependencyMatrix):
@@ -69,7 +70,9 @@ class GraphToMatrixAdapter(DependencyMatrix):
 
     def _matrix(self) -> DependencyMatrix:
         self._rebuild()
-        return DependencyMatrix(self._matrix_cache)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            return DependencyMatrix(self._matrix_cache)
 
     def get_dependency_type(self, parent_rule_id: int, child_rule_id: int) -> int:
         return self._matrix().get_dependency_type(parent_rule_id, child_rule_id)

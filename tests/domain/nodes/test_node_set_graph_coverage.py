@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
-from src.domain.nodes.dependency_matrix import DependencyMatrix
+from src.domain.graph.dependency_matrix import DependencyMatrix
+from src.domain.graph.dependency_type import DependencyType
 from src.domain.nodes.node_set import NodeSet
 
 
@@ -17,11 +18,11 @@ def _node(name, stable_id=None, node_id=None, dependencies=None):
 
 def test_set_dependency_matrix_ignores_unsupported_value():
     node_set = NodeSet()
-    before = node_set.get_dependency_matrix()
+    before = node_set.get_dependency_matrix().get_dependency_two_dimension_list()
 
     node_set.set_dependency_matrix(object())
 
-    assert node_set.get_dependency_matrix() is before
+    assert node_set.get_dependency_matrix().get_dependency_two_dimension_list() == before
 
 
 def test_remove_node_from_graph_noops_when_graph_is_missing():
@@ -85,3 +86,26 @@ def test_derive_graph_from_matrix_noops_without_node_id_dictionary():
     node_set._derive_graph_from_matrix()
 
     assert node_set.get_graph() is original_graph
+
+
+def test_set_dependency_matrix_with_runtime_ids_converts_then_discards_payload():
+    node_set = NodeSet()
+    node_set.set_node_id_dictionary({0: "A", 1: "B"})
+
+    node_set.set_dependency_matrix(
+        [[-1, DependencyType.get_and()], [-1, -1]]
+    )
+
+    assert node_set.get_graph().get_children_flat("A") == ("B",)
+    assert node_set._NodeSet__legacy_dependency_matrix_payload is None
+
+
+def test_get_dependency_matrix_initialises_graph_when_no_graph_or_payload():
+    node_set = NodeSet()
+    node_set._NodeSet__graph = None
+    node_set._NodeSet__legacy_dependency_matrix_payload = None
+
+    matrix_view = node_set.get_dependency_matrix()
+
+    assert matrix_view.get_dependency_two_dimension_list() == [[]]
+    assert node_set.get_graph() is not None

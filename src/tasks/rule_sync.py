@@ -17,6 +17,7 @@ from typing import Dict, Optional
 import structlog
 
 from src.domain.state.feature_flags import FeatureFlags
+from src.infrastructure.secrets import redis_client_from_env
 from src.tasks.celery_app import CELERY_AVAILABLE, app
 
 log = structlog.get_logger()
@@ -104,9 +105,7 @@ def publish_dead_letter_event(
 ) -> None:
     """Publish to dead-letter Redis list for manual reprocessing."""
     try:
-        import redis
-
-        r = redis.Redis()
+        r = redis_client_from_env("REDIS_URL", "redis://localhost:6379/0", 0)
         r.lpush(
             "inferra:dead_letter_queue",
             json.dumps(

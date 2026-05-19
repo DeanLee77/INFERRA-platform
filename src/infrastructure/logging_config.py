@@ -22,6 +22,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 import structlog
 
+from src.infrastructure.otel_logging_bridge import add_otel_context
+
 
 def configure_logging(env: Optional[str] = None) -> None:
     """
@@ -34,11 +36,14 @@ def configure_logging(env: Optional[str] = None) -> None:
     """
     if env is None:
         env = os.environ.get("INFERRA_ENV", "development")
+    log_level_name = os.environ.get("INFERRA_LOG_LEVEL", "INFO").upper()
+    log_level = getattr(logging, log_level_name, logging.INFO)
 
     # Standard library logging configuration
     logging.basicConfig(
         format="%(message)s",
-        level=logging.INFO,
+        level=log_level,
+        force=True,
     )
 
     processors: List[Callable[..., Any]] = [
@@ -48,6 +53,7 @@ def configure_logging(env: Optional[str] = None) -> None:
         structlog.stdlib.add_log_level,
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.TimeStamper(fmt="iso"),
+        add_otel_context,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.processors.UnicodeDecoder(),

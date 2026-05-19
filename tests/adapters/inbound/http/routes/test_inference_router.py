@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 from src.main import app
+from src.adapters.outbound.session.in_memory_session_store import InMemorySessionStore
+from src.domain.exceptions import ConcurrentModificationError
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.session import InferenceContext
 from src.domain.state.fact_source import FactSource
@@ -55,7 +57,7 @@ def client(mock_session_service, mock_session_store):
         _rule_service,
         router,
     )
-    from src.dependencies import get_session_store
+    from src.adapters.inbound.http.dependencies import get_session_store
 
     app.dependency_overrides[get_session_store] = lambda: mock_session_store
 
@@ -330,6 +332,60 @@ class TestFeedAnswer:
 
         assert response.status_code == 404
 
+    def test_feed_answer_persists_mutated_session(self):
+        from src.adapters.inbound.http.routes.inference import _session_service
+
+        session = _make_mock_session()
+        store = InMemorySessionStore()
+        store.save(session)
+        service = InferenceSessionService(store)
+        app.dependency_overrides[_session_service] = lambda: service
+
+        try:
+            with TestClient(app) as c:
+                response = c.post(
+                    "/api/v1/inference/feed-answer?session_id=test-session-123",
+                    json={
+                        "question": "age",
+                        "answer": {"type": "integer", "answer": 25},
+                    },
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert service.get_session("test-session-123").version == 1
+
+    def test_feed_answer_returns_409_when_session_save_conflicts(self):
+        from src.adapters.inbound.http.routes.inference import _session_service
+
+        session = _make_mock_session()
+
+        class ConflictStore:
+            def get(self, session_id):
+                return session if session_id == session.session_id else None
+
+            def save(self, _session):
+                raise ConcurrentModificationError("stale session")
+
+        service = InferenceSessionService(ConflictStore())
+        app.dependency_overrides[_session_service] = lambda: service
+
+        try:
+            with TestClient(app) as c:
+                response = c.post(
+                    "/api/v1/inference/feed-answer?session_id=test-session-123",
+                    json={
+                        "question": "age",
+                        "answer": {"type": "integer", "answer": 25},
+                    },
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["error_code"] == "SESSION_CONFLICT"
+
 
 # =============================================================================
 # GET /api/v1/inference/trace
@@ -596,6 +652,28 @@ class TestResetAnswer:
             )
         assert response.status_code == 404
 
+    def test_reset_answer_persists_mutated_session(self):
+        from src.adapters.inbound.http.routes.inference import _session_service
+
+        session = _make_mock_session()
+        session.inference_engine.edit_answer = MagicMock()
+        store = InMemorySessionStore()
+        store.save(session)
+        service = InferenceSessionService(store)
+        app.dependency_overrides[_session_service] = lambda: service
+
+        try:
+            with TestClient(app) as c:
+                response = c.post(
+                    "/api/v1/inference/reset-answer?session_id=test-session-123",
+                    json={"question": "age"},
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert service.get_session("test-session-123").version == 1
+
 
 # =============================================================================
 # POST /api/v1/inference/history
@@ -669,6 +747,25 @@ class TestGetNextQuestionWithIterateProgress:
         assert data["has_more_questions"] is False
         assert data["questions"] == []
 
+    def test_next_question_persists_selected_question_state(self):
+        from src.adapters.inbound.http.routes.inference import _session_service
+
+        session = _make_mock_session()
+        session.inference_engine.get_next_question_with_goal_name.return_value = None
+        store = InMemorySessionStore()
+        store.save(session)
+        service = InferenceSessionService(store)
+        app.dependency_overrides[_session_service] = lambda: service
+
+        try:
+            with TestClient(app) as c:
+                response = c.get("/api/v1/inference/next-question?session_id=test-session-123")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert service.get_session("test-session-123").version == 1
+
 
 # =============================================================================
 # Direct branch coverage for response-shaping helpers
@@ -692,10 +789,49 @@ async def test_session_context_reuses_existing_context():
     assert _session_context(session) is context
 
 
+def test_create_session_impl_passes_authenticated_owner_id():
+    from src.adapters.inbound.http.routes.inference import _create_session_impl
+
+    session = _make_mock_session()
+    session_service = MagicMock()
+    session_service.create_session_from_rule.return_value = session
+
+    response = _create_session_impl(
+        "rule",
+        "goal",
+        False,
+        MagicMock(),
+        session_service,
+        owner_id="user-1",
+    )
+
+    assert response.session_id == session.session_id
+    session_service.create_session_from_rule.assert_called_once()
+    assert session_service.create_session_from_rule.call_args.kwargs["owner_id"] == "user-1"
+
+
+def test_session_owner_mismatch_returns_403():
+    from fastapi import HTTPException
+    from starlette.requests import Request
+    from src.adapters.inbound.http.routes.inference import _enforce_session_owner
+    from src.domain.state.feature_flags import FeatureFlags
+
+    session = _make_mock_session()
+    session.owner_id = "owner-a"
+    request = Request({"type": "http", "headers": [], "inferra_user_id": "owner-b"})
+
+    with patch("src.adapters.inbound.http.routes.inference.get_feature_flags", return_value=FeatureFlags(auth_enabled=True)):
+        with pytest.raises(HTTPException) as exc:
+            _enforce_session_owner(session, request)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail["error_code"] == "SESSION_OWNER_MISMATCH"
+
+
 @pytest.mark.asyncio
 async def test_reset_answer_returns_has_more_when_goal_not_complete():
     from src.adapters.inbound.http.routes.inference import reset_answer
-    from src.schemas.inference_schemas import ResetAnswerRequest
+    from src.adapters.inbound.http.schemas.inference import ResetAnswerRequest
 
     session = _make_mock_session()
     state = MagicMock()
@@ -824,7 +960,7 @@ async def test_trace_runtime_error_becomes_503():
 async def test_update_history_lookup_error_becomes_404():
     from fastapi import HTTPException
     from src.adapters.inbound.http.routes.inference import update_history
-    from src.schemas.inference_schemas import UpdateHistoryRequest
+    from src.adapters.inbound.http.schemas.inference import UpdateHistoryRequest
 
     session = _make_mock_session()
     rule_service = MagicMock()

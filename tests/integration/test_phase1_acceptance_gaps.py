@@ -402,7 +402,7 @@ class TestSparseMatrixIteration:
 
     def test_sparse_adapter_iterates_proportionally_to_edges(self):
         """A 100x100 matrix with 5 edges should iterate ~5 times, not 10,000."""
-        from src.domain.nodes.dependency_matrix import DependencyMatrix
+        from src.domain.graph.dependency_matrix import DependencyMatrix
         from src.domain.graph.matrix_to_hyper_adapter import MatrixToHyperGraphAdapter
 
         # Build a 100x100 sparse matrix with only 5 non-(-1) entries
@@ -426,7 +426,7 @@ class TestSparseMatrixIteration:
 
     def test_sparse_items_yields_correct_values(self):
         """sparse_items() yields the correct (parent, child), dep_type tuples."""
-        from src.domain.nodes.dependency_matrix import DependencyMatrix
+        from src.domain.graph.dependency_matrix import DependencyMatrix
 
         matrix_2d = [
             [-1, 8, -1],

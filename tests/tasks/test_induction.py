@@ -5,6 +5,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.tasks.induction import (
+    InductionCircuitBreaker,
+    InductionCircuitOpenError,
+    build_induction_source_hash,
     mine_candidate_rules,
     publish_induction_dead_letter,
     run_induction_batch,
@@ -32,6 +35,41 @@ def test_mine_candidate_rules_uses_default_rule_name_when_sanitized_name_empty()
     assert "rule_learned_" in result[0]
 
 
+def test_mine_candidate_rules_uses_session_data_pipeline_when_available():
+    sessions = [
+        {"session_id": "s1", "working_memory": {"eligible": True, "income": True}},
+        {"session_id": "s2", "working_memory": {"eligible": True, "income": True}},
+        {"session_id": "s3", "working_memory": {"eligible": False, "income": False}},
+    ]
+
+    result = mine_candidate_rules(["s1", "s2", "s3"], "benefit rule", session_data_list=sessions)
+
+    assert result
+    assert any("eligible IS true" in rule for rule in result)
+    assert all("trace_pattern_" not in rule for rule in result)
+
+
+def test_build_induction_source_hash_is_order_independent():
+    first = build_induction_source_hash(["s2", "s1"], "rule")
+    second = build_induction_source_hash(["s1", "s2"], "rule")
+
+    assert first == second
+
+
+def test_induction_circuit_breaker_opens_and_recovers(monkeypatch):
+    breaker = InductionCircuitBreaker(failure_threshold=2, recovery_timeout=10)
+    breaker.record_failure()
+    breaker.before_call()
+    breaker.record_failure()
+
+    with pytest.raises(InductionCircuitOpenError):
+        breaker.before_call()
+
+    monkeypatch.setattr("src.tasks.induction.time.monotonic", lambda: breaker.opened_at + 11)
+    breaker.before_call()
+    assert breaker.is_open() is False
+
+
 def test_on_rule_updated_delegates_to_rule_sync_publisher():
     flags = object()
     with patch("src.tasks.event_publisher.publish_rule_updated_event", return_value="task-1") as publisher:
@@ -43,7 +81,7 @@ def test_on_rule_updated_delegates_to_rule_sync_publisher():
 def test_publish_induction_dead_letter_pushes_payload_to_redis():
     mock_redis_module = MagicMock()
     mock_client = MagicMock()
-    mock_redis_module.Redis.return_value = mock_client
+    mock_redis_module.Redis.from_url.return_value = mock_client
 
     with patch.dict(sys.modules, {"redis": mock_redis_module}):
         publish_induction_dead_letter("job1", "rule1", "boom")
@@ -58,7 +96,7 @@ def test_publish_induction_dead_letter_pushes_payload_to_redis():
 
 def test_publish_induction_dead_letter_handles_redis_failure():
     mock_redis_module = MagicMock()
-    mock_redis_module.Redis.side_effect = Exception("redis down")
+    mock_redis_module.Redis.from_url.side_effect = Exception("redis down")
 
     with patch.dict(sys.modules, {"redis": mock_redis_module}):
         publish_induction_dead_letter("job1", "rule1", "boom")

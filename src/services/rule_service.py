@@ -1,15 +1,26 @@
-from typing import Any, Optional
+import hashlib
+from typing import Any, List, Optional, Set
 
 from src.domain.exceptions import RuleValidationError
 from src.domain.fact_values import FactValue, FactValueType
+from src.domain.graph.graph_serialization import serialize_graph
+from src.domain.imports.import_matchers import extract_imports
+from src.domain.imports.import_resolver import (
+    CircularImportError,
+    ImportDepthExceededError,
+    RuleLoadTimeoutError,
+    RuleSetImportResolver,
+)
+from src.domain.state.feature_flags import FeatureFlags
 from src.domain.models.rule import RuleEntity, RuleFileEntity
+from src.domain.models.rule_file_payload import encode_rule_file_payload
 from src.domain.nodes.node import Node
 from src.domain.nodes.node_set import NodeSet
 from src.domain.rule_parser.rule_set_parser import RuleSetParser
 from src.domain.rule_parser.rule_set_reader import RuleSetReader
 from src.domain.rule_parser.rule_set_scanner import RuleSetScanner
 from src.ports.rule_repository_port import RuleRepositoryPort
-from src.services.rule_validation_service import RuleValidationService
+from src.services.rule_validation_service import RuleValidationService, ValidationError
 
 
 class RuleService:
@@ -57,17 +68,8 @@ class RuleService:
 
         rule_text = self.get_rule_text(rule_name)
 
-        rule_set_reader = RuleSetReader()
-        rule_set_reader.create()
-
-        rule_set_parser = RuleSetParser()
-        rule_set_parser.create()
-        rule_set_parser.set_source_name(rule_name)
-
-        rule_set_reader.set_file_with_text(rule_text)
-        rule_set_scanner = RuleSetScanner(rule_set_reader, rule_set_parser)
-        rule_set_scanner.scan_rule_set()
-        rule_set_scanner.establish_node_set(history_dict)
+        parse_text = self._build_import_aware_rule_text(rule_name, rule_text)
+        rule_set_parser = self._parse_rule_text(rule_name, parse_text, history_dict)
 
         if not rule_set_parser.get_node_set().get_sorted_node_list():
             raise ValueError(f"Rule '{rule_name}' could not be parsed into a valid node set")
@@ -130,9 +132,10 @@ class RuleService:
         description: str,
         rule_text: str,
         bypass_validation: bool = False,
+        waived_error_ids: Optional[List[str]] = None,
     ) -> RuleEntity:
         if not bypass_validation:
-            self._validate_rule_text(rule_text, name)
+            self._validate_rule_text(rule_text, name, waived_error_ids=waived_error_ids)
 
         rule_id = self._repository.create_rule(
             {
@@ -141,7 +144,10 @@ class RuleService:
                 "rule_description": description,
             }
         )
-        self._repository.create_rule_file(rule_id, bytearray(rule_text, "utf-8"))
+        self._repository.create_rule_file(
+            rule_id,
+            self._encode_rule_file(rule_text, name, require_graph=not bypass_validation),
+        )
 
         rule = self._repository.find_rule_by_rule_name(name)
         if rule is None:
@@ -153,15 +159,19 @@ class RuleService:
         rule_name: str,
         rule_text: str,
         bypass_validation: bool = False,
+        waived_error_ids: Optional[List[str]] = None,
     ) -> str:
         if not bypass_validation:
-            self._validate_rule_text(rule_text, rule_name)
+            self._validate_rule_text(rule_text, rule_name, waived_error_ids=waived_error_ids)
 
         rule_id = self._repository.find_id_by_name(rule_name)
         if rule_id is None:
             raise LookupError(f"Rule '{rule_name}' was not found")
 
-        self._repository.create_rule_file(rule_id, bytearray(rule_text, "utf-8"))
+        self._repository.create_rule_file(
+            rule_id,
+            self._encode_rule_file(rule_text, rule_name, require_graph=not bypass_validation),
+        )
         return self.get_rule_text(rule_name)
 
     def get_history_for_ml_inference(self, rule_name: str) -> dict | None:
@@ -208,19 +218,188 @@ class RuleService:
 
         self._repository.create_rule_history(rule.rule_id, history)
 
-    def _validate_rule_text(self, rule_text: str, rule_name: str) -> None:
+    def _validate_rule_text(
+        self,
+        rule_text: str,
+        rule_name: str,
+        waived_error_ids: Optional[List[str]] = None,
+    ) -> None:
         """Validate rule text before persistence. Raises RuleValidationError on failure.
 
         Args:
             rule_text: Rule text to validate
             rule_name: Name of the rule (for error reporting)
+            waived_error_ids: Validation error waiver IDs approved by a human reviewer.
 
         Raises:
-            RuleValidationError: When validation fails (valid=False)
+            RuleValidationError: When unwaived validation errors remain or unknown waiver IDs are supplied.
         """
-        result = self._validation_service.validate(rule_text, rule_name)
-        if not result.valid:
-            raise RuleValidationError(errors=list(result.errors), rule_name=rule_name)
+        validation_text = self._build_import_aware_rule_text(rule_name, rule_text)
+        result = self._validation_service.validate(validation_text, rule_name)
+        if result.valid:
+            return
+
+        actual_error_ids: Set[str] = {e.waiver_id for e in result.errors}
+        waived: Set[str] = set(waived_error_ids or ())
+
+        unknown = waived - actual_error_ids
+        if unknown:
+            raise RuleValidationError(
+                errors=list(result.errors),
+                rule_name=rule_name,
+                unknown_waiver_ids=sorted(unknown),
+            )
+
+        remaining_ids = actual_error_ids - waived
+        if remaining_ids:
+            raise RuleValidationError(
+                errors=[e for e in result.errors if e.waiver_id in remaining_ids],
+                rule_name=rule_name,
+            )
+
+    def _build_import_aware_rule_text(self, rule_name: str, rule_text: str) -> str:
+        """Return a transient merged rule view for validation and parsing.
+
+        Persisted rule text remains unchanged. The merge only lets the legacy
+        single-file validator/runtime parser see declarations and rule
+        conclusions supplied by IMPORT: modules.
+        """
+        if not extract_imports(rule_text):
+            return rule_text
+
+        imported_texts = self._load_imported_rule_texts(rule_name, rule_text)
+        if not imported_texts:
+            return rule_text
+
+        sections: list[str] = []
+        for module_name, imported_text in imported_texts:
+            cleaned_text = self._strip_modular_directives(imported_text).strip()
+            if cleaned_text:
+                sections.append(f"# Imported module: {module_name}\n{cleaned_text}")
+
+        cleaned_root_text = self._strip_modular_directives(rule_text).strip()
+        if cleaned_root_text:
+            sections.append(f"# Root module: {rule_name}\n{cleaned_root_text}")
+        return "\n\n".join(sections) + "\n"
+
+    def _strip_modular_directives(self, rule_text: str) -> str:
+        return "\n".join(
+            line for line in rule_text.splitlines()
+            if not line.startswith("IMPORT:") and not line.startswith("RULE SET:")
+        )
+
+    def _load_imported_rule_texts(
+        self,
+        rule_name: str,
+        rule_text: str,
+    ) -> list[tuple[str, str]]:
+        def load_rule(module_name: str) -> str:
+            if module_name == rule_name:
+                return rule_text
+            return self.get_rule_text(module_name)
+
+        resolver = RuleSetImportResolver(
+            rule_loader=load_rule,
+            feature_flags=FeatureFlags(modular_imports=True),
+        )
+
+        try:
+            resolved = resolver.resolve(rule_name)
+        except CircularImportError as exc:
+            raise RuleValidationError(
+                errors=[
+                    ValidationError(
+                        code="CIRCULAR_IMPORT",
+                        message=str(exc),
+                        node_name=rule_name,
+                    )
+                ],
+                rule_name=rule_name,
+            ) from exc
+        except ImportDepthExceededError as exc:
+            raise RuleValidationError(
+                errors=[
+                    ValidationError(
+                        code="IMPORT_DEPTH_EXCEEDED",
+                        message=str(exc),
+                        node_name=exc.module_name,
+                    )
+                ],
+                rule_name=rule_name,
+            ) from exc
+        except RuleLoadTimeoutError as exc:
+            raise RuleValidationError(
+                errors=[
+                    ValidationError(
+                        code="IMPORT_LOAD_TIMEOUT",
+                        message=str(exc),
+                        node_name=exc.module_name,
+                    )
+                ],
+                rule_name=rule_name,
+            ) from exc
+
+        imported_texts: list[tuple[str, str]] = []
+        for module_name in resolved:
+            if module_name == rule_name:
+                continue
+            try:
+                imported_texts.append((module_name, self.get_rule_text(module_name)))
+            except LookupError as exc:
+                raise RuleValidationError(
+                    errors=[
+                        ValidationError(
+                            code="UNRESOLVED_IMPORT",
+                            message=f"Imported rule '{module_name}' could not be loaded",
+                            node_name=module_name,
+                        )
+                    ],
+                    rule_name=rule_name,
+                ) from exc
+
+        return imported_texts
+
+    def _parse_rule_text(
+        self,
+        rule_name: str,
+        rule_text: str,
+        history_dict: dict | None = None,
+    ) -> RuleSetParser:
+        rule_set_reader = RuleSetReader()
+        rule_set_reader.create()
+
+        rule_set_parser = RuleSetParser()
+        rule_set_parser.create()
+        rule_set_parser.set_source_name(rule_name)
+
+        rule_set_reader.set_file_with_text(rule_text)
+        rule_set_scanner = RuleSetScanner(rule_set_reader, rule_set_parser)
+        rule_set_scanner.scan_rule_set()
+        rule_set_scanner.establish_node_set(history_dict)
+        return rule_set_parser
+
+    def _encode_rule_file(
+        self,
+        rule_text: str,
+        rule_name: str,
+        require_graph: bool,
+    ) -> bytearray:
+        try:
+            parse_text = self._build_import_aware_rule_text(rule_name, rule_text)
+            parser = self._parse_rule_text(rule_name, parse_text)
+            graph = parser.get_node_set().get_graph()
+            if graph is None:
+                raise ValueError("Parsed rule set did not produce a dependency graph")
+            source_hash = hashlib.sha256(rule_text.encode("utf-8")).hexdigest()
+            return encode_rule_file_payload(
+                rule_text=rule_text,
+                graph_json=serialize_graph(graph),
+                source_hash=source_hash,
+            )
+        except Exception:
+            if require_graph:
+                raise
+            return bytearray(rule_text, "utf-8")
 
     def get_target_node_names(self, rule_name: str) -> list[str]:
         node_set = self.build_rule_set_parser(rule_name).get_node_set()

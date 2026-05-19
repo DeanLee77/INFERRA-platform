@@ -15,7 +15,7 @@ from src.domain.graph import (
     HyperAdjacencyGraph,
     MatrixToHyperGraphAdapter,
 )
-from src.domain.nodes.dependency_matrix import DependencyMatrix
+from src.domain.graph.dependency_matrix import DependencyMatrix
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +325,15 @@ def test_adapter_topological_sort():
     assert order.index("A") < order.index("C")
     assert order.index("B") < order.index("D")
     assert order.index("C") < order.index("D")
+
+
+def test_adapter_from_legacy_list():
+    adapter = MatrixToHyperGraphAdapter.from_legacy_list(
+        [[-1, DependencyType.get_and()], [-1, -1]],
+        {0: "A", 1: "B"},
+    )
+
+    assert adapter.topological_sort() == ("A", "B")
 
 
 def test_adapter_memoization_guard_skips_rebuild():

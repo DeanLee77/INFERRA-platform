@@ -10,6 +10,10 @@ from src.domain.fact_values import FactValue
 from src.domain.state.fact_source import FactSource
 from src.ports.fact_store_port import FactStorePort
 
+_OVERRIDE_TRACKED_SOURCES = frozenset(
+    (FactSource.INFERRED, FactSource.LEARNED, FactSource.HYPOTHETICAL)
+)
+
 
 class LayeredFactStore(FactStorePort):
     """
@@ -28,20 +32,19 @@ class LayeredFactStore(FactStorePort):
         self._learned: Dict[str, FactValue] = {}
         self._hypothetical: Dict[str, FactValue] = {}
         self._semantic: Dict[str, FactValue] = {}
+        self._layers: Dict[FactSource, Dict[str, FactValue]] = {
+            FactSource.ASSERTED: self._asserted,
+            FactSource.INFERRED: self._inferred,
+            FactSource.LEARNED: self._learned,
+            FactSource.HYPOTHETICAL: self._hypothetical,
+            FactSource.SEMANTIC: self._semantic,
+        }
         self._timestamps: Dict[str, float] = {}
         self._overrides: Set[str] = set()
         self._clock: Callable[[], float] = clock if clock is not None else time.time
 
     def _get_layer(self, source: FactSource) -> Dict[str, FactValue]:
-        if source == FactSource.ASSERTED:
-            return self._asserted
-        if source == FactSource.INFERRED:
-            return self._inferred
-        if source == FactSource.LEARNED:
-            return self._learned
-        if source == FactSource.HYPOTHETICAL:
-            return self._hypothetical
-        return self._semantic
+        return self._layers[source]
 
     def get_unified_view(self) -> Dict[str, FactValue]:
         return {
@@ -58,10 +61,10 @@ class LayeredFactStore(FactStorePort):
         value: FactValue,
         source: FactSource = FactSource.ASSERTED,
     ) -> None:
-        target = self._get_layer(source)
+        target = self._layers[source]
         target[name] = value
         self._timestamps[name] = self._clock()
-        if source == FactSource.ASSERTED and (
+        if source is FactSource.ASSERTED and (
             name in self._inferred
             or name in self._learned
             or name in self._hypothetical
@@ -80,7 +83,7 @@ class LayeredFactStore(FactStorePort):
             return
         layer = self._get_layer(source)
         layer.pop(name, None)
-        if source == FactSource.ASSERTED:
+        if source is FactSource.ASSERTED:
             self._overrides.discard(name)
         if (
             name not in self._asserted
@@ -95,10 +98,10 @@ class LayeredFactStore(FactStorePort):
         layer = self._get_layer(source)
         cleared = set(layer.keys())
         layer.clear()
-        if source in {FactSource.INFERRED, FactSource.LEARNED, FactSource.HYPOTHETICAL}:
+        if source in _OVERRIDE_TRACKED_SOURCES:
             self._overrides.clear()
             self._rebuild_overrides()
-        elif source == FactSource.ASSERTED:
+        elif source is FactSource.ASSERTED:
             self._overrides -= cleared
         for name in cleared:
             if (

@@ -10,8 +10,10 @@ Covers:
 """
 
 import pytest
+import logging
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from unittest.mock import patch
 
 from src.infrastructure.correlation_middleware import CorrelationIdMiddleware
 from src.infrastructure.logging_config import configure_logging, get_logger
@@ -87,3 +89,9 @@ class TestLoggingConfig:
         configure_logging()
         logger = get_logger("test_module")
         assert logger is not None
+
+    def test_configure_logging_uses_env_log_level(self):
+        with patch.dict("os.environ", {"INFERRA_LOG_LEVEL": "WARNING"}, clear=False):
+            configure_logging(env="production")
+
+        assert logging.getLogger().level == logging.WARNING

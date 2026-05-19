@@ -31,10 +31,11 @@ class TestCheckRedis:
     def test_redis_ok(self):
         mock_redis = MagicMock()
         mock_instance = MagicMock()
-        mock_redis.Redis.return_value = mock_instance
+        mock_redis.Redis.from_url.return_value = mock_instance
         with patch.dict("os.environ", {}, clear=True):
             with patch.dict(sys.modules, {"redis": mock_redis}):
                 assert _check_redis() == "ok"
+                mock_redis.Redis.from_url.assert_called_once_with("redis://localhost:6379/0")
                 mock_instance.ping.assert_called_once()
 
     def test_redis_uses_configured_url(self):
@@ -56,7 +57,7 @@ class TestCheckRedis:
         mock_redis = MagicMock()
         mock_instance = MagicMock()
         mock_instance.ping.side_effect = Exception("Connection refused")
-        mock_redis.Redis.return_value = mock_instance
+        mock_redis.Redis.from_url.return_value = mock_instance
         with patch.dict("os.environ", {}, clear=True):
             with patch.dict(sys.modules, {"redis": mock_redis}):
                 assert _check_redis() == "unavailable"
@@ -197,14 +198,14 @@ class TestPhase5HealthHelpers:
                 "pending_jobs": 0,
             }
 
-    @patch("src.dependencies.get_session_store")
+    @patch("src.adapters.inbound.http.dependencies.get_session_store")
     def test_active_session_count_uses_store_count_when_available(self, mock_store_factory):
         store = MagicMock()
         store.count.return_value = 7
         mock_store_factory.return_value = store
         assert _get_active_session_count() == 7
 
-    @patch("src.dependencies.get_session_store")
+    @patch("src.adapters.inbound.http.dependencies.get_session_store")
     def test_active_session_count_falls_back_to_list_sessions(self, mock_store_factory):
         store = MagicMock()
         del store.count
@@ -212,7 +213,7 @@ class TestPhase5HealthHelpers:
         mock_store_factory.return_value = store
         assert _get_active_session_count() == 2
 
-    @patch("src.dependencies.get_session_store", side_effect=Exception("store down"))
+    @patch("src.adapters.inbound.http.dependencies.get_session_store", side_effect=Exception("store down"))
     def test_active_session_count_returns_zero_on_exception(self, mock_store_factory):
         assert _get_active_session_count() == 0
 
@@ -341,7 +342,7 @@ class TestHealthEndpointIntegration:
     def test_root_endpoint_returns_service_metadata(self):
         response = self.client.get("/")
         assert response.status_code == 200
-        assert response.json()["service"] == "INFERRA-PyRest"
+        assert response.json()["service"] == "INFERRA Platform"
 
 
 @pytest.mark.integration
@@ -350,8 +351,8 @@ class TestLiveRedisConnection:
         assert _check_redis() == "ok"
 
     def test_redis_connection_refused(self):
-        with patch("redis.Redis") as mock_cls:
-            mock_cls.return_value.ping.side_effect = Exception("Connection refused")
+        with patch("redis.Redis.from_url") as mock_factory:
+            mock_factory.return_value.ping.side_effect = Exception("Connection refused")
             assert _check_redis() == "unavailable"
 
 

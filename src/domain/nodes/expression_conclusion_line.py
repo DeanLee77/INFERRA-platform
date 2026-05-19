@@ -8,7 +8,7 @@ import json
 import re
 from datetime import datetime
 from typing import Any, Dict, Optional
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 from src.domain.nodes.node import Node
 from src.domain.nodes.line_type import LineType
 from src.domain.fact_values import FactValue, FactValueType
@@ -17,7 +17,7 @@ from src.domain.nodes.meta_data import MetaData
 import sympy as sp
 
 # Protected Module-Level Logger (Access Level: Protected)
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class ExprConclusionLine(Node):
@@ -45,11 +45,11 @@ class ExprConclusionLine(Node):
             tokens: Tokenized representation
             meta_data: Metadata for the node
         """
-        super().__init__(id=id, parent_text=parent_text, tokens=tokens, meta_data=meta_data)
-        self._line_type = LineType.EXPR_CONCLUSION
         # Private instance variable (initialized in __init__ to avoid shared state)
         self.__equation: Optional[FactValue] = None
         self.__date_formatter: str = '%Y-%m-%d'
+        super().__init__(id=id, parent_text=parent_text, tokens=tokens, meta_data=meta_data)
+        self._line_type = LineType.EXPR_CONCLUSION
 
     # -------------------------------------------------------------------------
     # Public Access Level: API Methods (Getters)
@@ -199,6 +199,9 @@ class ExprConclusionLine(Node):
     # -------------------------------------------------------------------------
     # Protected Access Level: Internal Helpers (Single Underscore)
     # -------------------------------------------------------------------------
+    def initialisation(self, parent_text: str, tokens: Token) -> None:
+        self._initialisation(parent_text, tokens)
+
     def _initialisation(self, parent_text: str, tokens: Token) -> None:
         """
         Protected Helper: Initializes the expression conclusion line.

@@ -20,9 +20,10 @@ from typing import List, Optional
 from src.domain.exceptions import ConcurrentModificationError
 from src.domain.inference.session import InferenceSession
 from src.ports.session_store_port import SessionStorePort
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
+from src.infrastructure.secrets import redis_url_from_env
 
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class RedisSessionStore(SessionStorePort):
@@ -55,7 +56,7 @@ class RedisSessionStore(SessionStorePort):
             import redis
 
             self._redis = redis.Redis.from_url(
-                redis_url or os.environ.get("REDIS_URL", self.DEFAULT_URL)
+                redis_url or redis_url_from_env("REDIS_URL", self.DEFAULT_URL, 0)
             )
         if ping_on_init:
             self._redis.ping()

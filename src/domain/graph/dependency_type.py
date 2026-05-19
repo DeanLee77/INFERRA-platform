@@ -1,29 +1,72 @@
 """
-Dependency Type Enum for HyperAdjacencyGraph.
-Wraps the existing DependencyType bit flags for graph-level usage.
+Canonical graph dependency type flags.
 
-Phase 2.5 (WS-7): Migrated from IntEnum to IntFlag to enable native
-bitmask operations (|, &, in) without casting.
+The values intentionally preserve the legacy PALOS bitmask layout while using
+IntFlag so composed dependencies such as MANDATORY | AND remain first-class
+values.
 """
 
 from enum import IntFlag
-from src.domain.nodes.dependency_type import DependencyType as _DT
+from typing import List
 
 
 class DependencyType(IntFlag):
-    """
-    Graph-level dependency type enum.
-    Values match the bit-flag constants in nodes.dependency_type.DependencyType.
+    """Dependency relationship flags used by graph and matrix adapters."""
 
-    IntFlag enables native bitmask composition:
-      DependencyType.MANDATORY | DependencyType.AND  → DependencyType.MANDATORY|AND (72)
-      DependencyType.AND in (DependencyType.MANDATORY | DependencyType.AND)  → True
-    """
+    KNOWN = 1
+    NOT = 2
+    OR = 4
+    AND = 8
+    POSSIBLE = 16
+    OPTIONAL = 32
+    MANDATORY = 64
 
-    MANDATORY = _DT.get_mandatory()
-    OPTIONAL = _DT.get_optional()
-    POSSIBLE = _DT.get_possible()
-    AND = _DT.get_and()
-    OR = _DT.get_or()
-    NOT = _DT.get_not()
-    KNOWN = _DT.get_known()
+    @classmethod
+    def get_mandatory(cls) -> int:
+        return int(cls.MANDATORY)
+
+    @classmethod
+    def get_optional(cls) -> int:
+        return int(cls.OPTIONAL)
+
+    @classmethod
+    def get_possible(cls) -> int:
+        return int(cls.POSSIBLE)
+
+    @classmethod
+    def get_and(cls) -> int:
+        return int(cls.AND)
+
+    @classmethod
+    def get_or(cls) -> int:
+        return int(cls.OR)
+
+    @classmethod
+    def get_not(cls) -> int:
+        return int(cls.NOT)
+
+    @classmethod
+    def get_known(cls) -> int:
+        return int(cls.KNOWN)
+
+    @classmethod
+    def populating_dependency(cls) -> None:
+        """
+        Legacy compatibility hook.
+
+        The old node-level class appended to mutable class state. The canonical
+        enum is immutable, so callers should read get_dependency_array().
+        """
+
+    @classmethod
+    def get_dependency_array(cls) -> List[int]:
+        """Return dependency bits in legacy matcher order."""
+        return [
+            cls.get_and(),
+            cls.get_or(),
+            cls.get_not(),
+            cls.get_known(),
+            cls.get_mandatory(),
+            cls.get_optional(),
+            cls.get_possible(),
+        ]

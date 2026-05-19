@@ -20,9 +20,12 @@ from pydantic import BaseModel, Field
 
 import structlog
 
+from src.domain.state.fact_source import FactSource
+
 _logger = structlog.get_logger("inferra.session_schema")
 
 CURRENT_SCHEMA_VERSION = 5
+_KNOWN_FACT_SOURCE_VALUES = frozenset(source.value for source in FactSource)
 
 
 class SessionMetadata(BaseModel):
@@ -59,9 +62,34 @@ def _reconstruct_iteration_state(data: Dict[str, Any]) -> Dict[str, Any]:
     fact_sources = data.get("fact_sources", {})
     iteration_state: Dict[str, Any] = {}
     for name, source in fact_sources.items():
-        if source == "INFERRED" and "iterate" in name.lower():
+        if _normalise_fact_source_value(source) == FactSource.INFERRED.value and "iterate" in name.lower():
             iteration_state[name] = {"status": "unknown", "progress": {}}
     return iteration_state
+
+
+def _normalise_fact_source_value(source: Any) -> str:
+    if isinstance(source, FactSource):
+        return source.value
+    if isinstance(source, str) and source in _KNOWN_FACT_SOURCE_VALUES:
+        return source
+    return FactSource.INFERRED.value
+
+
+def _normalise_fact_sources(data: Dict[str, Any]) -> None:
+    """Keep persisted fact-source maps forward-compatible with future enum values."""
+    fact_sources = data.get("fact_sources")
+    if not isinstance(fact_sources, dict):
+        return
+    for name, source in list(fact_sources.items()):
+        normalised = _normalise_fact_source_value(source)
+        if normalised != source:
+            _logger.warning(
+                "fact_source_defaulted_to_inferred",
+                fact_name=name,
+                original_source=source,
+                default_source=normalised,
+            )
+        fact_sources[name] = normalised
 
 
 def migrate_session(data: Dict[str, Any], from_version: int = 0) -> Dict[str, Any]:
@@ -140,6 +168,7 @@ def migrate_session(data: Dict[str, Any], from_version: int = 0) -> Dict[str, An
         result["metadata"]["phase5_migration"] = True
         _logger.info("migrated_session_v4_to_v5")
 
+    _normalise_fact_sources(result)
     result.setdefault("metadata", {})["schema_version"] = CURRENT_SCHEMA_VERSION
     return result
 

@@ -20,7 +20,7 @@ from src.domain.inference.inference_engine import InferenceEngine
 from src.domain.iterate.iteration_engine import IterationEngine
 from src.domain.state.fact_source import FactSource
 from src.ports.iteration_port import IterationPort
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 from src.domain.nodes.comparison_line import ComparisonLine
 from src.domain.nodes.expression_conclusion_line import ExprConclusionLine
 from src.domain.nodes.iterate_context import IterateContext
@@ -34,7 +34,7 @@ from src.domain.state.feature_flags import FeatureFlags
 from src.domain.tokens import Token
 
 # Protected Module-Level Logger (Access Level: Protected)
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class IterateLine(Node):
@@ -62,8 +62,6 @@ class IterateLine(Node):
             tokens: Tokenized representation
             meta_data: Metadata for the node
         """
-        super().__init__(id=id, parent_text=parent_text, tokens=tokens, meta_data=meta_data)
-        self._line_type = LineType.ITERATE
         # Private instance variables (initialized in __init__ to avoid shared state)
         self.__number_of_target: Optional[str] = None
         self.__iterate_node_set: Optional[NodeSet] = None
@@ -84,6 +82,8 @@ class IterateLine(Node):
         # Phase 2: IterationEngine delegates through FactStorePort with
         # truth-maintenance. Active when LEGACY_ITERATE=false.
         self._iteration_engine: Optional[IterationEngine] = None
+        super().__init__(id=id, parent_text=parent_text, tokens=tokens, meta_data=meta_data)
+        self._line_type = LineType.ITERATE
 
     # -------------------------------------------------------------------------
     # Public Access Level: API Methods (Getters)
@@ -245,15 +245,11 @@ class IterateLine(Node):
         """
         parent_node_dictionary = parent_node_set.get_node_dictionary()
         this_node_dictionary: Dict[str, Node] = dict()
-        this_node_id_dictionary: Dict[int, str] = dict()
         new_node_set = NodeSet()
         new_node_set.set_node_set_name(parent_node_set.get_node_set_name())
 
-        new_node_set.register_node(self)
+        new_node_set.add_node(self)
         this_node_dictionary[self._node_name] = self
-        self_runtime_id = self._runtime_id(self)
-        if isinstance(self_runtime_id, int):
-            this_node_id_dictionary[self_runtime_id] = self._node_name
 
         child_names = self._iterate_child_names(parent_node_set)
         first_child_name = child_names[0] if child_names else None
@@ -269,14 +265,12 @@ class IterateLine(Node):
                 temp_node = self._clone_iterate_child(
                     temp_child_node,
                     next_nth_in_string,
-                    self._get_next_iterate_node_id(this_node_id_dictionary),
                 )
 
                 if temp_node:
                     self._register_iterate_clone(
                         new_node_set,
                         this_node_dictionary,
-                        this_node_id_dictionary,
                         temp_node,
                         temp_child_node,
                         parent_node_set.get_node_set_name(),
@@ -291,14 +285,12 @@ class IterateLine(Node):
                         parent_node_set,
                         new_node_set,
                         this_node_dictionary,
-                        this_node_id_dictionary,
                         child_name,
                         temp_node.get_node_name(),
                         next_nth_in_string,
                     )
 
         new_node_set.set_node_dictionary(this_node_dictionary)
-        new_node_set.set_node_id_dictionary(this_node_id_dictionary)
         new_node_set.set_fact_dictionary(parent_node_set.get_fact_dictionary())
         sorted_names = new_node_set.get_graph().topological_sort()
         if sorted_names:
@@ -659,7 +651,6 @@ class IterateLine(Node):
         parent_node_set: NodeSet,
         iterate_node_set: NodeSet,
         this_node_dictionary: Dict[str, Node],
-        this_node_id_dictionary: Dict[int, str],
         original_parent_name: str,
         modified_parent_name: str,
         next_nth_in_string: str,
@@ -689,14 +680,12 @@ class IterateLine(Node):
                 temp_node = self._clone_iterate_child(
                     temp_child_node,
                     next_nth_in_string,
-                    self._get_next_iterate_node_id(this_node_id_dictionary),
                 )
 
             if temp_node and temp_node.get_node_name() not in this_node_dictionary:
                 self._register_iterate_clone(
                     iterate_node_set,
                     this_node_dictionary,
-                    this_node_id_dictionary,
                     temp_node,
                     temp_child_node,
                     parent_node_set.get_node_set_name(),
@@ -711,28 +700,22 @@ class IterateLine(Node):
                     parent_node_set,
                     iterate_node_set,
                     this_node_dictionary,
-                    this_node_id_dictionary,
                     child_name,
                     temp_node.get_node_name(),
                     next_nth_in_string,
                 )
-
-    def _runtime_id(self, node: Node) -> Optional[int]:
-        runtime_id = getattr(node, "_node_id", None)
-        return runtime_id if isinstance(runtime_id, int) else None
 
     def _iterate_child_names(self, parent_node_set: NodeSet) -> List[str]:
         graph = parent_node_set.get_graph()
         if graph is None:
             return []
         children = list(graph.get_children_flat(self.get_node_name()))
-        node_dict = parent_node_set.get_node_dictionary()
         return sorted(
             children,
             key=lambda name: (
                 graph.lookup_by_name(name)
                 if graph.lookup_by_name(name) is not None
-                else self._runtime_id(node_dict.get(name)) if node_dict.get(name) is not None else 10**9,
+                else 10**9,
                 name,
             ),
         )
@@ -760,7 +743,6 @@ class IterateLine(Node):
         self,
         child_node: Node,
         nth: str,
-        next_node_id: int,
     ) -> Optional[Node]:
         node_text = nth + "  " + self.get_variable_name() + "  " + child_node.get_node_name()
         line_type = child_node.get_line_type()
@@ -768,13 +750,11 @@ class IterateLine(Node):
 
         if line_type == LineType.VALUE_CONCLUSION:
             temp_node = ValueConclusionLine(
-                id=next_node_id,
                 node_text=node_text,
                 tokens=child_node.get_tokens(),
             )
         elif line_type == LineType.COMPARISON:
             temp_node = ComparisonLine(
-                id=next_node_id,
                 node_text=node_text,
                 tokens=child_node.get_tokens(),
             )
@@ -787,7 +767,6 @@ class IterateLine(Node):
                 temp_node.set_value(temp_fact_value)
         elif line_type == LineType.EXPR_CONCLUSION:
             temp_node = ExprConclusionLine(
-                id=next_node_id,
                 node_text=node_text,
                 tokens=child_node.get_tokens(),
             )
@@ -797,33 +776,14 @@ class IterateLine(Node):
         self,
         iterate_node_set: NodeSet,
         this_node_dictionary: Dict[str, Node],
-        this_node_id_dictionary: Dict[int, str],
         temp_node: Node,
         source_node: Node,
         source_name: str,
     ) -> None:
         temp_node.set_node_line(source_node.get_node_line() or 0)
         temp_node.refresh_stable_node_id(source_name)
-        iterate_node_set.register_node(temp_node)
+        iterate_node_set.add_node(temp_node)
         this_node_dictionary[temp_node.get_node_name()] = temp_node
-        runtime_id = self._runtime_id(temp_node)
-        if runtime_id is not None:
-            this_node_id_dictionary[runtime_id] = temp_node.get_node_name()
-
-    @staticmethod
-    def _get_next_iterate_node_id(node_id_dictionary: Dict[int, str]) -> int:
-        """
-        Protected Helper: Returns the next available iterate runtime node ID.
-
-        Args:
-            node_id_dictionary: Current iterate node ID dictionary
-
-        Returns:
-            Next runtime node ID
-        """
-        if len(node_id_dictionary) == 0:
-            return 0
-        return max(node_id_dictionary.keys()) + 1
 
     def _transfer_fact_value(self, working_memory_one: Dict[str, Any], 
                              working_memory_two: Dict[str, Any]) -> None:
@@ -909,6 +869,9 @@ class IterateLine(Node):
     # -------------------------------------------------------------------------
     # Protected Access Level: Internal Helpers (Single Underscore)
     # -------------------------------------------------------------------------
+    def initialisation(self, parent_text: str, tokens: Token) -> None:
+        self._initialisation(parent_text, tokens)
+
     def _initialisation(self, parent_text: str, tokens: Token) -> None:
         """
         Protected Helper: Initializes the iterate line.

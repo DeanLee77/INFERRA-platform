@@ -1,14 +1,14 @@
 import os
 import time
 import random
-from typing import Generator
+from typing import Generator, Optional
 
 from .client import LLMClient
 from .text_splitter import split_content
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 from src.config import settings
 
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 def load_inferra_guidance() -> str:
@@ -42,7 +42,12 @@ Ensure no repetition and maintain syntactic continuity.
 IMPORTANT: Process only this section. Complete rule structures when possible. Stream output."""
 
 
-def transform_to_inferra_rules_stream(file_name: str, markdown_content: str) -> Generator[str, None, None]:
+def transform_to_inferra_rules_stream(
+    file_name: str,
+    markdown_content: str,
+    provider_id: Optional[str] = None,
+    model_id: Optional[str] = None,
+) -> Generator[str, None, None]:
     demo = settings.DEMO
     if demo:
         yield from _string_streamer(file_name)
@@ -55,7 +60,7 @@ def transform_to_inferra_rules_stream(file_name: str, markdown_content: str) -> 
         generated_so_far = ""
         inferra_guidance = load_inferra_guidance()
 
-        llm = LLMClient()
+        llm = LLMClient(provider_id=provider_id, model_id=model_id)
         if llm.client is None:
             yield "[ERROR] LLM client not configured\n"
             return
@@ -72,7 +77,15 @@ def transform_to_inferra_rules_stream(file_name: str, markdown_content: str) -> 
             for attempt in range(3):
                 try:
                     current_timeout = llm.timeout * (2 ** attempt)
-                    _logger.info(f"API call attempt {attempt+1}/3 for chunk {chunk_index} with timeout={current_timeout}s")
+                    _logger.info(
+                        "llm_stream_chunk_request",
+                        chunk_index=chunk_index,
+                        total_chunks=total_chunks,
+                        attempt=attempt + 1,
+                        timeout=current_timeout,
+                        provider_id=llm.provider_id,
+                        model_id=llm.model,
+                    )
 
                     stream = llm.client.chat.completions.create(
                         model=llm.model,

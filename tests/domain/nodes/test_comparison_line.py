@@ -334,7 +334,7 @@ class TestSelfEvaluate:
         result = cl.self_evaluate({"x": FactValue(5, FactValueType.INTEGER)})
         assert result.get_value() is False
 
-    def test_list_comparison_raises_attribute_error(self):
+    def test_list_comparison_returns_true_when_item_matches(self):
         cl = _make_cl()
         cl._variable_name = "x"
         cl._ComparisonLine__operator_string = "=="
@@ -344,17 +344,21 @@ class TestSelfEvaluate:
             [FactValue("target", FactValueType.STRING)],
             FactValueType.LIST
         )
-        with pytest.raises(AttributeError, match="NUMBER"):
-            cl.self_evaluate({"x": list_val})
+        result = cl.self_evaluate({"x": list_val})
 
-    def test_string_comparison_raises_attribute_error(self):
+        assert result.get_value() is True
+        assert result.get_value_type() == FactValueType.BOOLEAN
+
+    def test_string_comparison_returns_true_when_values_match(self):
         cl = _make_cl()
         cl._variable_name = "name"
         cl._ComparisonLine__operator_string = "=="
         cl._ComparisonLine__lhs = "name"
         cl._ComparisonLine__rhs = FactValue("Alice", FactValueType.STRING)
-        with pytest.raises(AttributeError, match="NUMBER"):
-            cl.self_evaluate({"name": FactValue("Alice", FactValueType.STRING)})
+        result = cl.self_evaluate({"name": FactValue("Alice", FactValueType.STRING)})
+
+        assert result.get_value() is True
+        assert result.get_value_type() == FactValueType.BOOLEAN
 
 
 class TestRepr:

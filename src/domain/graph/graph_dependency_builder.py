@@ -46,7 +46,9 @@ class GraphDependencyBuilder:
         """
         self._id_to_name[node_id] = name
         self._name_to_id[name] = node_id
-        self._graph.register_node(name, metadata)
+        graph_metadata = dict(metadata or {})
+        graph_metadata.setdefault("runtime_id", node_id)
+        self._graph.register_node(name, graph_metadata)
 
     def add_dependency(self, parent_id: int, child_id: int, dep_type: int) -> None:
         """

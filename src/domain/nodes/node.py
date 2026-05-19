@@ -17,10 +17,10 @@ from src.domain.nodes import node_id_utils
 from src.domain.tokens import Token, TokenStringDictionary
 from src.domain.fact_values import FactValue
 from src.domain.nodes.meta_data import MetaData
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 
 # Protected Module-Level Logger (Access Level: Protected)
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class Node(metaclass=ABCMeta):

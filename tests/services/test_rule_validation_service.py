@@ -46,13 +46,24 @@ class TestValidationEntry:
     def test_to_dict_includes_all_fields(self):
         err = ValidationError("CODE", "message", line=5, node_name="var")
         d = err.to_dict()
-        assert d == {"code": "CODE", "message": "message", "line": 5, "node_name": "var"}
+        assert d == {
+            "code": "CODE",
+            "message": "message",
+            "waiver_id": "CODE:var",
+            "line": 5,
+            "node_name": "var",
+        }
 
     def test_to_dict_omits_none_fields(self):
         err = ValidationError("CODE", "message")
         d = err.to_dict()
         assert "line" not in d
         assert "node_name" not in d
+        assert d["waiver_id"] == "CODE"
+
+    def test_waiver_id_uses_line_when_node_name_missing(self):
+        err = ValidationError("CODE", "message", line=7)
+        assert err.waiver_id == "CODE:line_7"
 
     def test_equality(self):
         a = ValidationError("CODE", "msg", line=1)
@@ -281,6 +292,150 @@ class TestTypeConsistency:
         )
         result = service.validate(rule_text)
         assert any(e.code == "TYPE_MISMATCH" for e in result.errors)
+
+    def test_variable_name_discrepancy_blocks_save_with_line_number(self, service):
+        rule_text = (
+            'INPUT the person is a member of the Reserves AS BOOLEAN\n'
+            'eligible for reserve benefit\n'
+            '    AND person is a member of the Reserves\n'
+        )
+        result = service.validate(rule_text)
+
+        discrepancies = [
+            e for e in result.errors
+            if e.code == "VARIABLE_NAME_DISCREPANCY"
+        ]
+        assert result.valid is False
+        assert len(discrepancies) == 1
+        assert discrepancies[0].line == 3
+        assert discrepancies[0].node_name == "person is a member of the Reserves"
+        assert "the person is a member of the Reserves" in discrepancies[0].message
+        assert "line 1" in discrepancies[0].message
+
+    def test_variable_name_discrepancy_suppresses_duplicate_noise(self, service):
+        rule_text = (
+            'INPUT the person is a member of the Reserves AS BOOLEAN\n'
+            'eligible for reserve benefit\n'
+            '    AND person is a member of the Reserves\n'
+        )
+        result = service.validate(rule_text)
+
+        assert not any(
+            e.code == "UNDECLARED_REFERENCE"
+            and e.node_name == "person is a member of the Reserves"
+            for e in result.errors
+        )
+        assert not any(
+            w.code == "UNUSED_DECLARATION"
+            and w.node_name == "the person is a member of the Reserves"
+            for w in result.warnings
+        )
+
+    def test_variable_name_discrepancy_normalizes_apostrophe_variants(self, service):
+        rule_text = (
+            "INPUT the person's age AS NUMBER\n"
+            'eligible for age benefit\n'
+            "    AND the person\u2019s age >= 60\n"
+        )
+        result = service.validate(rule_text)
+
+        discrepancies = [
+            e for e in result.errors
+            if e.code == "VARIABLE_NAME_DISCREPANCY"
+        ]
+        assert len(discrepancies) == 1
+        assert discrepancies[0].line == 3
+        assert discrepancies[0].node_name == "the person\u2019s age"
+
+    def test_phrase_reference_without_declaration_is_reported_with_line(self, service):
+        rule_text = (
+            'eligible for reserve benefit\n'
+            '    AND person is a member of the Reserves\n'
+        )
+        result = service.validate(rule_text)
+
+        undeclared = [
+            e for e in result.errors
+            if e.code == "UNDECLARED_REFERENCE"
+        ]
+        assert len(undeclared) == 1
+        assert undeclared[0].line == 2
+        assert undeclared[0].node_name == "person is a member of the Reserves"
+
+    def test_fixed_phrase_reference_counts_as_used_on_rhs(self, service):
+        rule_text = (
+            'FIXED qualifying age for male service pension IS 60\n'
+            'INPUT the person age AS NUMBER\n'
+            'eligible for age service pension\n'
+            '    AND the person age >= qualifying age for male service pension\n'
+        )
+        result = service.validate(rule_text)
+
+        assert result.valid is True
+        assert not any(
+            w.code == "UNUSED_DECLARATION"
+            and w.node_name == "qualifying age for male service pension"
+            for w in result.warnings
+        )
+
+    def test_needs_and_wants_prefixes_are_not_variable_references(self, service):
+        rule_text = (
+            'INPUT proof of service exists AS BOOLEAN\n'
+            'INPUT review evidence exists AS BOOLEAN\n'
+            'eligible for service outcome\n'
+            '    AND MANDATORY NEEDS proof of service exists\n'
+            '    WANTS review evidence exists\n'
+        )
+        result = service.validate(rule_text)
+
+        assert result.valid is True
+        assert not any(e.code == "UNDECLARED_REFERENCE" for e in result.errors)
+
+    def test_expression_phrase_references_do_not_split_into_words(self, service):
+        rule_text = (
+            'FIXED maximum pension rate IS 100\n'
+            'INPUT income reduction amount AS NUMBER\n'
+            'pension amount IS CALC maximum pension rate - income reduction amount\n'
+        )
+        result = service.validate(rule_text)
+
+        assert result.valid is True
+        assert not any(
+            e.code == "UNDECLARED_REFERENCE"
+            and e.node_name in {"maximum", "pension", "rate", "income", "reduction", "amount"}
+            for e in result.errors
+        )
+
+    def test_expression_quoted_text_is_not_a_variable_reference(self, service):
+        rule_text = (
+            'INPUT decoration type AS TEXT\n'
+            'FIXED victoria cross allowance rate IS 100\n'
+            'FIXED decoration allowance rate IS 50\n'
+            'decoration allowance amount IS CALC (decoration type = "Victoria Cross" ? victoria cross allowance rate : decoration allowance rate)\n'
+        )
+        result = service.validate(rule_text)
+
+        assert result.valid is True
+        assert not any(
+            e.code == "UNDECLARED_REFERENCE"
+            and e.node_name in {"Victoria", "Cross"}
+            for e in result.errors
+        )
+
+    def test_not_prefix_inside_variable_name_is_not_stripped(self, service):
+        rule_text = (
+            'INPUT notification sent to claimant AS BOOLEAN\n'
+            'claim notice complete\n'
+            '    notification sent to claimant\n'
+        )
+        result = service.validate(rule_text)
+
+        assert result.valid is True
+        assert not any(
+            e.code == "UNDECLARED_REFERENCE"
+            and e.node_name == "ification sent to claimant"
+            for e in result.errors
+        )
 
 
 # =============================================================================

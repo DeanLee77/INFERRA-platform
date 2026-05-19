@@ -33,7 +33,13 @@ class TestNodeIdCollisionResistance:
         line=st.integers(min_value=1, max_value=9999),
         var=st.text(min_size=1, max_size=50, alphabet=st.characters(whitelist_categories=("L", "N"))),
     )
-    @settings(max_examples=200, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=200,
+        suppress_health_check=[
+            HealthCheck.function_scoped_fixture,
+            HealthCheck.too_slow,
+        ],
+    )
     def test_deterministic_for_same_input(self, module, rule, line, var):
         """Same inputs always produce the same ID."""
         reset_parse_context()
@@ -56,7 +62,13 @@ class TestNodeIdCollisionResistance:
         line=st.integers(min_value=1, max_value=10000),
         var=st.text(min_size=1, max_size=30, alphabet=st.characters(whitelist_categories=("L", "N"))),
     )
-    @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=100,
+        suppress_health_check=[
+            HealthCheck.function_scoped_fixture,
+            HealthCheck.too_slow,
+        ],
+    )
     def test_id_is_16_chars_or_longer(self, line, var):
         """Generated IDs are at least 16 characters long."""
         reset_parse_context()

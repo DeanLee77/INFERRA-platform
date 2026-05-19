@@ -6,7 +6,7 @@ Implements access levels and strong typing where appropriate.
 
 import json
 from typing import Any, Dict, Optional
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 from src.domain.nodes.node import Node
 from src.domain.nodes.line_type import LineType
 from src.domain.fact_values import FactValue
@@ -14,7 +14,7 @@ from src.domain.tokens import Token
 from src.domain.nodes.meta_data import MetaData
 
 # Protected Module-Level Logger (Access Level: Protected)
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class ValueConclusionLine(Node):
@@ -49,10 +49,10 @@ class ValueConclusionLine(Node):
             tokens: Tokenized representation
             meta_data: Metadata for the node
         """
-        super().__init__(id=id, parent_text=node_text, tokens=tokens, meta_data=meta_data)
-        self._line_type = LineType.VALUE_CONCLUSION
         # Private instance variable (initialized in __init__ to avoid shared state)
         self.__is_plain_statement_format: bool = False
+        super().__init__(id=id, parent_text=node_text, tokens=tokens, meta_data=meta_data)
+        self._line_type = LineType.VALUE_CONCLUSION
 
     # -------------------------------------------------------------------------
     # Public Access Level: API Methods
@@ -88,7 +88,7 @@ class ValueConclusionLine(Node):
         
         self._node_name = node_text
         last_token_string = tokens.get_tokens_string_list()[token_string_list_size - 1]
-        self._set_value(last_token_string, last_token)
+        self.set_value(last_token_string, last_token)
 
     def get_is_plain_statement(self) -> bool:
         """

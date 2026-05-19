@@ -65,6 +65,57 @@ def test_lru_eviction_removes_oldest_snapshot():
     assert mgr.get_snapshot("s2") is not None
 
 
+def test_snapshot_expires_after_ttl():
+    now = [100.0]
+    mgr = SessionManager(ttl_seconds=10, clock=lambda: now[0])
+    mgr.create_snapshot("s1", _ctx("s1"))
+
+    now[0] = 111.0
+
+    assert mgr.get_snapshot("s1") is None
+    assert mgr.snapshot_count == 0
+
+
+def test_check_convergence_returns_pending_for_missing_snapshot():
+    result = SessionManager().check_convergence("missing")
+
+    assert result.converged is False
+    assert result.reason == "PENDING"
+    assert result.session_id == "missing"
+
+
+def test_goal_reached_stable_allows_pending_ontology_delta():
+    mgr = SessionManager()
+    ctx = _ctx()
+    ctx.fact_store.set_fact("goal", FactValue(True), FactSource.INFERRED)
+    ctx.set_ontology_delta(1)
+    mgr.create_snapshot("s1", ctx)
+
+    first = mgr.check_convergence("s1")
+    second = mgr.check_convergence("s1")
+
+    assert first.reason == "GOAL_REACHED"
+    assert second.reason == "GOAL_REACHED_STABLE"
+
+
+def test_canonical_hash_handles_plain_nested_values():
+    mgr = SessionManager()
+    first = {
+        "plain": {
+            "b": [FactValue(2), 3],
+            "a": "x",
+        }
+    }
+    second = {
+        "plain": {
+            "a": "x",
+            "b": [FactValue(2), 3],
+        }
+    }
+
+    assert mgr._compute_wm_hash(first) == mgr._compute_wm_hash(second)
+
+
 def test_inference_context_records_phase5_abduction_state():
     ctx = _ctx()
 

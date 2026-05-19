@@ -225,7 +225,7 @@ class TestMidSessionFlipStickiness:
 class TestFlagDefaults:
     def test_default_values(self):
         flags = FeatureFlags()
-        assert flags.use_hypergraph is False
+        assert flags.use_hypergraph is True
         assert flags.legacy_iterate is True
         assert flags.layered_memory is True
         assert flags.ml_optimized_dfs is False
@@ -249,6 +249,11 @@ class TestFlagDefaults:
         with patch.dict("os.environ", {"INFERRA_USE_HYPERGRAPH": "true"}):
             flags = FeatureFlags()
             assert flags.use_hypergraph is True
+
+    def test_env_can_disable_hypergraph_for_legacy_regression(self):
+        with patch.dict("os.environ", {"INFERRA_USE_HYPERGRAPH": "false"}):
+            flags = FeatureFlags()
+            assert flags.use_hypergraph is False
 
     def test_explicit_overrides_env(self):
         with patch.dict("os.environ", {"INFERRA_USE_HYPERGRAPH": "true"}):

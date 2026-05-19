@@ -6,6 +6,7 @@ from src.tasks.induction import mine_candidate_rules
 
 
 def test_celery_induction_adapter_start_batch():
+    CeleryInductionAdapter.clear_idempotency_cache()
     adapter = CeleryInductionAdapter()
     with patch("src.tasks.induction.run_induction_batch") as task:
         task.delay.return_value = MagicMock(id="job-1")
@@ -14,6 +15,19 @@ def test_celery_induction_adapter_start_batch():
 
     assert isinstance(adapter, InductionPort)
     assert result == {"job_id": "job-1", "status": "submitted", "rule_name": "rule"}
+
+
+def test_celery_induction_adapter_start_batch_is_idempotent():
+    CeleryInductionAdapter.clear_idempotency_cache()
+    adapter = CeleryInductionAdapter()
+    with patch("src.tasks.induction.run_induction_batch") as task:
+        task.delay.return_value = MagicMock(id="job-1")
+
+        first = adapter.start_batch(["s2", "s1"], "rule")
+        second = adapter.start_batch(["s1", "s2"], "rule")
+
+    assert first == second
+    task.delay.assert_called_once_with(["s2", "s1"], "rule")
 
 
 def test_celery_induction_adapter_get_status_success():

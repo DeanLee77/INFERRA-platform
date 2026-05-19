@@ -8,14 +8,14 @@ from typing import Dict, List, Optional, Set
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.state import FactSource, LayeredFactStore
 from src.ports.fact_store_port import FactStorePort
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 from src.domain.nodes.comparison_line import ComparisonLine
 from src.domain.nodes.line_type import LineType
 from src.domain.nodes.node import Node
 from src.domain.nodes.node_set import NodeSet
 
 # Protected Module-Level Logger (Access Level: Protected)
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class AssessmentState:

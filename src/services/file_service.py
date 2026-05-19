@@ -9,9 +9,9 @@ import tempfile
 from typing import Tuple, AsyncGenerator
 
 from src.config import settings
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 # Lazy imports for optional dependencies
 fitz = None
@@ -134,7 +134,7 @@ def handle_pdf_file(file_path: str) -> str:
             markdown_content += page.get_text() + "\n"
         return markdown_content
     except Exception as exc:
-        _logger.exception("Failed to extract PDF content from '%s': %s", file_path, exc)
+        _logger.exception("pdf_extraction_failed", file_path=file_path, error=str(exc))
         return '[PDF extraction error: Unable to open PDF file.]'
     finally:
         if doc is not None:

@@ -33,6 +33,7 @@ from src.adapters.inbound.http.routes.metrics import (
     llm_confidence_score,
     llm_response_length,
     reasoning_route_total,
+    _metrics_payload,
     _refresh_semantic_cache_gauges,
 )
 
@@ -168,6 +169,29 @@ class TestRefreshSemanticCacheGauges:
         assert semantic_cache_triples._value.get() == 0.0
         assert semantic_cache_memory_mb._value.get() == 0.0
         assert semantic_cache_hit_rate._value.get() == 0.0
+
+
+class TestMetricsPayloadCache:
+    @patch.dict("os.environ", {"INFERRA_METRICS_CACHE_TTL_SECONDS": "1"}, clear=False)
+    @patch("src.adapters.inbound.http.routes.metrics._generate_metrics_payload")
+    def test_metrics_payload_uses_short_cache_when_enabled(self, generate_payload):
+        generate_payload.side_effect = [b"first", b"second"]
+
+        first = _metrics_payload()
+        second = _metrics_payload()
+
+        assert first == b"first"
+        assert second == b"first"
+        generate_payload.assert_called_once()
+
+    @patch.dict("os.environ", {"INFERRA_METRICS_CACHE_TTL_SECONDS": "0"}, clear=False)
+    @patch("src.adapters.inbound.http.routes.metrics._generate_metrics_payload")
+    def test_metrics_payload_bypasses_cache_when_disabled(self, generate_payload):
+        generate_payload.side_effect = [b"first", b"second"]
+
+        assert _metrics_payload() == b"first"
+        assert _metrics_payload() == b"second"
+        assert generate_payload.call_count == 2
 
 
 @pytest.mark.integration

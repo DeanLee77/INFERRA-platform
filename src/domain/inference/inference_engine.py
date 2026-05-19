@@ -17,7 +17,7 @@ from src.domain.fact_values import FactValue, FactValueType
 from src.domain.inference.assessments import Assessments
 from src.domain.inference.question_resolver import QuestionResolver
 from src.domain.nodes.comparison_line import ComparisonLine
-from src.domain.nodes.dependency_type import DependencyType
+from src.domain.graph.dependency_type import DependencyType
 from src.domain.nodes.line_type import LineType
 from src.domain.nodes.node import Node
 from src.domain.nodes.node_set import NodeSet
@@ -25,9 +25,9 @@ from src.domain.nodes.value_conclusion_line import ValueConclusionLine
 from src.domain.state.fact_source import FactSource
 from src.domain.state.feature_flags import FeatureFlags
 from src.ports.dependency_graph_port import DependencyGraphPort
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 def _noop_question_callback(_: Any) -> None:

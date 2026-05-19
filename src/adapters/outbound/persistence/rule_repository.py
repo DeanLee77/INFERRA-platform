@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 from src.ports.rule_repository_port import RuleRepositoryPort
 from src.domain.models.rule import RuleEntity, RuleFileEntity, RuleHistoryEntity
 from .models import RuleORM, FileORM, HistoryORM
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class RuleRepositoryImpl(RuleRepositoryPort):
@@ -32,7 +32,7 @@ class RuleRepositoryImpl(RuleRepositoryPort):
     def find_id_by_name(self, rule_name: str) -> Optional[int]:
         rule = self._db.query(RuleORM).filter_by(name=rule_name).first()
         rule_id = rule.rule_id if rule else None
-        _logger.info(f"Found Rule ID: {rule_id}")
+        _logger.info("rule_id_found", rule_id=rule_id)
         return rule_id
 
     def find_rule_by_rule_name(self, rule_name: str) -> Optional[RuleEntity]:
@@ -68,7 +68,7 @@ class RuleRepositoryImpl(RuleRepositoryPort):
             return updated_rows > 0
         except SQLAlchemyError as exc:
             self._db.rollback()
-            _logger.exception("Failed to update rule '%s': %s", old_rule_name, exc)
+            _logger.exception("rule_update_failed", rule_name=old_rule_name, error=str(exc))
             raise
 
     def create_rule(self, rule_details: Dict[str, Any]) -> int:
@@ -85,7 +85,7 @@ class RuleRepositoryImpl(RuleRepositoryPort):
             return rule.rule_id
         except SQLAlchemyError as exc:
             self._db.rollback()
-            _logger.exception("Failed to create rule '%s': %s", rule_name, exc)
+            _logger.exception("rule_create_failed", rule_name=rule_name, error=str(exc))
             raise
 
     def create_rule_file(self, rule_id: int, new_file: bytearray) -> None:
@@ -94,13 +94,13 @@ class RuleRepositoryImpl(RuleRepositoryPort):
         if new_file is None:
             raise ValueError("new_file is required")
         try:
-            _logger.info(f"Creating new file for rule_id={rule_id}")
+            _logger.info("creating_rule_file", rule_id=rule_id)
             new_file_record = FileORM(rule_id=rule_id, files=new_file)
             self._db.add(new_file_record)
             self._db.commit()
         except SQLAlchemyError as exc:
             self._db.rollback()
-            _logger.exception("Failed to create file for rule_id=%s: %s", rule_id, exc)
+            _logger.exception("rule_file_create_failed", rule_id=rule_id, error=str(exc))
             raise
 
     def create_rule_history(self, rule_id: int, history: Dict[str, Any]) -> None:
@@ -114,7 +114,7 @@ class RuleRepositoryImpl(RuleRepositoryPort):
             self._db.commit()
         except SQLAlchemyError as exc:
             self._db.rollback()
-            _logger.exception("Failed to create history for rule_id=%s: %s", rule_id, exc)
+            _logger.exception("rule_history_create_failed", rule_id=rule_id, error=str(exc))
             raise
 
     def find_rule_by_rule_name_with_latest_history(self, rule_name: str) -> Optional[Dict[str, Any]]:

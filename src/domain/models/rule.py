@@ -1,6 +1,11 @@
 from dataclasses import dataclass, field
 from typing import Optional, List, Any, Dict
 
+from src.domain.models.rule_file_payload import (
+    decode_rule_file_graph_json,
+    decode_rule_file_text,
+)
+
 
 @dataclass
 class RuleEntity:
@@ -19,7 +24,12 @@ class RuleFileEntity:
     def decode_files(self) -> str:
         if self.files is None:
             raise ValueError("No file content stored")
-        return self.files.decode('utf-8')
+        return decode_rule_file_text(self.files)
+
+    def decode_graph_json(self) -> Optional[str]:
+        if self.files is None:
+            raise ValueError("No file content stored")
+        return decode_rule_file_graph_json(self.files)
 
 
 @dataclass

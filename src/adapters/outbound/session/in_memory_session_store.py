@@ -10,9 +10,9 @@ from typing import Dict, Optional, List
 from src.domain.exceptions import ConcurrentModificationError
 from src.ports.session_store_port import SessionStorePort
 from src.domain.inference.session import InferenceSession
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class InMemorySessionStore(SessionStorePort):

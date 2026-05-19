@@ -8,10 +8,11 @@ from fastapi.responses import JSONResponse
 from src.adapters.inbound.http import api_router
 from src.config import settings
 from src.domain.exceptions import RuleValidationError
-from src.infrastructure.auth_middleware import ApiKeyAuthMiddleware, RateLimitMiddleware
+from src.infrastructure.auth_middleware import ApiKeyAuthMiddleware
 from src.infrastructure.correlation_middleware import CorrelationIdMiddleware
 from src.infrastructure.logging_config import configure_logging
 from src.infrastructure.observability import configure_observability
+from src.infrastructure.rate_limiter import RateLimitMiddleware
 
 import structlog
 
@@ -72,9 +73,9 @@ def register_exception_handlers(app: FastAPI) -> None:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="INFERRA-PyRest",
+        title="INFERRA Platform API",
         version="2.0.0",
-        description="INFERRA PyRest FastAPI application",
+        description="INFERRA Platform FastAPI application",
         lifespan=lifespan,
     )
 

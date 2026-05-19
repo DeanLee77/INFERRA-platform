@@ -1,14 +1,14 @@
 import json
 from datetime import datetime
 from typing import Any, Dict, Optional
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 from src.domain.nodes.node import Node
 from src.domain.tokens import Token
 from src.domain.nodes.line_type import LineType
 from src.domain.fact_values import FactValue, FactValueType
 
 # Protected Module-Level Logger (Access Level: Protected)
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class ComparisonLine(Node):
@@ -35,12 +35,12 @@ class ComparisonLine(Node):
             child_text: Text content of the comparison
             tokens: Tokenized representation
         """
-        super().__init__(id=id, parent_text=child_text, tokens=tokens)
-        self._line_type = LineType.COMPARISON
         # Private instance variables (initialized in __init__ to avoid shared state)
         self.__operator_string: Optional[str] = None
         self.__lhs: Optional[str] = None
         self.__rhs: Optional[FactValue] = None
+        super().__init__(id=id, parent_text=child_text, tokens=tokens)
+        self._line_type = LineType.COMPARISON
 
     # -------------------------------------------------------------------------
     # Public Access Level: API Methods (Getters)
@@ -154,8 +154,10 @@ class ComparisonLine(Node):
             working_memory_rhs_value = self.__rhs
 
         if working_memory_lhs_value is None or working_memory_rhs_value is None:
-            _logger.debug("Comparison '%s' could not be evaluated because one or more operands are missing", 
-                         self.get_node_name())
+            _logger.debug(
+                "comparison_missing_operand",
+                node_name=self.get_node_name(),
+            )
             return None
 
         # Handle date comparison
@@ -178,9 +180,8 @@ class ComparisonLine(Node):
         # Handle numeric comparison
         elif (working_memory_lhs_value is not None) and \
              ((working_memory_lhs_value.get_value_type() == FactValueType.DECIMAL)
-                 or (working_memory_lhs_value.get_value_type() == FactValueType.DOUBLE)
-                or (working_memory_lhs_value.get_value_type() == FactValueType.INTEGER)
-                or (working_memory_lhs_value.get_value_type() == FactValueType.NUMBER)):
+                or (working_memory_lhs_value.get_value_type() == FactValueType.DOUBLE)
+                or (working_memory_lhs_value.get_value_type() == FactValueType.INTEGER)):
             
             return_value = self._compare_numeric(
                 working_memory_lhs_value.get_value(),
@@ -287,6 +288,9 @@ class ComparisonLine(Node):
     # -------------------------------------------------------------------------
     # Protected Access Level: Initialization (Single Underscore)
     # -------------------------------------------------------------------------
+    def initialisation(self, child_text: str, tokens: Token) -> None:
+        self._initialisation(child_text, tokens)
+
     def _initialisation(self, child_text: str, tokens: Token) -> None:
         """
         Protected Helper: Initializes the comparison line with text and tokens.

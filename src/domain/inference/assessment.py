@@ -6,12 +6,12 @@ Implements access levels and strong typing where appropriate.
 
 import json
 from typing import Any, Dict, List, Optional
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 from src.domain.nodes.node import Node
 from src.domain.nodes.node_set import NodeSet
 
 # Protected Module-Level Logger (Access Level: Protected)
-_logging: Logger = Logger.get_logger(__name__)
+_logging = get_logger(__name__)
 
 
 class Assessment:

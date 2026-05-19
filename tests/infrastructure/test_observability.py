@@ -103,8 +103,9 @@ def test_ensure_tracer_provider_builds_provider_once():
         with patch.object(observability.Resource, "create", return_value=resource) as create_resource:
             with patch.object(observability, "TracerProvider", return_value=provider) as provider_cls:
                 with patch("src.infrastructure.observability._build_span_exporter", return_value=None):
-                    with patch.object(observability.trace, "set_tracer_provider") as set_provider:
-                        assert observability._ensure_tracer_provider() is provider
+                    with patch("src.infrastructure.observability._build_sampler", return_value=None):
+                        with patch.object(observability.trace, "set_tracer_provider") as set_provider:
+                            assert observability._ensure_tracer_provider() is provider
 
     create_resource.assert_called_once()
     provider_cls.assert_called_once_with(resource=resource)
@@ -121,12 +122,52 @@ def test_ensure_tracer_provider_adds_batch_processor_when_exporter_exists():
         with patch.object(observability.Resource, "create", return_value=resource):
             with patch.object(observability, "TracerProvider", return_value=provider):
                 with patch("src.infrastructure.observability._build_span_exporter", return_value=exporter):
-                    with patch.object(observability, "BatchSpanProcessor", return_value=processor) as processor_cls:
-                        with patch.object(observability.trace, "set_tracer_provider"):
-                            assert observability._ensure_tracer_provider() is provider
+                    with patch("src.infrastructure.observability._build_sampler", return_value=None):
+                        with patch.object(observability, "BatchSpanProcessor", return_value=processor) as processor_cls:
+                            with patch.object(observability.trace, "set_tracer_provider"):
+                                assert observability._ensure_tracer_provider() is provider
 
     processor_cls.assert_called_once_with(exporter)
     provider.add_span_processor.assert_called_once_with(processor)
+
+
+def test_ensure_tracer_provider_uses_sampler_when_configured():
+    provider = Mock()
+    resource = Mock()
+    sampler = Mock()
+
+    with patch("src.infrastructure.observability._PROVIDER_CONFIGURED", False):
+        with patch.object(observability.Resource, "create", return_value=resource):
+            with patch.object(observability, "TracerProvider", return_value=provider) as provider_cls:
+                with patch("src.infrastructure.observability._build_span_exporter", return_value=None):
+                    with patch("src.infrastructure.observability._build_sampler", return_value=sampler):
+                        with patch.object(observability.trace, "set_tracer_provider"):
+                            assert observability._ensure_tracer_provider() is provider
+
+    provider_cls.assert_called_once_with(resource=resource, sampler=sampler)
+
+
+def test_build_sampler_returns_none_without_sample_rate():
+    with patch.dict("os.environ", {}, clear=True):
+        assert observability._build_sampler() is None
+
+
+def test_build_sampler_uses_inferra_sample_rate():
+    ratio_sampler = Mock(name="ratio-sampler")
+    parent_sampler = Mock(name="parent-sampler")
+
+    with patch.dict("os.environ", {"INFERRA_OTEL_SAMPLE_RATE": "0.05"}, clear=True):
+        with patch.object(observability, "TraceIdRatioBased", return_value=ratio_sampler) as ratio_cls:
+            with patch.object(observability, "ParentBased", return_value=parent_sampler) as parent_cls:
+                assert observability._build_sampler() is parent_sampler
+
+    ratio_cls.assert_called_once_with(0.05)
+    parent_cls.assert_called_once_with(ratio_sampler)
+
+
+def test_build_sampler_ignores_invalid_sample_rate():
+    with patch.dict("os.environ", {"INFERRA_OTEL_SAMPLE_RATE": "not-a-number"}, clear=True):
+        assert observability._build_sampler() is None
 
 
 def test_service_name_uses_environment_default_and_override():

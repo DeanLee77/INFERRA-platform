@@ -11,9 +11,9 @@ import json
 from typing import Any, Dict, List, Optional
 
 from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph, NodeRecord
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 SCHEMA_VERSION = 1
 

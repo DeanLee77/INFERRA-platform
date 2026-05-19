@@ -13,10 +13,10 @@ from src.domain.nodes.node_set import NodeSet
 from src.domain.nodes.record import HistoryRecord
 from src.domain.rule_parser.i_line_reader import ILineReader
 from src.domain.rule_parser.i_scan_feeder import IScanFeeder
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 
 # Protected Module-Level Logger (Access Level: Protected)
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class RuleSetScanner:
@@ -113,8 +113,14 @@ class RuleSetScanner:
                         
                         parent = parent_stack[-1]
                         temp_line_trimmed = re.sub(
-                            r"^(OR\s?|AND\s?)(MANDATORY|OPTIONALLY|POSSIBLY)?(\s?NOT|\s?KNOWN)*(NEEDS|WANTS)?",
-                            "", line_trimmed.strip()).strip()
+                            r"^(?:(?:OR|AND)\b\s*)?"
+                            r"(?:(?:MANDATORY|OPTIONALLY|POSSIBLY)\b\s*)?"
+                            r"(?:(?:NOT|KNOWN)\b\s*)*"
+                            r"(?:(?:NEEDS|WANTS)\b\s*)?",
+                            "",
+                            line_trimmed.strip(),
+                            flags=re.IGNORECASE,
+                        ).strip()
                         
                         temp_first_keywords_group = line_trimmed.replace(temp_line_trimmed, "").strip()
                         parent_stack.append(temp_line_trimmed.strip())
@@ -133,7 +139,7 @@ class RuleSetScanner:
 
     def establish_node_set(self, record_node_dictionary: Optional[Dict[str, HistoryRecord]] = None) -> NodeSet:
         node_set: NodeSet = self.__scan_feeder.get_node_set()
-        node_set.set_dependency_matrix(self.__scan_feeder.create_dependency_matrix())
+        node_set.set_graph(self.__scan_feeder.create_dependency_graph())
 
         graph = node_set.get_graph()
         if graph is not None:

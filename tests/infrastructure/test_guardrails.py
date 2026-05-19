@@ -18,11 +18,10 @@ _SRC_ROOT = Path(__file__).resolve().parent.parent.parent / "src"
 
 _LEGACY_MATRIX_IMPORT_WHITELIST: FrozenSet[str] = frozenset(
     {
-        "src/domain/nodes/node_set.py",
         "src/domain/graph/matrix_to_hyper_adapter.py",
         "src/domain/graph/graph_to_matrix_adapter.py",
-        "src/domain/rule_parser/rule_set_parser.py",
-        "src/domain/rule_parser/i_scan_feeder.py",
+        "src/domain/graph/__init__.py",
+        "src/domain/nodes/dependency_matrix.py",
     }
 )
 
@@ -30,11 +29,7 @@ _LEGACY_DVDM_IMPORT_WHITELIST: FrozenSet[str] = frozenset()
 
 _LEGACY_DEP_BUILDER_IMPORT_WHITELIST: FrozenSet[str] = frozenset()
 
-_LEGACY_GET_NODE_ID_WHITELIST: FrozenSet[str] = frozenset(
-    {
-        "src/domain/inference/topo_sort.py",
-    }
-)
+_LEGACY_GET_NODE_ID_WHITELIST: FrozenSet[str] = frozenset()
 
 _FORBIDDEN_MATRIX_SYMBOLS = (
     "DependencyMatrix",
@@ -79,6 +74,25 @@ def _read_imports_and_calls(filepath: Path) -> tuple:
                 called_attrs.add("get_node_id")
 
     return imported_symbols, called_attrs
+
+
+def _read_import_modules(filepath: Path) -> Set[str]:
+    source = filepath.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(source, filename=str(filepath))
+    except SyntaxError:
+        return set()
+
+    modules: Set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module:
+                modules.add(node.module)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                modules.add(alias.name)
+
+    return modules
 
 
 def _rel_path(filepath: Path) -> str:
@@ -151,6 +165,51 @@ class TestNodeIdUsageGuardrails:
             "_LEGACY_GET_NODE_ID_WHITELIST in test_guardrails.py."
         )
 
+    def test_iterate_line_subgraph_extraction_has_no_runtime_node_id_dictionary(self):
+        source = (_SRC_ROOT / "domain" / "nodes" / "iterate_line.py").read_text(
+            encoding="utf-8"
+        )
+        forbidden = (
+            "node_id_dictionary",
+            "_get_next_iterate_node_id",
+            "get_node_id(",
+        )
+        violations = [token for token in forbidden if token in source]
+
+        assert not violations, (
+            "IterateLine subgraph extraction must stay graph-name-keyed. "
+            "Forbidden runtime node-id tokens found: "
+            + ", ".join(violations)
+        )
+
+    def test_rule_set_scanner_establishes_graph_without_matrix_setter(self):
+        source = (_SRC_ROOT / "domain" / "rule_parser" / "rule_set_scanner.py").read_text(
+            encoding="utf-8"
+        )
+
+        assert "create_dependency_graph()" in source
+        assert "set_dependency_matrix(" not in source
+
+    def test_topo_sort_facade_has_no_private_matrix_algorithms(self):
+        source = (_SRC_ROOT / "domain" / "inference" / "topo_sort.py").read_text(
+            encoding="utf-8"
+        )
+        forbidden = (
+            "_create_copy_of_dependency_matrix",
+            "_count_incoming_edges",
+            "_get_child_ids",
+            "_check_for_cycles",
+            "_deepening",
+            "_visit(",
+        )
+        violations = [token for token in forbidden if token in source]
+
+        assert not violations, (
+            "topo_sort.py must stay a graph adapter facade. "
+            "Private matrix algorithms found: "
+            + ", ".join(violations)
+        )
+
 
 class TestWhitelistSanity:
     """Ensure whitelisted files still exist and still use the legacy API."""
@@ -213,4 +272,95 @@ class TestWhitelistSanity:
         assert "get_node_id" in called, (
             f"{filepath} is whitelisted for get_node_id() but no longer calls it. "
             "Remove it from _LEGACY_GET_NODE_ID_WHITELIST."
+        )
+
+
+class TestArchitectureBoundaryImports:
+    """Keep Bucket 2 restructuring boundaries from drifting back."""
+
+    def test_no_production_imports_from_removed_shared_package(self):
+        violations: list = []
+        for filepath in _collect_py_files(_SRC_ROOT):
+            rel = _rel_path(filepath)
+            modules = _read_import_modules(filepath)
+            if any(module == "src.shared" or module.startswith("src.shared.") for module in modules):
+                violations.append(rel)
+
+        assert not violations, (
+            "Production code imports from removed src.shared package:\n"
+            + "\n".join(f"  - {v}" for v in violations)
+            + "\n\nMove shared-looking symbols to their owning domain or infrastructure package."
+        )
+
+    def test_no_production_imports_from_removed_top_level_schemas_or_dependencies(self):
+        violations: list = []
+        removed_roots = ("src.schemas", "src.dependencies")
+        for filepath in _collect_py_files(_SRC_ROOT):
+            rel = _rel_path(filepath)
+            modules = _read_import_modules(filepath)
+            if any(module == root or module.startswith(f"{root}.") for module in modules for root in removed_roots):
+                violations.append(rel)
+
+        assert not violations, (
+            "Production code imports removed top-level HTTP shims:\n"
+            + "\n".join(f"  - {v}" for v in violations)
+            + "\n\nUse src.adapters.inbound.http.schemas or "
+            "src.adapters.inbound.http.dependencies instead."
+        )
+
+    def test_no_legacy_logger_imports(self):
+        violations: list = []
+        for filepath in _collect_py_files(_SRC_ROOT):
+            rel = _rel_path(filepath)
+            modules = _read_import_modules(filepath)
+            if "src.infrastructure.legacy_logger" in modules:
+                violations.append(rel)
+
+        assert not violations, (
+            "Production code imports src.infrastructure.legacy_logger:\n"
+            + "\n".join(f"  - {v}" for v in violations)
+            + "\n\nUse src.infrastructure.logging_config.get_logger instead."
+        )
+
+    def test_no_bare_stdlib_logging_outside_logging_config(self):
+        violations: list = []
+        allowed = {"src/infrastructure/logging_config.py"}
+        for filepath in _collect_py_files(_SRC_ROOT):
+            rel = _rel_path(filepath)
+            modules = _read_import_modules(filepath)
+            if "logging" in modules and rel not in allowed:
+                violations.append(rel)
+
+        assert not violations, (
+            "Production code imports bare stdlib logging outside logging_config:\n"
+            + "\n".join(f"  - {v}" for v in violations)
+            + "\n\nUse structlog via src.infrastructure.logging_config.get_logger."
+        )
+
+    def test_no_production_imports_from_legacy_node_graph_modules(self):
+        violations: list = []
+        legacy_modules = {
+            "src.domain.nodes.dependency",
+            "src.domain.nodes.dependency_matrix",
+            "src.domain.nodes.dependency_type",
+        }
+        shim_files = {
+            "src/domain/nodes/dependency.py",
+            "src/domain/nodes/dependency_matrix.py",
+            "src/domain/nodes/dependency_type.py",
+        }
+
+        for filepath in _collect_py_files(_SRC_ROOT):
+            rel = _rel_path(filepath)
+            if rel in shim_files:
+                continue
+            modules = _read_import_modules(filepath)
+            if legacy_modules.intersection(modules):
+                violations.append(rel)
+
+        assert not violations, (
+            "Production code imports graph concerns from src.domain.nodes:\n"
+            + "\n".join(f"  - {v}" for v in violations)
+            + "\n\nUse src.domain.graph.dependency, dependency_matrix, or "
+            "dependency_type instead."
         )

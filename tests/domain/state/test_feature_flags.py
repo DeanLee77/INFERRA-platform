@@ -19,7 +19,7 @@ class TestFeatureFlagStickiness:
     def test_default_values(self):
         """Feature flags have correct defaults."""
         flags = FeatureFlags()
-        assert flags.use_hypergraph is False
+        assert flags.use_hypergraph is True
         assert flags.legacy_iterate is True
         assert flags.layered_memory is True
 
@@ -110,3 +110,19 @@ class TestFeatureFlagStickiness:
         assert session_flags.is_frozen() is True
         # New session would use the new flags
         assert new_global_flags.use_hypergraph is True
+
+    def test_legacy_retirement_report_identifies_production_flag_gaps(self):
+        flags = FeatureFlags(
+            use_hypergraph=True,
+            legacy_iterate=True,
+            layered_memory=True,
+            ml_optimized_dfs=False,
+        )
+
+        report = flags.legacy_retirement_report()
+
+        assert report["use_hypergraph"]["ready"] is True
+        assert report["layered_memory"]["ready"] is True
+        assert report["legacy_iterate"]["ready"] is False
+        assert report["legacy_iterate"]["expected"] is False
+        assert report["ml_optimized_dfs"]["ready"] is True

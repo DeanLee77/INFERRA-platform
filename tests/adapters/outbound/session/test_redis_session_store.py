@@ -122,6 +122,45 @@ def test_redis_session_store_rejects_stale_update(sample_session):
         store.save(second_copy)
 
 
+def test_redis_session_store_worker_handoff_preserves_mutated_state(sample_session):
+    client = FakeRedis()
+    worker_a = RedisSessionStore(redis_client=client, namespace="test:sessions")
+    worker_b = RedisSessionStore(redis_client=client, namespace="test:sessions")
+
+    sample_session.owner_id = "user-a"
+    worker_a.save(sample_session)
+
+    session_on_worker_a = worker_a.get("s1")
+    assert session_on_worker_a is not None
+    session_on_worker_a.assessment_state_marker = {"answered": ["age"], "goal": True}
+    session_on_worker_a.owner_id = "user-a"
+    worker_a.save(session_on_worker_a)
+
+    restored_on_worker_b = worker_b.get("s1")
+
+    assert restored_on_worker_b is not None
+    assert restored_on_worker_b.version == 1
+    assert restored_on_worker_b.owner_id == "user-a"
+    assert restored_on_worker_b.assessment_state_marker == {"answered": ["age"], "goal": True}
+
+
+def test_redis_session_store_cross_worker_stale_update_is_rejected(sample_session):
+    client = FakeRedis()
+    worker_a = RedisSessionStore(redis_client=client, namespace="test:sessions")
+    worker_b = RedisSessionStore(redis_client=client, namespace="test:sessions")
+    worker_a.save(sample_session)
+
+    session_on_worker_a = worker_a.get("s1")
+    stale_on_worker_b = worker_b.get("s1")
+    assert session_on_worker_a is not None
+    assert stale_on_worker_b is not None
+
+    worker_a.save(session_on_worker_a)
+
+    with pytest.raises(ConcurrentModificationError):
+        worker_b.save(stale_on_worker_b)
+
+
 def test_redis_session_store_rejects_invalid_session():
     store = RedisSessionStore(redis_client=FakeRedis(), namespace="test:sessions")
 

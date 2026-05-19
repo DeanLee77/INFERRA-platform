@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from src.domain.tokens.tokenizer import Tokenizer
 from src.domain.tokens.token import Token
-from src.shared.constants.tokenizer_matcher_constant import TokenizerMatcherConstant
+from src.domain.tokens.tokenizer_matcher_constant import TokenizerMatcherConstant
 
 
 _VALID_ENUM_NAMES = [
@@ -43,13 +43,13 @@ def _mock_get_compiled_matcher(name):
 def _patch_tokenizer_constants():
     _pattern_cache.clear()
     with patch(
-        "src.shared.constants.tokenizer_matcher_constant.TokenizerMatcherConstant.get_all_matcher",
+        "src.domain.tokens.tokenizer_matcher_constant.TokenizerMatcherConstant.get_all_matcher",
         side_effect=_mock_get_all_matcher,
     ), patch(
-        "src.shared.constants.tokenizer_matcher_constant.TokenizerMatcherConstant.get_all_enums",
+        "src.domain.tokens.tokenizer_matcher_constant.TokenizerMatcherConstant.get_all_enums",
         side_effect=_mock_get_all_enums,
     ), patch(
-        "src.shared.constants.tokenizer_matcher_constant.TokenizerMatcherConstant.get_compiled_matcher",
+        "src.domain.tokens.tokenizer_matcher_constant.TokenizerMatcherConstant.get_compiled_matcher",
         side_effect=_mock_get_compiled_matcher,
     ), patch(
         "src.domain.tokens.tokenizer.TokenizerMatcherConstant",

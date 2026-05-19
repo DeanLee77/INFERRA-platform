@@ -146,7 +146,7 @@ class TestPublishDeadLetterEvent:
     def test_pushes_json_payload_to_redis(self):
         mock_redis_module = MagicMock()
         mock_client = MagicMock()
-        mock_redis_module.Redis.return_value = mock_client
+        mock_redis_module.Redis.from_url.return_value = mock_client
 
         with patch.dict(sys.modules, {"redis": mock_redis_module}):
             publish_dead_letter_event("rule1", "text", "hash1", "test error")
@@ -160,7 +160,7 @@ class TestPublishDeadLetterEvent:
 
     def test_handles_redis_unavailable(self):
         mock_redis_module = MagicMock()
-        mock_redis_module.Redis.side_effect = Exception("Connection refused")
+        mock_redis_module.Redis.from_url.side_effect = Exception("Connection refused")
         with patch.dict(sys.modules, {"redis": mock_redis_module}):
             publish_dead_letter_event("rule1", "text", "hash1", "test error")
 

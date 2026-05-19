@@ -41,6 +41,7 @@ class TestValidationRouter:
         assert data["valid"] is False
         assert len(data["errors"]) > 0
         assert data["errors"][0]["code"] == "EMPTY_RULE"
+        assert data["errors"][0]["waiver_id"] == "EMPTY_RULE"
 
     def test_validate_invalid_rule_with_duplicate(self, client):
         response = client.post(
@@ -53,7 +54,11 @@ class TestValidationRouter:
         assert response.status_code == 200
         data = response.json()
         assert data["valid"] is False
-        assert any(e["code"] == "DUPLICATE_DECLARATION" for e in data["errors"])
+        assert any(
+            e["code"] == "DUPLICATE_DECLARATION"
+            and e["waiver_id"] == "DUPLICATE_DECLARATION:rate"
+            for e in data["errors"]
+        )
 
     def test_validate_rule_with_type_mismatch(self, client):
         response = client.post(

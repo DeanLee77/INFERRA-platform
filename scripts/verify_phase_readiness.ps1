@@ -119,6 +119,14 @@ if (-not $SkipDockerSmoke) {
 
         Write-Host "reasoning smoke passed"
     }
+
+    Invoke-Step "Local Grafana endpoint" {
+        $grafana = Invoke-WebRequest -Uri "http://localhost:3000/api/health" -Method Get -TimeoutSec 15 -UseBasicParsing
+        if ($grafana.StatusCode -ne 200) {
+            throw "Grafana health endpoint did not return 200."
+        }
+        Write-Host "grafana health endpoint is reachable"
+    }
 }
 
 Write-Host ""

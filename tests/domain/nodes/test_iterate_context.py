@@ -16,7 +16,7 @@ import pytest
 
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
-from src.domain.nodes.dependency_type import DependencyType
+from src.domain.graph.dependency_type import DependencyType
 from src.domain.nodes.iterate_context import IterateContext
 from src.domain.nodes.iterate_line import IterateLine
 from src.domain.nodes.line_type import LineType
@@ -452,19 +452,6 @@ def test_ordinal_larger():
     assert IterateLine._ordinal(22) == "22nd"
     assert IterateLine._ordinal(23) == "23rd"
     assert IterateLine._ordinal(111) == "111th"
-
-
-# ===================================================================
-# 11. _get_next_iterate_node_id — static helper
-# ===================================================================
-
-
-def test_get_next_iterate_node_id_empty():
-    assert IterateLine._get_next_iterate_node_id({}) == 0
-
-
-def test_get_next_iterate_node_id_with_entries():
-    assert IterateLine._get_next_iterate_node_id({0: "a", 3: "b"}) == 4
 
 
 # ===================================================================

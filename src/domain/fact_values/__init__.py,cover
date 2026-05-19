@@ -1,7 +1,0 @@
-> from .fact_value import FactValue
-> from .fact_value_type import FactValueType
-  
-> __all__ = [
->     'FactValue',
->     'FactValueType'
-> ]

@@ -1,22 +1,68 @@
+name: inferra
+
+x-common-service: &common-service
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-app-service: &app-service
+  <<: *common-service
+  read_only: true
+  tmpfs:
+    - /tmp:size=128M,mode=1777
+
 services:
   api:
-    build: .
+    <<: *app-service
+    image: inferra-api:local
+    build:
+      context: .
     environment:
       INFERRA_REDIS_SESSION_STORE: "true"
+      INFERRA_USE_HYPERGRAPH: "true"
       INFERRA_ABDUCTION_ENABLED: "true"
       INFERRA_INDUCTION_PIPELINE: "true"
       INFERRA_REASONING_ROUTER: "true"
       INFERRA_OBSERVABILITY_ENABLED: "true"
+      INFERRA_AUTH_ENABLED: ${INFERRA_AUTH_ENABLED:-false}
+      INFERRA_API_KEY: ${INFERRA_API_KEY:-}
+      INFERRA_API_KEY_OWNER_ID: ${INFERRA_API_KEY_OWNER_ID:-api-key}
+      INFERRA_JWT_SECRET: ${INFERRA_JWT_SECRET:-}
+      INFERRA_CSRF_PROTECTION: ${INFERRA_CSRF_PROTECTION:-false}
+      INFERRA_CSRF_TOKEN: ${INFERRA_CSRF_TOKEN:-}
+      INFERRA_ENV: production
+      INFERRA_LOG_LEVEL: WARNING
+      INFERRA_RATE_LIMIT_PER_MINUTE: "120000"
+      INFERRA_METRICS_CACHE_TTL_SECONDS: "30.0"
+      INFERRA_OTEL_SAMPLE_RATE: "0.01"
+      INFERRA_LLM_PROVIDER: ${INFERRA_LLM_PROVIDER:-}
+      INFERRA_LLM_MODEL: ${INFERRA_LLM_MODEL:-}
+      INFERRA_LLM_BASE_URL: ${INFERRA_LLM_BASE_URL:-}
+      INFERRA_LLM_API_KEY: ${INFERRA_LLM_API_KEY:-}
+      INFERRA_LLM_API_KEY_FILE: ${INFERRA_LLM_API_KEY_FILE:-}
+      MODALRESEARCH_API_KEY: ${MODALRESEARCH_API_KEY:-}
+      MODALRESEARCH_API_KEY_FILE: ${MODALRESEARCH_API_KEY_FILE:-}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      NVIDIA_API_KEY_FILE: ${NVIDIA_API_KEY_FILE:-}
+      ZAI_BASE_URL: ${ZAI_BASE_URL:-}
+      ZAI_API_KEY: ${ZAI_API_KEY:-}
+      ZAI_API_KEY_FILE: ${ZAI_API_KEY_FILE:-}
+      ZAI_MODEL: ${ZAI_MODEL:-}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       FUSEKI_URL: http://fuseki:3030/inferra
-      FUSEKI_USER: admin
-      FUSEKI_PASSWORD: admin
+      FUSEKI_USER: ${FUSEKI_USER:-admin}
+      FUSEKI_PASSWORD: ${FUSEKI_PASSWORD:-admin}
       OTEL_SERVICE_NAME: inferra-api
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_INSECURE: "true"
-      SQLALCHEMY_DATABASE_URI: postgresql://inferra:inferra@postgres:5432/inferra
+      SQLALCHEMY_DATABASE_URI: ${SQLALCHEMY_DATABASE_URI:-postgresql://inferra:inferra@postgres:5432/inferra}
     ports:
       - "8000:8000"
     depends_on:
@@ -33,17 +79,34 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
   worker:
-    build: .
+    <<: *app-service
+    image: inferra-worker:local
+    build:
+      context: .
     command: celery -A src.tasks.celery_app.app worker --loglevel=INFO
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       FUSEKI_URL: http://fuseki:3030/inferra
-      FUSEKI_USER: admin
-      FUSEKI_PASSWORD: admin
-      SQLALCHEMY_DATABASE_URI: postgresql://inferra:inferra@postgres:5432/inferra
+      FUSEKI_USER: ${FUSEKI_USER:-admin}
+      FUSEKI_PASSWORD: ${FUSEKI_PASSWORD:-admin}
+      INFERRA_LLM_PROVIDER: ${INFERRA_LLM_PROVIDER:-}
+      INFERRA_LLM_MODEL: ${INFERRA_LLM_MODEL:-}
+      INFERRA_LLM_BASE_URL: ${INFERRA_LLM_BASE_URL:-}
+      INFERRA_LLM_API_KEY: ${INFERRA_LLM_API_KEY:-}
+      INFERRA_LLM_API_KEY_FILE: ${INFERRA_LLM_API_KEY_FILE:-}
+      MODALRESEARCH_API_KEY: ${MODALRESEARCH_API_KEY:-}
+      MODALRESEARCH_API_KEY_FILE: ${MODALRESEARCH_API_KEY_FILE:-}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      NVIDIA_API_KEY_FILE: ${NVIDIA_API_KEY_FILE:-}
+      ZAI_BASE_URL: ${ZAI_BASE_URL:-}
+      ZAI_API_KEY: ${ZAI_API_KEY:-}
+      ZAI_API_KEY_FILE: ${ZAI_API_KEY_FILE:-}
+      ZAI_MODEL: ${ZAI_MODEL:-}
+      SQLALCHEMY_DATABASE_URI: ${SQLALCHEMY_DATABASE_URI:-postgresql://inferra:inferra@postgres:5432/inferra}
     depends_on:
       redis:
         condition: service_healthy
@@ -51,47 +114,122 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "from src.tasks.celery_app import app; import sys; response = app.control.inspect(timeout=2).ping() or {}; sys.exit(0 if response else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   otel-collector:
+    <<: *common-service
     image: otel/opentelemetry-collector:0.96.0
     command: ["--config=/etc/otel-collector-config.yaml"]
     ports:
-      - "4317:4317"
-      - "4318:4318"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
 
+  prometheus:
+    <<: *common-service
+    image: prom/prometheus:v2.54.1
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+
+  loki:
+    <<: *common-service
+    image: grafana/loki:2.9.8
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ./monitoring/loki/local-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+
+  promtail:
+    <<: *common-service
+    image: grafana/promtail:2.9.8
+    command: ["-config.file=/etc/promtail/config.yml"]
+    volumes:
+      - ./monitoring/promtail/config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+
+  grafana:
+    <<: *common-service
+    image: grafana/grafana:11.2.2
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_DEFAULT_THEME: light
+      GF_METRICS_ENABLED: "true"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - loki
+      - postgres
+
   redis:
+    <<: *common-service
     image: redis:7
+    ports:
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 5s
 
   fuseki:
+    <<: *common-service
     image: stain/jena-fuseki
+    ports:
+      - "127.0.0.1:3030:3030"
     environment:
-      ADMIN_PASSWORD: admin
+      ADMIN_PASSWORD: ${FUSEKI_PASSWORD:-admin}
       FUSEKI_DATASET_1: inferra
       TDB: "2"
     volumes:
-      - inferra-fuseki-data:/fuseki
+      - fuseki-data:/fuseki
 
   postgres:
+    <<: *common-service
     image: postgres:16
     environment:
-      POSTGRES_USER: inferra
-      POSTGRES_PASSWORD: inferra
+      POSTGRES_USER: ${POSTGRES_USER:-inferra}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-inferra}
       POSTGRES_DB: inferra
     volumes:
-      - inferra-postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U inferra -d inferra"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
 volumes:
-  inferra-fuseki-data:
-  inferra-postgres-data:
+  fuseki-data:
+  postgres-data:
+  prometheus-data:
+  loki-data:
+  grafana-data:

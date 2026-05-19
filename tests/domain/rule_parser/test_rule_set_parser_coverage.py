@@ -17,11 +17,11 @@ from src.domain.nodes.node_set import NodeSet
 from src.domain.nodes.meta_data import MetaData
 from src.domain.nodes.meta_type import MetaType
 from src.domain.nodes.line_type import LineType
-from src.domain.nodes.dependency_type import DependencyType
-from src.domain.nodes.dependency import Dependency
+from src.domain.graph.dependency_type import DependencyType
+from src.domain.graph.dependency import Dependency
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.nodes import node_id_utils
-from src.shared.constants.tokenizer_matcher_constant import TokenizerMatcherConstant
+from src.domain.tokens.tokenizer_matcher_constant import TokenizerMatcherConstant
 
 
 _VALID_ENUM_NAMES = [

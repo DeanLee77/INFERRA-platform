@@ -123,6 +123,14 @@ async def abduct(request: AbductionRequest) -> AbductionResponse:
 
 @router.post("/goal", response_model=GoalMappingResponse)
 async def map_goal(request: GoalMappingRequest) -> GoalMappingResponse:
+    if not request.enabled:
+        llm_call_total.labels(operation="goal_mapping", status="fallback").inc()
+        llm_confidence_score.observe(0.0)
+        return GoalMappingResponse(
+            fallback=True,
+            message="LLM enhancements are disabled",
+        )
+
     orchestrator = create_llm_orchestrator(
         FeatureFlags(llm_enhancements=request.enabled)
     )

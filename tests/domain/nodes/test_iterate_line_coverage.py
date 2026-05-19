@@ -14,7 +14,7 @@ import pytest
 
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
-from src.domain.nodes.dependency_type import DependencyType
+from src.domain.graph.dependency_type import DependencyType
 from src.domain.nodes.iterate_line import IterateLine
 from src.domain.nodes.line_type import LineType
 from src.domain.nodes.node import Node
@@ -158,6 +158,32 @@ class TestCreateIterateNodeSet:
 
         result = line.create_iterate_node_set(parent_ns)
         assert result is not None
+
+    @patch('src.domain.nodes.iterate_line.ComparisonLine')
+    def test_create_iterate_node_set_uses_graph_without_parent_node_id_dictionary(self, MockCL):
+        mock_node = MagicMock()
+        mock_node.get_node_name.return_value = "1st  services  age > 18"
+        mock_node.get_node_id.return_value = 1
+        mock_rhs = MagicMock()
+        mock_rhs.get_value_type.return_value = FactValueType.INTEGER
+        mock_node.get_rhs.return_value = mock_rhs
+        MockCL.return_value = mock_node
+
+        line = _make_iterate_line(node_id=0, list_size=1)
+        first_child = _make_mock_node(1, "services count", LineType.COMPARISON, "services count")
+        child = _make_mock_node(2, "age > 18", LineType.COMPARISON, "age")
+        parent_ns = _build_parent_node_set(line, {1: first_child, 2: child}, [1, 2])
+        parent_ns.get_node_id_dictionary.side_effect = AssertionError(
+            "iterate runtime should read the graph, not parent node_id_dictionary"
+        )
+
+        result = line.create_iterate_node_set(parent_ns)
+
+        assert "1st  services  age > 18" in result.get_node_dictionary()
+        assert result.get_graph().get_dependency_type(
+            line.get_node_name(),
+            "1st  services  age > 18",
+        ) == DependencyType.get_or()
 
     @patch('src.domain.nodes.iterate_line.ComparisonLine')
     def test_create_iterate_node_set_comparison_string_rhs(self, MockCL):
@@ -547,13 +573,11 @@ class TestCreateIterateNodeSetAux:
 
         iterate_ns = MagicMock(spec=NodeSet)
         this_node_dict = {line.get_node_name(): line}
-        this_id_dict = {0: line.get_node_name()}
 
         line._create_iterate_node_set_aux(
             parent_ns,
             iterate_ns,
             this_node_dict,
-            this_id_dict,
             line.get_node_name(),
             line.get_node_name(),
             "1st",
@@ -575,13 +599,11 @@ class TestCreateIterateNodeSetAux:
 
         iterate_ns = MagicMock(spec=NodeSet)
         this_node_dict = {line.get_node_name(): line}
-        this_id_dict = {0: line.get_node_name()}
 
         line._create_iterate_node_set_aux(
             parent_ns,
             iterate_ns,
             this_node_dict,
-            this_id_dict,
             line.get_node_name(),
             line.get_node_name(),
             "1st",
@@ -601,13 +623,11 @@ class TestCreateIterateNodeSetAux:
 
         iterate_ns = MagicMock(spec=NodeSet)
         this_node_dict = {line.get_node_name(): line}
-        this_id_dict = {0: line.get_node_name()}
 
         line._create_iterate_node_set_aux(
             parent_ns,
             iterate_ns,
             this_node_dict,
-            this_id_dict,
             line.get_node_name(),
             line.get_node_name(),
             "1st",
@@ -619,13 +639,11 @@ class TestCreateIterateNodeSetAux:
         parent_ns = _build_parent_node_set(line, {}, [])
         iterate_ns = MagicMock(spec=NodeSet)
         this_node_dict = {}
-        this_id_dict = {}
 
         line._create_iterate_node_set_aux(
             parent_ns,
             iterate_ns,
             this_node_dict,
-            this_id_dict,
             line.get_node_name(),
             line.get_node_name(),
             "1st",
@@ -643,13 +661,11 @@ class TestCreateIterateNodeSetAux:
         pre_existing_key = "1st  services  eligible IS True"
         existing_clone = _make_mock_node(2, pre_existing_key, LineType.VALUE_CONCLUSION, "eligible")
         this_node_dict = {line.get_node_name(): line, pre_existing_key: existing_clone}
-        this_id_dict = {0: line.get_node_name(), 2: pre_existing_key}
 
         line._create_iterate_node_set_aux(
             parent_ns,
             iterate_ns,
             this_node_dict,
-            this_id_dict,
             line.get_node_name(),
             line.get_node_name(),
             "1st",

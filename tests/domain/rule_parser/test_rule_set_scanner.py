@@ -8,7 +8,7 @@ from src.domain.rule_parser.i_scan_feeder import IScanFeeder
 from src.domain.nodes.node_set import NodeSet
 from src.domain.nodes.meta_data import MetaData
 from src.domain.nodes.record import HistoryRecord
-from src.domain.nodes.dependency_matrix import DependencyMatrix
+from src.domain.graph.dependency_matrix import DependencyMatrix
 from src.domain.graph.dependency_type import DependencyType
 from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
 
@@ -206,6 +206,45 @@ class TestRuleSetScannerScanRuleSet:
         scanner = RuleSetScanner(reader, feeder)
         scanner.scan_rule_set()
 
+    def test_scan_child_with_and_mandatory_needs_keywords(self):
+        reader = _MockLineReader([
+            "status IS active\n",
+            "    AND MANDATORY NEEDS proof submitted\n"
+        ])
+        feeder = _MockScanFeeder()
+        scanner = RuleSetScanner(reader, feeder)
+        scanner.scan_rule_set()
+
+        assert feeder._children == [
+            ("status IS active", "proof submitted", "AND MANDATORY NEEDS", 2)
+        ]
+
+    def test_scan_child_with_needs_keyword_only(self):
+        reader = _MockLineReader([
+            "status IS active\n",
+            "    NEEDS proof submitted\n"
+        ])
+        feeder = _MockScanFeeder()
+        scanner = RuleSetScanner(reader, feeder)
+        scanner.scan_rule_set()
+
+        assert feeder._children == [
+            ("status IS active", "proof submitted", "NEEDS", 2)
+        ]
+
+    def test_scan_child_does_not_strip_not_inside_word(self):
+        reader = _MockLineReader([
+            "status IS active\n",
+            "    notification sent to claimant\n"
+        ])
+        feeder = _MockScanFeeder()
+        scanner = RuleSetScanner(reader, feeder)
+        scanner.scan_rule_set()
+
+        assert feeder._children == [
+            ("status IS active", "notification sent to claimant", "", 2)
+        ]
+
     def test_scan_invalid_indentation_triggers_warning(self):
         reader = _MockLineReader([
             "status IS active\n",
@@ -238,6 +277,15 @@ class TestRuleSetScannerEstablishNodeSet:
         scanner = RuleSetScanner(reader, feeder)
         node_set = scanner.establish_node_set()
         assert isinstance(node_set, NodeSet)
+
+    def test_scan_feeder_default_create_dependency_graph_initialises_missing_graph(self):
+        feeder = _MockScanFeeder()
+        feeder._node_set._NodeSet__graph = None
+
+        graph = feeder.create_dependency_graph()
+
+        assert isinstance(graph, HyperAdjacencyGraph)
+        assert feeder._node_set.get_graph() is graph
 
     def test_establish_node_set_with_records(self):
         reader = _MockLineReader([])

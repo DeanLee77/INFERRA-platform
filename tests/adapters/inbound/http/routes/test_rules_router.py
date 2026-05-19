@@ -238,12 +238,20 @@ class TestSaveConvertedRule:
                 "category": "Converted",
                 "description": "Desc",
                 "ruleText": "INPUT x AS NUMBER\nx > 10",
+                "waived_error_ids": ["TYPE_MISMATCH:x"],
             },
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["ruleName"] == "Converted Rule"
+        mock_save.assert_called_once_with(
+            "Converted Rule",
+            "Converted",
+            "Desc",
+            "INPUT x AS NUMBER\nx > 10",
+            waived_error_ids=["TYPE_MISMATCH:x"],
+        )
 
 
 # =============================================================================
@@ -260,12 +268,21 @@ class TestCreateFile:
 
         response = client.post(
             "/service/rule/createFile",
-            json={"ruleName": "Test Rule", "ruleText": "INPUT x AS NUMBER\nx > 10"},
+            json={
+                "ruleName": "Test Rule",
+                "ruleText": "INPUT x AS NUMBER\nx > 10",
+                "waived_error_ids": ["TYPE_MISMATCH:x"],
+            },
         )
 
         assert response.status_code == 200
         data = response.json()
         assert "ruleText" in data
+        mock_create_file.assert_called_once_with(
+            "Test Rule",
+            "INPUT x AS NUMBER\nx > 10",
+            waived_error_ids=["TYPE_MISMATCH:x"],
+        )
 
 
 # =============================================================================

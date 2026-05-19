@@ -128,3 +128,45 @@ def test_router_uses_env_confidence_threshold(monkeypatch):
     assert router.min_confidence == 0.95
     assert decision.mode == "DEDUCTION"
     assert decision.reason == "no_alternate_route"
+
+
+def test_router_confidence_threshold_precedence_session_rule_global():
+    router = ReasoningRouter(
+        MockAbductionAdapter([Hypothesis("maybe", "true", 0.7)]),
+        abduction_enabled=True,
+        min_confidence=0.5,
+        rule_confidence_thresholds={"strict_rule": 0.8},
+    )
+
+    rule_decision = router.route(
+        session_id="s1",
+        target="goal",
+        working_memory={},
+        graph_snapshot={},
+        iteration_count=2,
+        has_unasked_questions=False,
+        rule_name="strict_rule",
+    )
+    session_decision = router.route(
+        session_id="s1",
+        target="goal",
+        working_memory={},
+        graph_snapshot={},
+        iteration_count=2,
+        has_unasked_questions=False,
+        rule_name="strict_rule",
+        session_min_confidence=0.65,
+    )
+    explicit_rule_decision = router.route(
+        session_id="s1",
+        target="goal",
+        working_memory={},
+        graph_snapshot={},
+        iteration_count=2,
+        has_unasked_questions=False,
+        rule_min_confidence=0.75,
+    )
+
+    assert rule_decision.mode == "DEDUCTION"
+    assert session_decision.mode == "ABDUCTION"
+    assert explicit_rule_decision.mode == "DEDUCTION"

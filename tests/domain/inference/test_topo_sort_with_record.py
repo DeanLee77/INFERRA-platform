@@ -9,7 +9,7 @@ import pytest
 
 from src.domain.nodes.record import HistoryRecord
 from src.domain.inference.topo_sort import TopologicalSort
-from src.domain.nodes.dependency_type import DependencyType
+from src.domain.graph.dependency_type import DependencyType
 from src.ports.history_record_store_port import HistoryRecordStorePort
 from src.adapters.outbound.persistence.in_memory_history_record_store import InMemoryHistoryRecordStore
 
@@ -165,8 +165,31 @@ def _build_chain_graph():
     return node_dict, id_dict, matrix
 
 
+def _build_branching_chain_graph():
+    """
+    root -> (OR) -> mid, sibling
+    mid -> (OR) -> leaf
+    """
+    root = _make_node("root", 0)
+    mid = _make_node("mid", 1)
+    sibling = _make_node("sibling", 2)
+    leaf = _make_node("leaf", 3)
+
+    node_dict = {"root": root, "mid": mid, "sibling": sibling, "leaf": leaf}
+    id_dict = {0: "root", 1: "mid", 2: "sibling", 3: "leaf"}
+
+    or_dep = DependencyType.get_or()
+    matrix = [
+        [-1, or_dep, or_dep, -1],
+        [-1, -1, -1, or_dep],
+        [-1, -1, -1, -1],
+        [-1, -1, -1, -1],
+    ]
+    return node_dict, id_dict, matrix
+
+
 class TestDfsTopologicalSortWithRecord:
-    def test_falls_back_to_bfs_when_no_records(self):
+    def test_falls_back_to_deterministic_dfs_when_no_records(self):
         node_dict, id_dict, matrix = _build_simple_or_graph()
         result = TopologicalSort.dfs_topological_sort_with_record(
             node_dict, id_dict, matrix, {}
@@ -214,6 +237,21 @@ class TestDfsTopologicalSortWithRecord:
         names = [n.get_node_name() for n in result]
         assert names == ["root", "mid", "leaf"]
 
+    def test_branching_chain_uses_depth_first_history_path(self):
+        node_dict, id_dict, matrix = _build_branching_chain_graph()
+        records = {
+            "mid": HistoryRecord(name="mid", true_count=9, false_count=1),
+            "sibling": HistoryRecord(name="sibling", true_count=1, false_count=9),
+            "leaf": HistoryRecord(name="leaf", true_count=5, false_count=5),
+        }
+
+        result = TopologicalSort.dfs_topological_sort_with_record(
+            node_dict, id_dict, matrix, records
+        )
+
+        names = [n.get_node_name() for n in result]
+        assert names == ["root", "mid", "leaf", "sibling"]
+
     def test_missing_record_treated_as_zero(self):
         node_dict, id_dict, matrix = _build_simple_or_graph()
         records = {
@@ -251,74 +289,6 @@ class TestDfsTopologicalSortWithRecord:
             node_dict, id_dict, matrix, records
         )
         assert len(result) == 3
-
-
-class TestFindTheMostPositive:
-    def test_selects_highest_true_rate(self):
-        node_dict, id_dict, matrix = _build_simple_or_graph()
-        records = {
-            "a": HistoryRecord(name="a", true_count=8, false_count=2),
-            "b": HistoryRecord(name="b", true_count=2, false_count=8),
-        }
-        children = [node_dict["a"], node_dict["b"]]
-        result = TopologicalSort._find_the_most_positive(children, records)
-        assert result.get_node_name() == "a"
-
-    def test_tie_breaker_by_total(self):
-        node_dict, id_dict, matrix = _build_simple_or_graph()
-        records = {
-            "a": HistoryRecord(name="a", true_count=5, false_count=5),
-            "b": HistoryRecord(name="b", true_count=50, false_count=50),
-        }
-        children = [node_dict["a"], node_dict["b"]]
-        result = TopologicalSort._find_the_most_positive(children, records)
-        assert result.get_node_name() == "b"
-
-    def test_removes_winner_from_list(self):
-        node_dict, id_dict, matrix = _build_simple_or_graph()
-        records = {
-            "a": HistoryRecord(name="a", true_count=9, false_count=1),
-            "b": HistoryRecord(name="b", true_count=1, false_count=9),
-        }
-        children = [node_dict["a"], node_dict["b"]]
-        TopologicalSort._find_the_most_positive(children, records)
-        assert len(children) == 1
-
-
-class TestFindTheMostNegative:
-    def test_selects_highest_false_rate(self):
-        node_dict, id_dict, matrix = _build_simple_and_graph()
-        records = {
-            "a": HistoryRecord(name="a", true_count=8, false_count=2),
-            "b": HistoryRecord(name="b", true_count=2, false_count=8),
-        }
-        children = [node_dict["a"], node_dict["b"]]
-        result = TopologicalSort._find_the_most_negative(children, records)
-        assert result.get_node_name() == "b"
-
-    def test_removes_winner_from_list(self):
-        node_dict, id_dict, matrix = _build_simple_and_graph()
-        records = {
-            "a": HistoryRecord(name="a", true_count=9, false_count=1),
-            "b": HistoryRecord(name="b", true_count=1, false_count=9),
-        }
-        children = [node_dict["a"], node_dict["b"]]
-        TopologicalSort._find_the_most_negative(children, records)
-        assert len(children) == 1
-
-
-class TestIsBetterChoice:
-    def test_higher_rate_with_more_observations(self):
-        assert TopologicalSort._is_better_choice(0.8, 0.5, 100, 50) is True
-
-    def test_lower_rate(self):
-        assert TopologicalSort._is_better_choice(0.3, 0.8, 100, 50) is False
-
-    def test_zero_rate_with_more_observations(self):
-        assert TopologicalSort._is_better_choice(0.0, 0.0, 10, 5) is True
-
-    def test_zero_rate_with_fewer_observations(self):
-        assert TopologicalSort._is_better_choice(0.0, 0.0, 5, 10) is False
 
 
 class TestMlOptimizedDfsFeatureFlag:

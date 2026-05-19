@@ -2,7 +2,7 @@
 Feature flag configuration for INFERRA.
 
 Phase 1 feature flags:
-- USE_HYPERGRAPH: Use HyperAdjacencyGraph instead of DependencyMatrix (default: false)
+- USE_HYPERGRAPH: Use HyperAdjacencyGraph instead of DependencyMatrix (default: true)
 - LEGACY_ITERATE: Use nested InferenceEngine for iterate (default: true)
 - LAYERED_MEMORY: Use LayeredFactStore for working memory (default: true)
 - ML_OPTIMIZED_DFS: Use DFS topo-sort with HistoryRecord (default: false)
@@ -69,7 +69,7 @@ class FeatureFlags:
         reasoning_router: Optional[bool] = None,
         confidence_thresholds: Optional[bool] = None,
     ):
-        self._use_hypergraph = use_hypergraph if use_hypergraph is not None else self._env_bool("USE_HYPERGRAPH", False)
+        self._use_hypergraph = use_hypergraph if use_hypergraph is not None else self._env_bool("USE_HYPERGRAPH", True)
         self._legacy_iterate = legacy_iterate if legacy_iterate is not None else self._env_bool("LEGACY_ITERATE", True)
         self._layered_memory = layered_memory if layered_memory is not None else self._env_bool("LAYERED_MEMORY", True)
         self._ml_optimized_dfs = ml_optimized_dfs if ml_optimized_dfs is not None else self._env_bool("ML_OPTIMIZED_DFS", False)
@@ -206,6 +206,39 @@ class FeatureFlags:
             "induction_pipeline": self._induction_pipeline,
             "reasoning_router": self._reasoning_router,
             "confidence_thresholds": self._confidence_thresholds,
+        }
+
+    def legacy_retirement_report(self) -> dict:
+        """Report legacy flags that must be frozen or retired before production."""
+        return {
+            "use_hypergraph": {
+                "actual": self._use_hypergraph,
+                "expected": True,
+                "status": "required_on",
+                "ready": self._use_hypergraph is True,
+                "reason": "HyperAdjacencyGraph is the canonical runtime graph.",
+            },
+            "layered_memory": {
+                "actual": self._layered_memory,
+                "expected": True,
+                "status": "required_on",
+                "ready": self._layered_memory is True,
+                "reason": "Phase 2+ truth-maintenance depends on LayeredFactStore.",
+            },
+            "legacy_iterate": {
+                "actual": self._legacy_iterate,
+                "expected": False,
+                "status": "deprecated",
+                "ready": self._legacy_iterate is False,
+                "reason": "IterationEngine is the production path; legacy nested inference is compatibility only.",
+            },
+            "ml_optimized_dfs": {
+                "actual": self._ml_optimized_dfs,
+                "expected": "deployment_decision",
+                "status": "optional_strategy",
+                "ready": True,
+                "reason": "MLTopologicalSortStrategy supports both deterministic DFS and history-aware ordering.",
+            },
         }
 
 

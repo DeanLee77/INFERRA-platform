@@ -9,15 +9,15 @@ Rate limiting: per-task rate limit of 10/m prevents overwhelming Fuseki
 on bulk rule saves. Submission-level idempotency skips duplicate tasks.
 """
 
-import os
+from src.infrastructure.secrets import redis_url_from_env
 
 try:
     from celery import Celery
 
     app = Celery(
         "inferra",
-        broker=os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0"),
-        backend=os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/1"),
+        broker=redis_url_from_env("CELERY_BROKER_URL", "redis://localhost:6379/0", 0),
+        backend=redis_url_from_env("CELERY_RESULT_BACKEND", "redis://localhost:6379/1", 1),
     )
 
     app.conf.update(

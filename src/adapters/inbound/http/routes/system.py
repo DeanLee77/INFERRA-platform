@@ -8,7 +8,6 @@ Phase 1 WS-5: Enhanced health check with component-level status
 Phase 2: Extended health check with Celery, Fuseki, and SemanticCache stats.
 """
 
-import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -19,6 +18,7 @@ from sqlalchemy.orm import Session
 import structlog
 
 from src.adapters.inbound.http.dependencies import get_db_session
+from src.infrastructure.secrets import redis_client_from_env
 
 router = APIRouter(tags=["system"])
 logger = structlog.get_logger("inferra.fastapi.system")
@@ -39,9 +39,7 @@ class LivenessResponse(BaseModel):
 
 def _check_redis() -> str:
     try:
-        import redis
-        redis_url = os.environ.get("REDIS_URL")
-        r = redis.Redis.from_url(redis_url) if redis_url else redis.Redis()
+        r = redis_client_from_env("REDIS_URL", "redis://localhost:6379/0", 0)
         r.ping()
         return "ok"
     except Exception:
@@ -120,7 +118,7 @@ def _get_induction_worker_status() -> dict:
 
 def _get_active_session_count() -> int:
     try:
-        from src.dependencies import get_session_store
+        from src.adapters.inbound.http.dependencies import get_session_store
         store = get_session_store()
         if hasattr(store, "count"):
             return int(store.count())
@@ -133,7 +131,7 @@ def _get_active_session_count() -> int:
 @router.get("/")
 async def root() -> dict[str, str]:
     return {
-        "service": "INFERRA-PyRest",
+        "service": "INFERRA Platform",
         "framework": "FastAPI",
         "status": "running",
     }

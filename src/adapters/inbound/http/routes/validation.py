@@ -8,7 +8,7 @@ from functools import lru_cache
 
 from fastapi import APIRouter, Depends
 
-from src.schemas.validation_schemas import (
+from src.adapters.inbound.http.schemas.validation import (
     RuleValidateRequest,
     RuleValidateResponse,
     ValidationEntryDetail,
@@ -54,6 +54,7 @@ async def validate_rule(
         ValidationEntryDetail(
             code=e.code,
             message=e.message,
+            waiver_id=e.waiver_id,
             line=e.line,
             node_name=e.node_name,
         )
@@ -64,6 +65,7 @@ async def validate_rule(
         ValidationEntryDetail(
             code=w.code,
             message=w.message,
+            waiver_id=w.waiver_id,
             line=w.line,
             node_name=w.node_name,
         )

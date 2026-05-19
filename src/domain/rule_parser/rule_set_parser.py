@@ -5,13 +5,13 @@ Implements access levels and strong typing where appropriate.
 """
 
 import re
+import warnings
 from abc import ABC
 from datetime import datetime
-from typing import Dict, List, Optional
-from src.shared.constants import DependencyTypeStringMatcher
-from src.domain.nodes.dependency import Dependency
-from src.domain.nodes.dependency_matrix import DependencyMatrix
-from src.domain.nodes.dependency_type import DependencyType
+from typing import Any, Dict, List, Optional
+from src.domain.graph.dependency import Dependency
+from src.domain.graph.graph_dependency_builder import GraphDependencyBuilder
+from src.domain.graph.dependency_type import DependencyType
 from src.domain.nodes.expression_conclusion_line import ExprConclusionLine
 from src.domain.nodes.iterate_line import IterateLine
 from src.domain.nodes.line_type import LineType
@@ -24,13 +24,15 @@ from src.domain.nodes.node import Node
 from src.domain.nodes.comparison_line import ComparisonLine
 from src.domain.nodes.meta_data import MetaData
 from src.domain.nodes.value_conclusion_line import ValueConclusionLine
+from src.domain.rule_parser.dependency_type_string_matcher import DependencyTypeStringMatcher
 from src.domain.rule_parser.i_scan_feeder import IScanFeeder
+from src.domain.rule_parser.line_matcher_constant import LineMatcherConstant
 from src.domain.tokens import Tokenizer
-from src.shared.constants import LineMatcherConstant
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
+from src.ports.dependency_graph_port import DependencyGraphPort
 
 # Protected Module-Level Logger (Access Level: Protected)
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class RuleSetParser(IScanFeeder, ABC):
@@ -219,13 +221,15 @@ class RuleSetParser(IScanFeeder, ABC):
         
         if meta_type == MetaType.INPUT:
             fact_value = self.__node_set.get_input_dictionary().get(string_to_get_fact_value)
-            if fact_value.get_value_type().value is not FactValueType.LIST.value:
+            if fact_value is None or fact_value.get_value_type() != FactValueType.LIST:
                 fact_value = FactValue(list(), FactValueType.LIST)
+                self.__node_set.get_input_dictionary()[string_to_get_fact_value] = fact_value
             fact_value.get_value().append(fv)
         elif meta_type == MetaType.FIXED:
             fact_value = self.__node_set.get_fact_dictionary().get(string_to_get_fact_value)
-            if fact_value.get_value_type().value is not FactValueType.LIST.value:
+            if fact_value is None or fact_value.get_value_type() != FactValueType.LIST:
                 fact_value = FactValue(list(), FactValueType.LIST)
+                self.__node_set.get_fact_dictionary()[string_to_get_fact_value] = fact_value
             fact_value.get_value().append(fv)
 
     def handle_warning(self, parent_text: str) -> str:
@@ -242,14 +246,10 @@ class RuleSetParser(IScanFeeder, ABC):
         _logger.warning(warning_text)
         return warning_text
 
-    def create_dependency_matrix(self) -> DependencyMatrix:
+    def create_dependency_graph(self) -> DependencyGraphPort:
         dependency_list = list(self.__dependencies)
         self.__node_set.set_node_dictionary(self._handling_virtual_node(dependency_list))
-        
-        number_of_rules = self._get_dependency_matrix_size(dependency_list)
-        dependency_matrix = [[-1] * number_of_rules for i in range(number_of_rules)]
 
-        from src.domain.graph.graph_dependency_builder import GraphDependencyBuilder
         graph_builder = GraphDependencyBuilder()
 
         for node in self.__node_set.get_node_dictionary().values():
@@ -267,24 +267,25 @@ class RuleSetParser(IScanFeeder, ABC):
                 graph_builder.graph.register_node(node_name, metadata)
 
         for dp in dependency_list:
-            parent_id = getattr(dp.get_parent_node(), "_node_id", None)
-            child_id = getattr(dp.get_child_node(), "_node_id", None)
-            dp_type = dp.get_dependency_type()
-            if (
-                isinstance(parent_id, int)
-                and isinstance(child_id, int)
-                and parent_id < number_of_rules
-                and child_id < number_of_rules
-            ):
-                existing = dependency_matrix[parent_id][child_id]
-                dependency_matrix[parent_id][child_id] = (
-                    existing | dp_type if existing != -1 else dp_type
-                )
-                graph_builder.add_dependency(parent_id, child_id, dp_type)
+            graph_builder.add_dependencies_from_nodes(
+                dp.get_parent_node(),
+                dp.get_child_node(),
+                dp.get_dependency_type(),
+            )
 
         self.__node_set.set_graph(graph_builder.graph)
+        return graph_builder.graph
 
-        return DependencyMatrix(dependency_matrix)
+    def create_dependency_matrix(self) -> Any:
+        warnings.warn(
+            "RuleSetParser.create_dependency_matrix() is deprecated; use "
+            "create_dependency_graph() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        from src.domain.graph.graph_to_matrix_adapter import GraphToMatrixAdapter
+
+        return GraphToMatrixAdapter(self.create_dependency_graph())
 
     # -------------------------------------------------------------------------
     # Protected Access Level: Internal Helpers (Single Underscore)
@@ -293,8 +294,8 @@ class RuleSetParser(IScanFeeder, ABC):
         """
         Protected Helper: Record a parser dependency without the legacy builder.
 
-        Graph construction happens in create_dependency_matrix(); the returned
-        DependencyMatrix is now a compatibility payload only.
+        Graph construction happens in create_dependency_graph(); the returned
+        dependency matrix is now a compatibility view only.
         """
         self.__dependencies.append(Dependency(parent, child, dependency_type))
 
@@ -467,29 +468,28 @@ class RuleSetParser(IScanFeeder, ABC):
         
         if node_data is None:
             match_patterns = [
-                LineMatcherConstant.VALUE_CONCLUSION_MATCHER.value,
-                LineMatcherConstant.COMPARISON_MATCHER.value,
-                LineMatcherConstant.ITERATE_MATCHER.value,
-                LineMatcherConstant.EXPRESSION_CONCLUSION_MATCHER.value,
-                LineMatcherConstant.WARNING_MATCHER.value
+                (LineMatcherConstant.COMPARISON_MATCHER.value, "comparison"),
+                (LineMatcherConstant.ITERATE_MATCHER.value, "iterate"),
+                (LineMatcherConstant.EXPRESSION_CONCLUSION_MATCHER.value, "expression"),
+                (LineMatcherConstant.VALUE_CONCLUSION_MATCHER.value, "value"),
+                (LineMatcherConstant.WARNING_MATCHER.value, "warning"),
             ]
             
-            for pattern_index in range(len(match_patterns)):
-                pattern = match_patterns[pattern_index]
+            for pattern, line_kind in match_patterns:
                 match = re.match(pattern, tokens.get_tokens_string())
                 
                 if match:
-                    if pattern_index == 4:
+                    if line_kind == "warning":
                         self.handle_warning(child_text)
-                    elif pattern_index == 0:
+                    elif line_kind == "value":
                         node_data = ValueConclusionLine(next_node_id, child_text, tokens)
                         self._handle_child_value_conclusion(node_data)
-                    elif pattern_index == 1:
+                    elif line_kind == "comparison":
                         node_data = ComparisonLine(next_node_id, child_text, tokens)
                         self._handle_child_comparison(node_data)
-                    elif pattern_index == 2:
+                    elif line_kind == "iterate":
                         node_data = IterateLine(next_node_id, child_text, tokens)
-                    elif pattern_index == 3:
+                    elif line_kind == "expression":
                         node_data = ExprConclusionLine(next_node_id, child_text, tokens)
                     else:
                         self.handle_warning(child_text)
@@ -587,7 +587,7 @@ class RuleSetParser(IScanFeeder, ABC):
         """
         virtual_node_dictionary = {}
         
-        for each_node in self.__node_set.get_node_dictionary().values():
+        for each_node in list(self.__node_set.get_node_dictionary().values()):
             virtual_node_dictionary[each_node.get_node_name()] = each_node
             temp_dependency_list = list(filter(
                 lambda dp: each_node.get_node_name() == dp.get_parent_node().get_node_name(),

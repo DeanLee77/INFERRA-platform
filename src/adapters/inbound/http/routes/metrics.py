@@ -6,6 +6,10 @@ async pipeline observability. Metrics cover Fuseki sync, graph
 propagation, import resolution, and semantic cache state.
 """
 
+import os
+import time
+from threading import Lock
+
 from fastapi import APIRouter
 from prometheus_client import Counter, Gauge, Histogram, generate_latest
 from starlette.responses import PlainTextResponse
@@ -105,6 +109,17 @@ llm_response_length = Histogram(
     buckets=[0, 50, 100, 250, 500, 1000, 2500, 6000],
 )
 
+_metrics_cache_lock = Lock()
+_metrics_cache_payload: bytes | None = None
+_metrics_cache_expires_at = 0.0
+
+
+def _metrics_cache_ttl_seconds() -> float:
+    try:
+        return max(float(os.environ.get("INFERRA_METRICS_CACHE_TTL_SECONDS", "0")), 0.0)
+    except ValueError:
+        return 0.0
+
 
 def _refresh_semantic_cache_gauges() -> None:
     try:
@@ -120,10 +135,35 @@ def _refresh_semantic_cache_gauges() -> None:
         semantic_cache_hit_rate.set(0.0)
 
 
+def _generate_metrics_payload() -> bytes:
+    _refresh_semantic_cache_gauges()
+    return generate_latest()
+
+
+def _metrics_payload() -> bytes:
+    """Return Prometheus output, optionally cached for high-frequency scrapes."""
+    global _metrics_cache_payload, _metrics_cache_expires_at
+
+    ttl_seconds = _metrics_cache_ttl_seconds()
+    if ttl_seconds <= 0:
+        return _generate_metrics_payload()
+
+    now = time.monotonic()
+    if _metrics_cache_payload is not None and now < _metrics_cache_expires_at:
+        return _metrics_cache_payload
+
+    with _metrics_cache_lock:
+        now = time.monotonic()
+        if _metrics_cache_payload is not None and now < _metrics_cache_expires_at:
+            return _metrics_cache_payload
+        _metrics_cache_payload = _generate_metrics_payload()
+        _metrics_cache_expires_at = now + ttl_seconds
+        return _metrics_cache_payload
+
+
 @router.get("/metrics")
 async def metrics() -> PlainTextResponse:
-    _refresh_semantic_cache_gauges()
-    return PlainTextResponse(generate_latest(), media_type="text/plain; version=0.0.4; charset=utf-8")
+    return PlainTextResponse(_metrics_payload(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 @router.get("/api/v1/metrics")

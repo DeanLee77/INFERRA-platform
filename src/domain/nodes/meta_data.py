@@ -6,10 +6,10 @@ Implements access levels and strong typing where appropriate.
 
 import re
 from typing import Optional, List, Tuple
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 
 # Protected Module-Level Logger (Access Level: Protected)
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 # Protected Module-Level Constant (Access Level: Protected)
 _META_DATA_TYPES: List[Tuple[str, str]] = [

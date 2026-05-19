@@ -24,9 +24,10 @@ from src.domain.fact_values import FactValue
 from src.domain.graph.dependency_type import DependencyType
 from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
 from src.domain.imports.node_origin import NodeOrigin
-from src.domain.nodes.dependency_matrix import DependencyMatrix
+from src.domain.graph.dependency_matrix import DependencyMatrix
 from src.domain.nodes.line_type import LineType
 from src.domain.nodes.node import Node
+from src.domain.nodes.node_id_utils import canonical_node_key, unqualified_node_key
 from src.domain.nodes.node_set import NodeSet
 from src.domain.rule_parser.node_set_merger import NodeSetMerger
 
@@ -75,14 +76,22 @@ class TestNodeSetMergerBasic:
         local = _make_node_set([DummyNode(0, "a")], name="local")
         imported = _make_node_set([DummyNode(0, "b"), DummyNode(1, "c")], name="imp")
         result = NodeSetMerger.merge(local, [imported])
-        assert set(result.get_node_dictionary().keys()) == {"a", "b", "c"}
+        assert set(result.get_node_dictionary().keys()) == {
+            "a",
+            canonical_node_key("b", "imp"),
+            canonical_node_key("c", "imp"),
+        }
 
     def test_merge_multiple_imports(self):
         local = _make_node_set([DummyNode(0, "local_node")], name="local")
         imp1 = _make_node_set([DummyNode(0, "imp1_a")], name="imp1")
         imp2 = _make_node_set([DummyNode(0, "imp2_a")], name="imp2")
         result = NodeSetMerger.merge(local, [imp1, imp2])
-        assert set(result.get_node_dictionary().keys()) == {"local_node", "imp1_a", "imp2_a"}
+        assert set(result.get_node_dictionary().keys()) == {
+            "local_node",
+            canonical_node_key("imp1_a", "imp1"),
+            canonical_node_key("imp2_a", "imp2"),
+        }
 
 
 class TestNodeSetMergerLocalWins:
@@ -91,29 +100,53 @@ class TestNodeSetMergerLocalWins:
         imported = _make_node_set([DummyNode(0, "shared")], name="imp")
         result = NodeSetMerger.merge(local, [imported], rule_name="local")
         assert "shared" in result.get_node_dictionary()
+        assert canonical_node_key("shared", "imp") in result.get_node_dictionary()
         merged_node = result.get_node_dictionary()["shared"]
         record = result.get_graph().get_node_record("shared")
         assert record.module == "local"
         assert record.imported is False
         assert record.import_depth == 0
 
-    def test_local_overrides_multiple_imports_same_name(self):
+    def test_multiple_imports_same_name_are_qualified(self):
         local = _make_node_set([DummyNode(0, "shared")], name="local")
         imp1 = _make_node_set([DummyNode(0, "shared")], name="imp1")
         imp2 = _make_node_set([DummyNode(0, "shared")], name="imp2")
         result = NodeSetMerger.merge(local, [imp1, imp2], rule_name="local")
-        merged_node = result.get_node_dictionary()["shared"]
-        record = result.get_graph().get_node_record("shared")
-        assert record.module == "local"
-        assert record.imported is False
+        assert set(result.get_node_dictionary()) == {
+            "shared",
+            canonical_node_key("shared", "imp1"),
+            canonical_node_key("shared", "imp2"),
+        }
 
-    def test_first_import_wins_when_no_local_collision(self):
+    def test_imported_collision_records_keep_module_namespace(self):
         local = _make_node_set([DummyNode(0, "x")], name="local")
         imp1 = _make_node_set([DummyNode(0, "dup")], name="imp1")
         imp2 = _make_node_set([DummyNode(0, "dup")], name="imp2")
         result = NodeSetMerger.merge(local, [imp1, imp2])
-        record = result.get_graph().get_node_record("dup")
+        record = result.get_graph().get_node_record(canonical_node_key("dup", "imp1"))
         assert record.module == "imp1"
+        assert record.import_namespace == "imp1"
+        assert result.get_graph().get_node_record(canonical_node_key("dup", "imp2")).module == "imp2"
+
+    def test_duplicate_imported_module_is_deduplicated_by_canonical_name(self):
+        local = _make_node_set([], name="local")
+        imported = _make_node_set([DummyNode(0, "dup")], name="imp")
+
+        result = NodeSetMerger.merge(local, [imported, imported])
+
+        assert list(result.get_node_dictionary()).count(canonical_node_key("dup", "imp")) == 1
+
+    def test_local_qualified_name_overrides_same_imported_canonical_name(self):
+        local_name = canonical_node_key("shared", "imp")
+        local = _make_node_set([DummyNode(0, local_name)], name="local")
+        imported = _make_node_set([DummyNode(0, "shared")], name="imp")
+
+        result = NodeSetMerger.merge(local, [imported], rule_name="local")
+
+        record = result.get_graph().get_node_record(local_name)
+        assert set(result.get_node_dictionary()) == {local_name}
+        assert record.module == "local"
+        assert record.imported is False
 
 
 class TestNodeSetMergerNodeRecord:
@@ -132,20 +165,28 @@ class TestNodeSetMergerNodeRecord:
         assert record.imported is False
         assert record.import_depth == 0
 
+    def test_stable_id_is_copied_to_node_record(self):
+        local = _make_node_set([DummyNode(0, "a", stable_node_id="stable-a")], name="local")
+
+        result = NodeSetMerger.merge(local, [], rule_name="root_rule")
+
+        assert result.get_graph().get_node_record("a").stable_id == "stable-a"
+
     def test_imported_node_record_default(self):
         local = _make_node_set([], name="local")
         imp = _make_node_set([DummyNode(0, "b")], name="imported_module")
         result = NodeSetMerger.merge(local, [imp], rule_name="root")
-        record = result.get_graph().get_node_record("b")
+        record = result.get_graph().get_node_record(canonical_node_key("b", "imported_module"))
         assert record.imported is True
         assert record.module == "imported_module"
+        assert record.import_namespace == "imported_module"
 
     def test_imported_node_record_from_origins_dict(self):
         local = _make_node_set([], name="local")
         imp = _make_node_set([DummyNode(0, "b")], name="common_rules")
         origins = {"common_rules": NodeOrigin(module="common_rules", imported=True, depth=2)}
         result = NodeSetMerger.merge(local, [imp], imported_origins=origins, rule_name="root")
-        record = result.get_graph().get_node_record("b")
+        record = result.get_graph().get_node_record(canonical_node_key("b", "common_rules"))
         assert record.import_depth == 2
 
 
@@ -188,6 +229,25 @@ class TestNodeSetMergerDependencyMatrix:
                 if val != -1:
                     assert val > 0
 
+    def test_imported_graph_edges_are_rekeyed_to_qualified_names(self):
+        imported = _make_node_set(
+            [DummyNode(0, "parent"), DummyNode(1, "child")],
+            name="benefits@1.0.0",
+        )
+        imported.get_graph().add_dependency_group(
+            "parent",
+            int(DependencyType.AND),
+            {"child"},
+        )
+        local = _make_node_set([DummyNode(0, "goal")], name="local")
+
+        result = NodeSetMerger.merge(local, [imported])
+
+        parent_key = canonical_node_key("parent", "benefits@1.0.0")
+        child_key = canonical_node_key("child", "benefits@1.0.0")
+        assert result.get_graph().get_dependency_type(parent_key, child_key) == int(DependencyType.AND)
+        assert result.get_graph().get_dependency_type("parent", "child") == -1
+
 
 class TestNodeSetMergerOrdering:
     def test_imported_nodes_before_local_nodes(self):
@@ -195,7 +255,7 @@ class TestNodeSetMergerOrdering:
         imp = _make_node_set([DummyNode(0, "imp_b")], name="imp")
         result = NodeSetMerger.merge(local, [imp])
         names = [n.get_node_name() for n in result.get_sorted_node_list()]
-        imp_indices = [i for i, n in enumerate(names) if n.startswith("imp_")]
+        imp_indices = [i for i, n in enumerate(names) if "::" in n]
         local_indices = [i for i, n in enumerate(names) if n.startswith("local_")]
         if imp_indices and local_indices:
             assert max(imp_indices) < min(local_indices)
@@ -273,7 +333,11 @@ class TestNodeSetMergerCommutativity:
         ab = NodeSetMerger.merge(ns_a, [ns_b])
         ba = NodeSetMerger.merge(ns_b, [ns_a])
 
-        assert set(ab.get_node_dictionary().keys()) == set(ba.get_node_dictionary().keys())
+        assert {
+            unqualified_node_key(name) for name in ab.get_node_dictionary().keys()
+        } == {
+            unqualified_node_key(name) for name in ba.get_node_dictionary().keys()
+        }
 
 
 class TestNodeSetMergerIdempotency:

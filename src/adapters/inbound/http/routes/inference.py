@@ -19,15 +19,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from src.adapters.inbound.http.dependencies import get_db_session
 from src.adapters.outbound.persistence.rule_repository import RuleRepositoryImpl
+from src.domain.exceptions import ConcurrentModificationError
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.inference.session import InferenceSession
 from src.domain.inference.session_service import InferenceSessionService
 from src.domain.nodes.iterate_line import IterateLine
 from src.domain.nodes.line_type import LineType
 from src.domain.session import InferenceContext
+from src.domain.state import FactSource
+from src.domain.state.feature_flags import get_feature_flags
 from src.domain.trace import ProvOTraceGenerator
+from src.tasks.ontology_post_reasoner import run_post_reasoning
 from src.ports.session_store_port import SessionStorePort
-from src.schemas.inference_schemas import (
+from src.adapters.inbound.http.schemas.inference import (
     AnswerEntry,
     ResetAnswerRequest,
     EditAnswerResponse,
@@ -48,7 +52,7 @@ from src.schemas.inference_schemas import (
     UpdateHistoryResponse,
 )
 from src.services.rule_service import RuleService
-from src.dependencies import get_session_store, get_rule_repository
+from src.adapters.inbound.http.dependencies import get_session_store, get_rule_repository
 
 import structlog
 
@@ -122,13 +126,54 @@ def _session_service(
 
 
 def _get_session_or_404(
+    request: Request,
     session_id: str = Query(..., description="Session identifier"),
     session_service: InferenceSessionService = Depends(_session_service),
 ) -> InferenceSession:
     session = session_service.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+    _enforce_session_owner(session, request)
     return session
+
+
+def _request_user_id(request: Request) -> Optional[str]:
+    user_id = request.scope.get("inferra_user_id")
+    return str(user_id) if user_id else None
+
+
+def _enforce_session_owner(session: InferenceSession, request: Request) -> None:
+    if not get_feature_flags().auth_enabled:
+        return
+    requester = _request_user_id(request)
+    if not requester:
+        raise HTTPException(status_code=401, detail="Authenticated user identity is missing")
+    if session.owner_id is not None and session.owner_id != requester:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error_code": "SESSION_OWNER_MISMATCH",
+                "message": "Session belongs to a different authenticated principal",
+            },
+        )
+
+
+def _save_session_or_409(
+    session_service: InferenceSessionService,
+    session: InferenceSession,
+) -> None:
+    if not isinstance(session_service, InferenceSessionService) or not hasattr(session_service, "_store"):
+        return
+    try:
+        session_service.save_session(session)
+    except ConcurrentModificationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "SESSION_CONFLICT",
+                "message": str(exc),
+            },
+        ) from exc
 
 
 def _session_context(session: InferenceSession) -> InferenceContext:
@@ -167,6 +212,7 @@ def _create_session_impl(
     use_history: bool,
     rule_service: RuleService,
     session_service: InferenceSessionService,
+    owner_id: Optional[str] = None,
 ) -> SessionCreateResponse:
     try:
         session = session_service.create_session_from_rule(
@@ -174,6 +220,7 @@ def _create_session_impl(
             target_node_name=target_node_name,
             rule_service=rule_service,
             use_history=use_history,
+            owner_id=owner_id,
         )
         return SessionCreateResponse(
             session_id=session.session_id,
@@ -193,11 +240,19 @@ def _create_session_impl(
 )
 async def create_session(
     request: SessionCreateRequest,
+    fastapi_request: Request,
     rule_service: RuleService = Depends(_rule_service),
     session_service: InferenceSessionService = Depends(_session_service),
 ) -> SessionCreateResponse:
     logger.info("creating_session", rule_name=request.rule_name, target_node_name=request.target_node_name, use_history=False)
-    return _create_session_impl(request.rule_name, request.target_node_name, False, rule_service, session_service)
+    return _create_session_impl(
+        request.rule_name,
+        request.target_node_name,
+        False,
+        rule_service,
+        session_service,
+        _request_user_id(fastapi_request),
+    )
 
 
 @router.post(
@@ -207,11 +262,19 @@ async def create_session(
 )
 async def create_ml_session(
     request: MLSessionCreateRequest,
+    fastapi_request: Request,
     rule_service: RuleService = Depends(_rule_service),
     session_service: InferenceSessionService = Depends(_session_service),
 ) -> SessionCreateResponse:
     logger.info("creating_ml_session", rule_name=request.rule_name, target_node_name=request.target_node_name, use_history=True)
-    return _create_session_impl(request.rule_name, request.target_node_name, True, rule_service, session_service)
+    return _create_session_impl(
+        request.rule_name,
+        request.target_node_name,
+        True,
+        rule_service,
+        session_service,
+        _request_user_id(fastapi_request),
+    )
 
 
 # =============================================================================
@@ -226,6 +289,7 @@ async def create_ml_session(
 async def get_next_question(
     session_id: str = Query(..., description="Session identifier"),
     session: InferenceSession = Depends(_get_session_or_404),
+    session_service: InferenceSessionService = Depends(_session_service),
 ) -> NextQuestionResponse:
     logger.info("getting_next_question", session_id=session_id)
 
@@ -236,6 +300,7 @@ async def get_next_question(
     next_question_node = inference_engine.get_next_question_with_goal_name(target_node_name)
 
     if next_question_node is None:
+        _save_session_or_409(session_service, session)
         return NextQuestionResponse(
             session_id=session_id,
             questions=[],
@@ -280,13 +345,15 @@ async def get_next_question(
     goal_fact = working_memory.get(assessment.get_goal_node().get_node_name())
     has_more = goal_fact is None or not inference_engine.get_assessment_state().all_mandatory_node_determined()
 
-    return NextQuestionResponse(
+    response = NextQuestionResponse(
         session_id=session_id,
         questions=question_items,
         has_more_questions=has_more,
         iterate_progress=iterate_progress,
         convergence_state=_convergence_state(session),
     )
+    _save_session_or_409(session_service, session)
+    return response
 
 
 @router.post(
@@ -299,6 +366,7 @@ async def feed_answer(
     fastapi_request: Request,
     session_id: str = Query(..., description="Session identifier"),
     session: InferenceSession = Depends(_get_session_or_404),
+    session_service: InferenceSessionService = Depends(_session_service),
 ) -> FeedAnswerResponse:
     logger.info("feeding_answer", session_id=session_id, question=request.question)
 
@@ -379,6 +447,11 @@ async def feed_answer(
         goal_node_name = assessment.get_goal_node().get_node_name()
         goal_types = inference_engine.find_type_of_element_to_be_asked(assessment.get_goal_node())
         goal_type = goal_types.get(goal_node_name)
+        _run_ontology_post_reasoning(
+            session_id,
+            session.rule_name,
+            inference_engine.get_assessment_state(),
+        )
 
         response = FeedAnswerResponse(
             has_more_questions=False,
@@ -387,10 +460,26 @@ async def feed_answer(
             goal_rule_type=str(goal_type.value).lower() if goal_type else "unknown",
         )
 
+    _save_session_or_409(session_service, session)
     if cache_key:
         _idempotency_store.put(cache_key, response)
-
     return response
+
+
+def _run_ontology_post_reasoning(session_id: str, rule_name: str, assessment_state: Any) -> None:
+    fact_store = assessment_state.get_fact_store()
+    concluded_facts = []
+    for source in (FactSource.INFERRED, FactSource.LEARNED, FactSource.HYPOTHETICAL):
+        for name, fact_value in fact_store.get_layer_snapshot(source).items():
+            concluded_facts.append({"name": name, "value": fact_value})
+    if not concluded_facts:
+        return
+    run_post_reasoning(
+        session_id=session_id,
+        rule_name=rule_name,
+        concluded_facts=concluded_facts,
+        feature_flags=get_feature_flags(),
+    )
 
 
 @router.post(
@@ -402,6 +491,7 @@ async def reset_answer(
     request: ResetAnswerRequest,
     session_id: str = Query(..., description="Session identifier"),
     session: InferenceSession = Depends(_get_session_or_404),
+    session_service: InferenceSessionService = Depends(_session_service),
 ) -> EditAnswerResponse:
     logger.info("resetting_answer", session_id=session_id, question=request.question)
 
@@ -414,18 +504,22 @@ async def reset_answer(
     goal_fact = working_memory.get(assessment.get_goal_node().get_node_name())
 
     if goal_fact is None or not inference_engine.get_assessment_state().all_mandatory_node_determined():
-        return EditAnswerResponse(has_more_questions=True)
+        response = EditAnswerResponse(has_more_questions=True)
+        _save_session_or_409(session_service, session)
+        return response
 
     goal_node_name = assessment.get_goal_node().get_node_name()
     goal_types = inference_engine.find_type_of_element_to_be_asked(assessment.get_goal_node())
     goal_type = goal_types.get(goal_node_name)
 
-    return EditAnswerResponse(
+    response = EditAnswerResponse(
         has_more_questions=False,
         goal_rule_name=goal_node_name,
         goal_rule_value=str(goal_fact.get_value()),
         goal_rule_type=str(goal_type.value).lower() if goal_type else "unknown",
     )
+    _save_session_or_409(session_service, session)
+    return response
 
 
 # =============================================================================

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from src.domain.fact_values import FactValue
-from src.domain.nodes.dependency_type import DependencyType
+from src.domain.graph.dependency_type import DependencyType
 from src.domain.nodes.line_type import LineType
 from src.domain.nodes.node import Node
 from src.domain.nodes.node_set import NodeSet
+from src.domain.nodes.node_id_utils import canonical_node_key, unqualified_node_key
 from src.domain.rule_parser.rule_set_parser import RuleSetParser
 
 
@@ -76,3 +77,23 @@ def test_rule_set_parser_sizes_dependency_matrix_from_runtime_ids_not_static_cou
 
     assert len(dependency_matrix) == 6
     assert dependency_matrix[3][5] == DependencyType.get_and()
+
+
+def test_canonical_node_key_keeps_local_names_raw():
+    assert canonical_node_key("eligibility") == "eligibility"
+
+
+def test_canonical_node_key_qualifies_imported_names():
+    assert (
+        canonical_node_key("eligibility", "common_rules@2.1.0")
+        == "common_rules@2.1.0::eligibility"
+    )
+
+
+def test_canonical_node_key_does_not_double_qualify():
+    key = "common_rules@2.1.0::eligibility"
+    assert canonical_node_key(key, "common_rules@2.1.0") == key
+
+
+def test_unqualified_node_key_returns_raw_name():
+    assert unqualified_node_key("common_rules@2.1.0::eligibility") == "eligibility"

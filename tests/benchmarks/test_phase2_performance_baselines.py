@@ -20,6 +20,7 @@ Generate baseline: python -m pytest tests/benchmarks/test_phase2_performance_bas
 """
 
 import asyncio
+import gc
 import json
 import os
 import time
@@ -55,11 +56,17 @@ BASELINE_FILE = BENCHMARK_DIR / "baseline_phase2.json"
 
 def _time_it(func, iterations: int = 100) -> dict:
     times = []
-    for _ in range(iterations):
-        start = time.perf_counter()
-        func()
-        end = time.perf_counter()
-        times.append((end - start) * 1000)
+    gc_was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        for _ in range(iterations):
+            start = time.perf_counter()
+            func()
+            end = time.perf_counter()
+            times.append((end - start) * 1000)
+    finally:
+        if gc_was_enabled:
+            gc.enable()
 
     times.sort()
     avg = sum(times) / len(times)
@@ -77,11 +84,17 @@ def _time_it(func, iterations: int = 100) -> dict:
 
 def _async_time_it(coro_func, iterations: int = 100) -> dict:
     times = []
-    for _ in range(iterations):
-        start = time.perf_counter()
-        asyncio.run(coro_func())
-        end = time.perf_counter()
-        times.append((end - start) * 1000)
+    gc_was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        for _ in range(iterations):
+            start = time.perf_counter()
+            asyncio.run(coro_func())
+            end = time.perf_counter()
+            times.append((end - start) * 1000)
+    finally:
+        if gc_was_enabled:
+            gc.enable()
 
     times.sort()
     avg = sum(times) / len(times)

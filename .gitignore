@@ -33,6 +33,7 @@ ENV/
 .pytest_cache/
 .coverage
 htmlcov/
+*,cover
 
 # Logs
 Nadia-logging/
@@ -48,3 +49,10 @@ app/
 # Lock files (using pyproject.toml only)
 *.lock
 Pipfile*
+
+# docs
+docs/ 
+AGENTS.md
+
+# legacy frontend
+frontends/

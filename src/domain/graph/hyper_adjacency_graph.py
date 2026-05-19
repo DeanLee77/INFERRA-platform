@@ -24,9 +24,9 @@ from typing import Deque, Dict, Iterator, List, Optional, Set, Tuple
 from src.domain.graph.dependency_group import DependencyGroup
 from src.domain.graph.dependency_type import DependencyType
 from src.ports.dependency_graph_port import DependencyGraphPort
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class CyclicGraphError(RuntimeError):
@@ -73,6 +73,7 @@ class HyperAdjacencyGraph(DependencyGraphPort):
         self._parents: Dict[str, Set[str]] = {}
         self._topo_cache: Optional[Tuple[str, ...]] = None
         self._edge_types: Dict[Tuple[str, str], int] = {}
+        self._outgoing: Dict[str, Set[str]] = {}
         self._nodes: Dict[str, NodeRecord] = {}
         self._name_to_id: Dict[str, int] = {}
         self._id_to_name: Dict[int, str] = {}
@@ -172,6 +173,7 @@ class HyperAdjacencyGraph(DependencyGraphPort):
         if isinstance(dep_type, int) and not isinstance(dep_type, DependencyType):
             dep_type = DependencyType(dep_type)
 
+        self._outgoing.setdefault(parent, set())
         for child in children:
             key = (parent, child)
             existing_dep = self._edge_types.get(key)
@@ -180,6 +182,7 @@ class HyperAdjacencyGraph(DependencyGraphPort):
                 self._edge_types[key] = merged
             else:
                 self._edge_types[key] = int(dep_type)
+            self._outgoing[parent].add(child)
 
         for child in children:
             self._parents.setdefault(child, set()).add(parent)
@@ -189,11 +192,7 @@ class HyperAdjacencyGraph(DependencyGraphPort):
 
     def remove_node(self, name: str) -> None:
         """Remove a node and all incoming/outgoing edges."""
-        child_names = {
-            child
-            for (parent, child) in self._edge_types
-            if parent == name
-        }
+        child_names = set(self._outgoing.get(name, set()))
         for child in child_names:
             self._edge_types.pop((name, child), None)
             parents = self._parents.get(child)
@@ -205,9 +204,13 @@ class HyperAdjacencyGraph(DependencyGraphPort):
         parent_names = set(self._parents.get(name, set()))
         for parent in parent_names:
             self._edge_types.pop((parent, name), None)
+            outgoing = self._outgoing.get(parent)
+            if outgoing is not None:
+                outgoing.discard(name)
             self._rebuild_groups_for(parent)
 
         self._children.pop(name, None)
+        self._outgoing.pop(name, None)
         self._parents.pop(name, None)
         self._nodes.pop(name, None)
         runtime_id = self._name_to_id.pop(name, None)
@@ -218,8 +221,9 @@ class HyperAdjacencyGraph(DependencyGraphPort):
     def _rebuild_groups_for(self, parent: str) -> None:
         """Rebuild _children groups for a parent from _edge_types."""
         child_by_type: Dict[int, set] = {}
-        for (p, child), dep_val in self._edge_types.items():
-            if p == parent:
+        for child in self._outgoing.get(parent, set()):
+            dep_val = self._edge_types.get((parent, child))
+            if dep_val is not None:
                 child_by_type.setdefault(dep_val, set()).add(child)
         self._children[parent] = tuple(
             DependencyGroup(DependencyType(dt), frozenset(ch))
@@ -412,7 +416,7 @@ class HyperAdjacencyGraph(DependencyGraphPort):
                         in_degree[child] += 1
 
         queue: Deque[str] = deque(
-            name for name, deg in in_degree.items() if deg == 0
+            name for name in sorted(in_degree) if in_degree[name] == 0
         )
         result: list = []
 
@@ -420,7 +424,7 @@ class HyperAdjacencyGraph(DependencyGraphPort):
             node = queue.popleft()
             result.append(node)
             for group in self.get_typed_child_groups(node):
-                for child in group.children:
+                for child in sorted(group.children):
                     if child in in_degree:
                         in_degree[child] -= 1
                         if in_degree[child] == 0:
@@ -444,6 +448,7 @@ class HyperAdjacencyGraph(DependencyGraphPort):
         self._parents.clear()
         self._topo_cache = None
         self._edge_types.clear()
+        self._outgoing.clear()
         self._nodes.clear()
         self._name_to_id.clear()
         self._id_to_name.clear()

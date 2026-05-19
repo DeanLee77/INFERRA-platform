@@ -5,11 +5,11 @@ Implements access levels and strong typing where appropriate.
 """
 
 from abc import ABCMeta, abstractmethod
-from typing import Optional
-from src.domain.nodes.dependency_matrix import DependencyMatrix
+from typing import Any, Optional
 from src.domain.nodes.meta_data import MetaData
 from src.domain.nodes.meta_type import MetaType
 from src.domain.nodes.node_set import NodeSet
+from src.ports.dependency_graph_port import DependencyGraphPort
 
 
 class IScanFeeder(metaclass=ABCMeta):
@@ -96,12 +96,34 @@ class IScanFeeder(metaclass=ABCMeta):
         """
         pass  # pragma: no cover
 
-    @abstractmethod
-    def create_dependency_matrix(self) -> DependencyMatrix:
+    def create_dependency_graph(self) -> DependencyGraphPort:
         """
-        Public API: Creates the dependency matrix.
+        Public API: Creates the canonical dependency graph.
+
+        Default implementation returns the graph stored on the NodeSet.
+        Graph-first feeders should override this when they can build a more
+        specific graph directly.
+
+        Returns:
+            DependencyGraphPort object
+        """
+        from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
+
+        node_set = self.get_node_set()
+        graph = node_set.get_graph()
+        if graph is not None:
+            return graph
+
+        graph = HyperAdjacencyGraph()
+        node_set.set_graph(graph)
+        return graph
+
+    @abstractmethod
+    def create_dependency_matrix(self) -> Any:
+        """
+        Public API: Creates a legacy dependency matrix compatibility view.
         
         Returns:
-            DependencyMatrix object
+            Matrix-like object
         """
         pass  # pragma: no cover

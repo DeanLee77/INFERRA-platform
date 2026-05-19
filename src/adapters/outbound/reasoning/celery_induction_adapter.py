@@ -1,4 +1,5 @@
 from typing import Iterable
+from threading import Lock
 
 import structlog
 
@@ -11,10 +12,41 @@ log = structlog.get_logger(__name__)
 class CeleryInductionAdapter(InductionPort):
     """Celery-backed induction adapter with graceful status reporting."""
 
-    def start_batch(self, session_ids: Iterable[str], rule_name: str) -> dict:
-        from src.tasks.induction import run_induction_batch
+    _idempotency_lock = Lock()
+    _submitted_jobs: dict[str, dict] = {}
 
-        result = run_induction_batch.delay(list(session_ids), rule_name)
+    @classmethod
+    def clear_idempotency_cache(cls) -> None:
+        with cls._idempotency_lock:
+            cls._submitted_jobs.clear()
+
+    def start_batch(self, session_ids: Iterable[str], rule_name: str) -> dict:
+        session_ids = list(session_ids)
+        from src.tasks.induction import build_induction_source_hash, run_induction_batch
+
+        source_hash = build_induction_source_hash(session_ids, rule_name)
+        with self._idempotency_lock:
+            existing = self._submitted_jobs.get(source_hash)
+            if existing is not None:
+                log.info(
+                    "induction_batch_idempotency_hit",
+                    session_id="",
+                    node_id="",
+                    fact_source="LEARNED",
+                    correlation_id=existing["job_id"],
+                    rule_name=rule_name,
+                    source_hash=source_hash,
+                )
+                return dict(existing)
+
+        result = run_induction_batch.delay(session_ids, rule_name)
+        payload = {
+            "job_id": result.id,
+            "status": "submitted",
+            "rule_name": rule_name,
+        }
+        with self._idempotency_lock:
+            self._submitted_jobs[source_hash] = dict(payload)
         log.info(
             "induction_batch_start",
             session_id="",
@@ -22,12 +54,9 @@ class CeleryInductionAdapter(InductionPort):
             fact_source="LEARNED",
             correlation_id=getattr(result, "id", ""),
             rule_name=rule_name,
+            source_hash=source_hash,
         )
-        return {
-            "job_id": result.id,
-            "status": "submitted",
-            "rule_name": rule_name,
-        }
+        return payload
 
     def get_status(self, job_id: str) -> dict:
         from celery.result import AsyncResult

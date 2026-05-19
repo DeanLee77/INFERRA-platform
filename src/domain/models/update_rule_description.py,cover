@@ -1,8 +1,0 @@
-> from dataclasses import dataclass
-> from typing import Optional
-  
-  
-> @dataclass
-> class UpdateRuleDescription:
->     rule_id: Optional[int] = None
->     new_description: str = ""

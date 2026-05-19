@@ -5,7 +5,7 @@ Custom exception classes for cross-cutting domain errors that don't belong
 to a single module.
 """
 
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
     from src.services.rule_validation_service import ValidationError
@@ -25,10 +25,22 @@ class RuleValidationError(ValueError):
     before the generic ValueError handler.
     """
 
-    def __init__(self, errors: List["ValidationError"], rule_name: str = "") -> None:
+    def __init__(
+        self,
+        errors: List["ValidationError"],
+        rule_name: str = "",
+        unknown_waiver_ids: Optional[List[str]] = None,
+    ) -> None:
         self.errors = errors
         self.rule_name = rule_name
-        summary = "; ".join(f"[{e.code}] {e.message}" for e in errors)
+        self.unknown_waiver_ids = unknown_waiver_ids or []
+        summary_parts = []
+        if self.unknown_waiver_ids:
+            summary_parts.append(
+                f"unknown waiver IDs: {', '.join(sorted(self.unknown_waiver_ids))}"
+            )
+        summary_parts.append("; ".join(f"[{e.code}] {e.message}" for e in errors))
+        summary = " | ".join(part for part in summary_parts if part)
         super().__init__(
             f"Rule validation failed for '{rule_name}': {summary}"
             if rule_name
@@ -37,7 +49,7 @@ class RuleValidationError(ValueError):
 
     def to_dict(self) -> dict:
         """Structured representation for API responses."""
-        return {
+        result = {
             "success": False,
             "error": "Rule validation failed",
             "detail": {
@@ -45,6 +57,9 @@ class RuleValidationError(ValueError):
                 "errors": [e.to_dict() for e in self.errors],
             },
         }
+        if self.unknown_waiver_ids:
+            result["detail"]["unknown_waiver_ids"] = sorted(self.unknown_waiver_ids)
+        return result
 
 
 class ConcurrentModificationError(RuntimeError):

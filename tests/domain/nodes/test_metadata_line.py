@@ -190,29 +190,35 @@ class TestMetadataLineInitialisationInput:
         ml.initialisation("INPUT items AS LIST STRING hello", tokens)
         assert ml.get_meta_type() == MetaType.INPUT
 
-    def test_input_list_with_value_hash_raises_index_error(self):
+    def test_input_list_with_value_hash(self):
         ml = _make_ml()
         tokens = _make_token(["INPUT", "hashes", "AS", "LIST", "HASH", "abc"], ["L", "L", "L", "L", "L", "Ha"])
-        with pytest.raises(IndexError):
-            ml.initialisation("INPUT hashes AS LIST HASH abc", tokens)
+        ml.initialisation("INPUT hashes AS LIST HASH abc", tokens)
+        assert ml.get_fact_value().get_value_type() == FactValueType.LIST
 
-    def test_input_hash_no_value_raises_attribute_error(self):
+    def test_input_hash_no_value(self):
         ml = _make_ml()
         tokens = _make_token(["INPUT", "data", "AS", "HASH"], ["L", "L", "L", "L"])
-        with pytest.raises(AttributeError, match="NUMBER"):
-            ml.initialisation("INPUT data AS HASH", tokens)
+        ml.initialisation("INPUT data AS HASH", tokens)
+        assert ml.get_fact_value().get_value_type() == FactValueType.HASH
 
-    def test_input_double_no_value_raises_attribute_error(self):
+    def test_input_double_no_value(self):
         ml = _make_ml()
         tokens = _make_token(["INPUT", "price", "AS", "DOUBLE"], ["L", "L", "L", "L"])
-        with pytest.raises(AttributeError, match="NUMBER"):
-            ml.initialisation("INPUT price AS DOUBLE", tokens)
+        ml.initialisation("INPUT price AS DOUBLE", tokens)
+        assert ml.get_fact_value().get_value_type() == FactValueType.DOUBLE
 
-    def test_input_boolean_no_value_raises_attribute_error(self):
+    def test_input_boolean_no_value(self):
         ml = _make_ml()
         tokens = _make_token(["INPUT", "flag", "AS", "BOOLEAN"], ["L", "L", "L", "L"])
-        with pytest.raises(AttributeError, match="NUMBER"):
-            ml.initialisation("INPUT flag AS BOOLEAN", tokens)
+        ml.initialisation("INPUT flag AS BOOLEAN", tokens)
+        assert ml.get_fact_value().get_value_type() == FactValueType.BOOLEAN
+
+    def test_input_number_no_value_maps_to_double(self):
+        ml = _make_ml()
+        tokens = _make_token(["INPUT", "amount", "AS", "NUMBER"], ["L", "L", "L", "L"])
+        ml.initialisation("INPUT amount AS NUMBER", tokens)
+        assert ml.get_fact_value().get_value_type() == FactValueType.DOUBLE
 
     def test_input_non_list_with_value_raises_index_error(self):
         ml = _make_ml()

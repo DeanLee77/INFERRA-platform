@@ -7,7 +7,7 @@ Implements access levels and strong typing where appropriate.
 import re
 from typing import Optional
 from datetime import datetime
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.nodes.line_type import LineType
 from src.domain.nodes.meta_type import MetaType
@@ -15,7 +15,7 @@ from .node import Node
 from src.domain.tokens import Token
 
 # Protected Module-Level Logger (Access Level: Protected)
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class MetadataLine(Node):
@@ -40,11 +40,11 @@ class MetadataLine(Node):
             node_text: Text content of the metadata line
             tokens: Tokenized representation
         """
-        super().__init__(parent_text=node_text, tokens=tokens)
-        self._line_type = LineType.META
         # Private instance variables (initialized in __init__ to avoid shared state)
         self.__meta_type: Optional[MetaType] = None
         self.__name: Optional[str] = None
+        super().__init__(parent_text=node_text, tokens=tokens)
+        self._line_type = LineType.META
 
     # -------------------------------------------------------------------------
     # Public Access Level: API Methods
@@ -63,20 +63,20 @@ class MetadataLine(Node):
         self._set_meta_type(parent_text)
 
         if self.__meta_type == MetaType.FIXED:
-            pattern = re.compile(r"^(FIXED)(.*)(\s[AS|IS]\s*.*)")
+            pattern = re.compile(r"^FIXED\s+(.+?)\s+(IS|AS)\s+(.+)$")
             match = pattern.match(parent_text)
 
             if match:
-                self._set_value(match.group(3).strip(), tokens)
-                self._variable_name = match.group(2).strip()
+                self._set_value(f"{match.group(2)} {match.group(3)}", tokens)
+                self._variable_name = match.group(1).strip()
         
         if self.__meta_type == MetaType.INPUT:
-            pattern = re.compile(r"^(INPUT)(.*)(AS)(.*)[(IS)(.*)]?")
+            pattern = re.compile(r"^INPUT\s+(.+?)\s+AS\s+(.+)$")
             match = pattern.match(parent_text)
 
             if match:
-                self._set_value(match.group(4).strip(), tokens)
-                self._variable_name = match.group(2).strip()
+                self._set_value(match.group(2).strip(), tokens)
+                self._variable_name = match.group(1).strip()
 
     def _set_value(self, value_in_string: str, tokens: Token) -> None:
         """
@@ -146,9 +146,11 @@ class MetadataLine(Node):
                     self._value = FactValue(temp_str_2, FactValueType.STRING)
                 elif FactValueType.DATE.value == temp_str:
                     self._value = FactValue(datetime.strptime(temp_str_2, '%d/%m/%Y').strftime("%d/%m/%Y"), FactValueType.DATE)
-                elif FactValueType.NUMBER.value == temp_str or FactValueType.INTEGER.value == temp_str:
+                elif FactValueType.INTEGER.value == temp_str:
                     self._value = FactValue(int(temp_str_2), FactValueType.INTEGER)
-                elif FactValueType.DECIMAL.value == temp_str or FactValueType.DOUBLE.value == temp_str:
+                elif temp_str == "NUMBER" or FactValueType.DOUBLE.value == temp_str:
+                    self._value = FactValue(float(temp_str_2), FactValueType.DOUBLE)
+                elif FactValueType.DECIMAL.value == temp_str:
                     self._value = FactValue(float(temp_str_2), FactValueType.DOUBLE)
                 elif FactValueType.BOOLEAN.value == temp_str:
                     if temp_str_2.lower() == 'true':
@@ -175,9 +177,11 @@ class MetadataLine(Node):
                     self._value = FactValue(None, FactValueType.GUID)
                 elif FactValueType.DATE.value == temp_str:
                     self._value = FactValue(None, FactValueType.DATE)
-                elif FactValueType.NUMBER.value == temp_str or FactValueType.INTEGER.value == temp_str:
+                elif FactValueType.INTEGER.value == temp_str:
                     self._value = FactValue(None, FactValueType.INTEGER)
-                elif FactValueType.DECIMAL.value == temp_str or FactValueType.DOUBLE.value == temp_str:
+                elif temp_str == "NUMBER" or FactValueType.DOUBLE.value == temp_str:
+                    self._value = FactValue(None, FactValueType.DOUBLE)
+                elif FactValueType.DECIMAL.value == temp_str:
                     self._value = FactValue(None, FactValueType.DOUBLE)
                 elif FactValueType.BOOLEAN.value == temp_str:
                     self._value = FactValue(None, FactValueType.BOOLEAN)
@@ -189,6 +193,7 @@ class MetadataLine(Node):
         Args:
             parent_text: Text to analyze for meta type
         """
+        self.__meta_type = None
         for x in MetaType.get_all_meta_type():
             if x.value in parent_text:
                 self.__meta_type = x

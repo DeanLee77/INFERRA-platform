@@ -299,6 +299,28 @@ class TestDependencyTypeIntFlag:
         assert DependencyType.AND == 8
         assert DependencyType.MANDATORY == 64
 
+    def test_legacy_getter_methods_return_plain_ints(self):
+        assert DependencyType.get_and() == 8
+        assert DependencyType.get_or() == 4
+        assert DependencyType.get_mandatory() == 64
+        assert isinstance(DependencyType.get_and(), int)
+
+    def test_dependency_array_is_idempotent(self):
+        expected = [8, 4, 2, 1, 64, 32, 16]
+        DependencyType.populating_dependency()
+        first = DependencyType.get_dependency_array()
+        DependencyType.populating_dependency()
+        second = DependencyType.get_dependency_array()
+
+        assert first == expected
+        assert second == expected
+
+    def test_node_dependency_type_shim_points_to_canonical_graph_type(self):
+        from src.domain.nodes.dependency_type import DependencyType as NodeDependencyType
+
+        assert NodeDependencyType is DependencyType
+        assert NodeDependencyType.get_dependency_array() == DependencyType.get_dependency_array()
+
 
 # ===================================================================
 # 7. NodeRecord dataclass

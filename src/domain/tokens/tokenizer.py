@@ -1,13 +1,33 @@
 import re
 from typing import Optional
-from src.shared.constants import TokenizerMatcherConstant
 from src.domain.tokens.token import Token
-from src.shared.loggers import Logger
+from src.domain.tokens.tokenizer_matcher_constant import TokenizerMatcherConstant
+from src.infrastructure.logging_config import get_logger
 
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class Tokenizer:
+    _TOKEN_CODES = {
+        "RULE_SET_MATCHER": "U",
+        "ITERATE_MATCHER": "I",
+        "CALCULATION_MATCHER": "C",
+        "QUOTED_MATCHER": "Q",
+        "URL_MATCHER": "Url",
+        "GUID_MATCHER": "Id",
+        "HASH_MATCHER": "Ha",
+        "DATE_MATCHER": "Da",
+        "DECIMAL_NUMBER_MATCHER": "De",
+        "OPERATOR_MATCHER": "O",
+        "NUMBER_MATCHER": "No",
+        "PARAGRAPH_MATCHER": "Pa",
+        "SECTION_MATCHER": "Se",
+        "FUNCTION_MATCHER": "Fu",
+        "UPPER_MATCHER": "U",
+        "MIXED_MATCHER": "M",
+        "LOWER_MATCHER": "L",
+    }
+
     @staticmethod
     def get_tokens(text: str) -> Token:
         if not text or not text.strip():
@@ -36,7 +56,12 @@ class Tokenizer:
                     token_str = match.group(0)
                     if matcher_names[idx] != 'SPACE_MATCHER':
                         tokens_list.append(token_str.strip())
-                        tokens_string_list.append(matcher_names[idx].replace('_MATCHER', '').replace('_NUMBER', '').replace('_', ' '))
+                        tokens_string_list.append(
+                            Tokenizer._TOKEN_CODES.get(
+                                matcher_names[idx],
+                                matcher_names[idx].replace('_MATCHER', '').replace('_NUMBER', '').replace('_', ' '),
+                            )
+                        )
                     remaining = remaining[len(token_str):]
                     matched = True
                     break
@@ -48,5 +73,5 @@ class Tokenizer:
                 else:
                     break
 
-        tokens_string = ' '.join(tokens_string_list) if tokens_string_list else ''
+        tokens_string = ''.join(tokens_string_list) if tokens_string_list else ''
         return Token(tokens_list, tokens_string_list, tokens_string)

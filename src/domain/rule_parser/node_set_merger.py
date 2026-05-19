@@ -14,6 +14,7 @@ Legacy matrices are derived from the merged graph on demand.
 
 from __future__ import annotations
 
+from copy import copy
 from typing import Dict, List, Optional, Set
 
 import structlog
@@ -21,6 +22,10 @@ import structlog
 from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
 from src.domain.imports.node_origin import NodeOrigin
 from src.domain.nodes.node import Node
+from src.domain.nodes.node_id_utils import (
+    CANONICAL_NODE_KEY_SEPARATOR,
+    canonical_node_key,
+)
 from src.domain.nodes.node_set import NodeSet
 
 log = structlog.get_logger()
@@ -53,11 +58,14 @@ class NodeSetMerger:
                 origin = NodeOrigin(module=ns_name, imported=True, depth=1)
 
             for node in imported_ns.get_sorted_node_list():
-                name = node.get_node_name()
+                name = _canonical_name(node.get_node_name(), origin)
                 if name in seen_names:
                     log.debug("import_name_collision_skipped", node_name=name, source=ns_name)
                     continue
-                merged.add_node(node, _origin_metadata(node, origin))
+                merged.add_node(
+                    _node_with_graph_name(node, name),
+                    _origin_metadata(node, origin),
+                )
                 seen_names.add(name)
                 log.debug("node_merged", node_name=name, source=ns_name)
 
@@ -70,7 +78,12 @@ class NodeSetMerger:
             merged.add_node(node, _origin_metadata(node, origin))
             seen_names.add(name)
 
-        _merge_graphs(merged.get_graph(), local_node_set, imported_node_sets)
+        _merge_graphs(
+            merged.get_graph(),
+            local_node_set,
+            imported_node_sets,
+            imported_origins,
+        )
 
         merged.set_input_dictionary(
             _merge_dicts(
@@ -111,7 +124,9 @@ def _origin_metadata(node: Node, origin: Optional[NodeOrigin] = None) -> dict:
         metadata["module"] = origin.module
         metadata["imported"] = origin.imported
         metadata["import_depth"] = origin.depth
-        metadata["import_namespace"] = getattr(origin, "import_namespace", "")
+        metadata["import_namespace"] = (
+            getattr(origin, "import_namespace", "") or origin.module if origin.imported else ""
+        )
         metadata["import_version"] = getattr(origin, "import_version", "")
     return metadata
 
@@ -120,17 +135,26 @@ def _merge_graphs(
     target: HyperAdjacencyGraph,
     local_node_set: NodeSet,
     imported_node_sets: List[NodeSet],
+    imported_origins: Optional[Dict[str, NodeOrigin]] = None,
 ) -> None:
     """Merge edges from all input graphs into the target graph.
 
     Uses write-time bitmask OR via add_dependency_group() — identical
     The graph performs bitmask OR when duplicate edges are added.
     """
-    for imported_ns in imported_node_sets:
+    for idx, imported_ns in enumerate(imported_node_sets):
+        ns_name = imported_ns.get_node_set_name() or f"__import_{idx}__"
+        origin = imported_origins.get(ns_name) if imported_origins else None
+        if origin is None:
+            origin = NodeOrigin(module=ns_name, imported=True, depth=1)
         src = imported_ns.get_graph()
         if src is not None:
             for parent, child, dep_type in src.edges():
-                target.add_dependency_group(parent, dep_type, {child})
+                target.add_dependency_group(
+                    _canonical_name(parent, origin),
+                    dep_type,
+                    {_canonical_name(child, origin)},
+                )
 
     local_graph = local_node_set.get_graph()
     if local_graph is not None:
@@ -144,3 +168,21 @@ def _merge_dicts(dicts: List[Dict]) -> Dict:
     for d in dicts:
         result.update(d)
     return result
+
+
+def _canonical_name(name: str, origin: NodeOrigin) -> str:
+    """Return the graph key for a node at a merge boundary."""
+    if not origin.imported:
+        return name
+    if CANONICAL_NODE_KEY_SEPARATOR in str(name):
+        return name
+    return canonical_node_key(name, origin.module)
+
+
+def _node_with_graph_name(node: Node, graph_name: str) -> Node:
+    """Shallow-copy a node and give the copy its canonical graph key."""
+    cloned = copy(node)
+    cloned._node_name = graph_name
+    cloned._node_id = None
+    cloned._node_unique_id = -1
+    return cloned

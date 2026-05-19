@@ -12,12 +12,12 @@ from src.domain.inference.assessment import Assessment
 from src.domain.nodes.node_set import NodeSet
 from src.domain.state.feature_flags import FeatureFlags, get_feature_flags
 from src.ports.session_store_port import SessionStorePort
-from src.shared.loggers import Logger
+from src.infrastructure.logging_config import get_logger
 
 if TYPE_CHECKING:
     from src.services.rule_service import RuleService
 
-_logger: Logger = Logger.get_logger(__name__)
+_logger = get_logger(__name__)
 
 
 class InferenceSessionService:
@@ -95,6 +95,7 @@ class InferenceSessionService:
         target_node_name: str,
         node_set: NodeSet,
         history_dict: Optional[dict] = None,
+        owner_id: Optional[str] = None,
     ) -> InferenceSession:
         """
         Create a new inference session.
@@ -145,6 +146,7 @@ class InferenceSessionService:
             inference_engine=inference_engine,
             assessment=assessment,
             feature_flags=session_flags,
+            owner_id=owner_id,
         )
         
         # Store session
@@ -156,6 +158,10 @@ class InferenceSessionService:
         )
         
         return session
+
+    def save_session(self, session: InferenceSession) -> None:
+        """Persist an existing session after request-time state mutation."""
+        self._store.save(session)
     
     def get_session(self, session_id: str) -> Optional[InferenceSession]:
         """
@@ -248,6 +254,7 @@ class InferenceSessionService:
         target_node_name: str,
         rule_service: 'RuleService',
         use_history: bool = False,
+        owner_id: Optional[str] = None,
     ) -> InferenceSession:
         """
         Create a new inference session by parsing a rule.
@@ -285,4 +292,5 @@ class InferenceSessionService:
             target_node_name=target_node_name,
             node_set=node_set,
             history_dict=history_dict,
+            owner_id=owner_id,
         )

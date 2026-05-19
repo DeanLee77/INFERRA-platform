@@ -40,6 +40,7 @@ class ReasoningRouter:
         induction_pipeline: bool = False,
         confidence_thresholds: bool = True,
         min_confidence: Optional[float] = None,
+        rule_confidence_thresholds: Optional[Dict[str, float]] = None,
         max_hypotheses: int = 5,
     ) -> None:
         self.abduction = abduction
@@ -52,6 +53,7 @@ class ReasoningRouter:
             if min_confidence is not None
             else self._confidence_threshold_from_env()
         )
+        self.rule_confidence_thresholds = dict(rule_confidence_thresholds or {})
         self.max_hypotheses = max_hypotheses
 
     def route(
@@ -66,6 +68,8 @@ class ReasoningRouter:
         converged: bool = False,
         trace_backlog_size: int = 0,
         rule_name: str = "",
+        rule_min_confidence: Optional[float] = None,
+        session_min_confidence: Optional[float] = None,
     ) -> ReasoningDecision:
         if converged:
             return ReasoningDecision("DEDUCTION", "COMPLETE", reason="converged")
@@ -75,12 +79,18 @@ class ReasoningRouter:
             return ReasoningDecision("DEDUCTION", "CONTINUE_LOOP", reason="deduction_warmup")
 
         if self.abduction_enabled:
+            min_confidence = self._threshold_for(
+                rule_name=rule_name,
+                rule_min_confidence=rule_min_confidence,
+                session_min_confidence=session_min_confidence,
+            )
             hypotheses = self._rank_hypotheses(
                 self.abduction.propose_hypotheses(
                     target=target,
                     working_memory=working_memory,
                     graph_snapshot=graph_snapshot,
-                )
+                ),
+                min_confidence=min_confidence,
             )
             if hypotheses:
                 best = hypotheses[0]
@@ -113,11 +123,17 @@ class ReasoningRouter:
 
         return ReasoningDecision("DEDUCTION", "CONTINUE_LOOP", reason="no_alternate_route")
 
-    def _rank_hypotheses(self, hypotheses: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _rank_hypotheses(
+        self,
+        hypotheses: Iterable[Dict[str, Any]],
+        *,
+        min_confidence: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        threshold = self.min_confidence if min_confidence is None else min_confidence
         pruned: List[Dict[str, Any]] = []
         for hypothesis in hypotheses:
             confidence = float(hypothesis.get("confidence", 0.0))
-            if self.confidence_thresholds and confidence < self.min_confidence:
+            if self.confidence_thresholds and confidence < threshold:
                 continue
             if not bool(hypothesis.get("ontology_consistent", True)):
                 continue
@@ -126,6 +142,21 @@ class ReasoningRouter:
             pruned.append(item)
         pruned.sort(key=lambda item: (-item["confidence"], str(item.get("fact_name", ""))))
         return pruned[: self.max_hypotheses]
+
+    def _threshold_for(
+        self,
+        *,
+        rule_name: str,
+        rule_min_confidence: Optional[float],
+        session_min_confidence: Optional[float],
+    ) -> float:
+        if session_min_confidence is not None:
+            return min(max(float(session_min_confidence), 0.0), 1.0)
+        if rule_min_confidence is not None:
+            return min(max(float(rule_min_confidence), 0.0), 1.0)
+        if rule_name in self.rule_confidence_thresholds:
+            return min(max(float(self.rule_confidence_thresholds[rule_name]), 0.0), 1.0)
+        return self.min_confidence
 
     @staticmethod
     def _confidence_threshold_from_env() -> float:

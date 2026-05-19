@@ -12,8 +12,7 @@ Usage:
         ...
 """
 
-import signal
-import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from collections import deque
 from typing import Callable, Dict, List, Optional, Set
 
@@ -89,6 +88,7 @@ class RuleSetImportResolver:
         self._feature_flags = feature_flags or FeatureFlags()
         self._load_timeout_s = load_timeout_s
         self._resolved_cache: Dict[str, Dict[str, NodeOrigin]] = {}
+        self._loader_executor: Optional[ThreadPoolExecutor] = None
 
     def resolve(self, root_module: str) -> Dict[str, NodeOrigin]:
         """
@@ -197,19 +197,12 @@ class RuleSetImportResolver:
         visited.add(module_name)
         path.pop()
 
-        log.debug(
-            "import_resolved",
-            module_name=module_name,
-            import_count=len(imports),
-            depth=current_depth,
-        )
-
     def _load_rule_with_timeout(self, module_name: str) -> str:
         """
         Load rule text with timeout guard.
 
-        Uses threading-based timeout on Windows (no SIGALRM).
-        Falls back to direct call if threading unavailable.
+        Uses a single reusable worker thread on Windows. Reuse matters because
+        import resolution may load dozens of small rule modules in one DFS pass.
 
         Args:
             module_name: Name of the module to load
@@ -220,27 +213,20 @@ class RuleSetImportResolver:
         Raises:
             RuleLoadTimeoutError: If loading exceeds self._load_timeout_s
         """
-        result: Optional[str] = None
-        error: Optional[Exception] = None
+        if self._loader_executor is None:
+            self._loader_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="inferra-import-loader",
+            )
 
-        def _load():
-            nonlocal result, error
-            try:
-                result = self._rule_loader(module_name)
-            except Exception as exc:
-                error = exc
-
-        import threading
-
-        thread = threading.Thread(target=_load, daemon=True)
-        thread.start()
-        thread.join(timeout=self._load_timeout_s)
-
-        if thread.is_alive():
+        future = self._loader_executor.submit(self._rule_loader, module_name)
+        try:
+            result = future.result(timeout=self._load_timeout_s)
+        except FutureTimeoutError:
+            future.cancel()
+            self._loader_executor.shutdown(wait=False, cancel_futures=True)
+            self._loader_executor = None
             raise RuleLoadTimeoutError(module_name, self._load_timeout_s)
-
-        if error is not None:
-            raise error
 
         if result is None:
             raise RuleLoadTimeoutError(module_name, self._load_timeout_s)

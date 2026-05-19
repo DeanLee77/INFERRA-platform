@@ -3,6 +3,31 @@ import threading
 import warnings
 from typing import Dict, Optional, Set
 
+CANONICAL_NODE_KEY_SEPARATOR = "::"
+
+
+def canonical_node_key(node_name: str, origin_module: str = "") -> str:
+    """Return the runtime graph key for a node.
+
+    Local nodes use their raw node name. Imported nodes use a qualified
+    module/name key, for example ``common_rules@2.1.0::eligibility``.
+    This key is separate from ``stable_id``, which remains a compatibility
+    and persistence lookup value.
+    """
+    normalized_name = str(node_name).strip()
+    normalized_origin = str(origin_module or "").strip()
+    if not normalized_origin:
+        return normalized_name
+    prefix = f"{normalized_origin}{CANONICAL_NODE_KEY_SEPARATOR}"
+    if normalized_name.startswith(prefix):
+        return normalized_name
+    return f"{prefix}{normalized_name}"
+
+
+def unqualified_node_key(node_key: str) -> str:
+    """Return the raw node name from a canonical graph key."""
+    return str(node_key).rsplit(CANONICAL_NODE_KEY_SEPARATOR, 1)[-1]
+
 
 class _ParseContext:
     """Per-session collision tracker for deterministic node ID generation.
