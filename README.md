@@ -576,3 +576,9 @@ system like INFERRA, users need to understand its trust model, not only its API.
 
 No license file is currently included in this repository. Add a license before
 publishing or distributing INFERRA outside the private development context.
+
+Until INFERRA Legal/IP approves and publishes a `LICENSE` file or equivalent
+written licensing terms, the code and documentation in this public repository
+should be treated as proprietary INFERRA material with all rights reserved.
+Viewing the public repository does not grant permission to copy, modify,
+distribute, sublicense, or use it in another product.

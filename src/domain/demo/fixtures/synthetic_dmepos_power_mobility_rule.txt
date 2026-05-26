@@ -1,0 +1,25 @@
+INPUT face-to-face evaluation documented AS BOOLEAN
+INPUT home mobility need documented AS BOOLEAN
+INPUT lower-acuity mobility aids ruled out AS BOOLEAN
+INPUT safe operation documented AS BOOLEAN
+INPUT supplier order complete AS BOOLEAN
+INPUT unresolved safety contraindication AS BOOLEAN
+
+synthetic power mobility request is CERTIFY
+	AND face-to-face evaluation documented
+	AND home mobility need documented
+	AND lower-acuity mobility aids ruled out
+	AND safe operation documented
+	AND supplier order complete
+	AND NOT unresolved safety contraindication
+
+synthetic power mobility request is REVIEW
+	OR NOT face-to-face evaluation documented
+	OR NOT lower-acuity mobility aids ruled out
+	OR NOT safe operation documented
+	OR NOT supplier order complete
+
+synthetic power mobility request is DENY
+	OR unresolved safety contraindication
+	OR NOT home mobility need documented
+
