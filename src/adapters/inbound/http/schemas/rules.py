@@ -18,6 +18,67 @@ class RuleTreeDataResponse(BaseModel):
     ruleTreeData: str
 
 
+class RuleGraphNodeResponse(BaseModel):
+    name: str
+    stable_id: str | None = None
+    runtime_id: int | None = None
+    module: str | None = None
+    import_namespace: str | None = None
+    import_version: str | None = None
+    imported: bool | None = None
+    import_depth: int | None = None
+
+
+class RuleGraphEdgeResponse(BaseModel):
+    parent: str
+    child: str
+    dep_type: int | str
+
+
+class RuleGraphResponse(BaseModel):
+    rule_name: str
+    source: str
+    rule_text: str
+    expanded_rule_text: str
+    schema_version: int
+    nodes: list[RuleGraphNodeResponse]
+    edges: list[RuleGraphEdgeResponse]
+
+
+class RuleOntologyTripleResponse(BaseModel):
+    subject: str
+    predicate: str
+    object: str
+
+
+class RuleOntologyNodeResponse(BaseModel):
+    uri: str
+    name: str | None = None
+    types: list[str] = Field(default_factory=list)
+
+
+class RuleOntologyEdgeResponse(BaseModel):
+    subject: str
+    predicate: str
+    object: str
+
+
+class RuleOntologyResponse(BaseModel):
+    rule_name: str
+    source: str
+    triple_count: int
+    triples: list[RuleOntologyTripleResponse]
+    nodes: list[RuleOntologyNodeResponse]
+    edges: list[RuleOntologyEdgeResponse]
+
+
+class RuleOntologySyncResponse(BaseModel):
+    rule_name: str
+    status: str
+    task_id: str | None = None
+    triple_count: int = 0
+
+
 class UpdateRuleRequest(BaseModel):
     oldRuleName: str
     newRuleName: str

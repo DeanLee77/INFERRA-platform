@@ -25,6 +25,7 @@ from src.domain.nodes.value_conclusion_line import ValueConclusionLine
 from src.domain.state.fact_source import FactSource
 from src.domain.state.feature_flags import FeatureFlags
 from src.ports.dependency_graph_port import DependencyGraphPort
+from src.ports.question_strategy_port import QuestionStrategyPort
 from src.infrastructure.logging_config import get_logger
 
 _logger = get_logger(__name__)
@@ -52,6 +53,7 @@ class InferenceEngine:
         self,
         node_set: Optional[NodeSet] = None,
         feature_flags: Optional[FeatureFlags] = None,
+        question_strategy: Optional[QuestionStrategyPort] = None,
     ):
         """
         Public Constructor: Initializes InferenceEngine.
@@ -70,6 +72,7 @@ class InferenceEngine:
         self.__asses: Assessments = Assessments()
         self.__node_fact_list: List[Node] = list()
         self.__question_resolver: QuestionResolver = QuestionResolver(_noop_question_callback)
+        self.__question_strategy: Optional[QuestionStrategyPort] = question_strategy
         self.__feature_flags: FeatureFlags = feature_flags if feature_flags is not None else FeatureFlags()
         self.__dependency_graph: Optional[DependencyGraphPort] = None
 
@@ -105,6 +108,17 @@ class InferenceEngine:
             DependencyGraphPort instance, or None when no graph is available
         """
         return self.__dependency_graph
+
+    def set_question_strategy(
+        self,
+        question_strategy: Optional[QuestionStrategyPort],
+    ) -> None:
+        """
+        Public API: Installs an optional advisory question strategy.
+
+        Passing None restores the legacy conservative QuestionResolver path.
+        """
+        self.__question_strategy = question_strategy
 
     # -------------------------------------------------------------------------
     # Protected Access Level: Internal Helpers (Single Underscore)
@@ -380,6 +394,192 @@ class InferenceEngine:
     # -------------------------------------------------------------------------
     # Public Access Level: API Methods (Question Handling)
     # -------------------------------------------------------------------------
+    def get_questions_from_node_to_be_asked(self, node: Optional[Node]) -> List[str]:
+        """
+        Public API: Returns the user-facing question keys for an askable node.
+
+        The rule graph asks nodes, but answers are stored under variable names
+        such as an INPUT declaration key. For example, the node
+        "service type IS IN LIST: DVA operational service type" must ask for
+        and store the answer under "service type".
+
+        Args:
+            node: Node selected by backward chaining
+
+        Returns:
+            List of question names to present to the caller
+        """
+        question_name = self._question_name_for_node(node)
+        return [question_name] if question_name else []
+
+    def find_type_of_element_to_be_asked(
+        self,
+        node: Optional[Node],
+    ) -> Dict[str, FactValueType]:
+        """
+        Public API: Returns expected value types for a selected node.
+
+        The map includes the question key used for answer submission and, when
+        different, the node name itself for callers that need the result type of
+        a goal node.
+
+        Args:
+            node: Node selected by backward chaining
+
+        Returns:
+            Mapping from question or node name to FactValueType
+        """
+        if node is None:
+            return {}
+
+        question_names = self.get_questions_from_node_to_be_asked(node)
+        question_types = {
+            question_name: self._infer_question_value_type(node, question_name)
+            for question_name in question_names
+        }
+
+        node_name = node.get_node_name()
+        if isinstance(node_name, str) and node_name and node_name not in question_types:
+            question_types[node_name] = self._infer_node_value_type(node)
+
+        return question_types
+
+    def _question_name_for_node(self, node: Optional[Node]) -> Optional[str]:
+        """
+        Protected Helper: Derives the answer key for an askable node.
+        """
+        if node is None:
+            return None
+
+        if node.get_line_type() == LineType.COMPARISON and hasattr(node, "get_lhs"):
+            lhs = node.get_lhs()
+            if isinstance(lhs, str) and lhs:
+                return lhs
+
+        variable_name = node.get_variable_name()
+        if isinstance(variable_name, str) and variable_name:
+            return variable_name
+
+        node_name = node.get_node_name()
+        if isinstance(node_name, str) and node_name:
+            return node_name
+        return None
+
+    def _declared_value_type(self, name: str) -> Optional[FactValueType]:
+        """
+        Protected Helper: Finds a declared INPUT/FIXED type by variable name.
+        """
+        if self.__node_set is None:
+            return None
+
+        declaration_names = {name}
+        for dictionary in (
+            self.__node_set.get_input_dictionary(),
+            self.__node_set.get_fact_dictionary(),
+        ):
+            for declared_name in dictionary.keys():
+                if name.endswith(f"  {declared_name}"):
+                    declaration_names.add(declared_name)
+
+        for declaration_name in sorted(declaration_names, key=len, reverse=True):
+            for declaration in (
+                self.__node_set.get_input_dictionary().get(declaration_name),
+                self.__node_set.get_fact_dictionary().get(declaration_name),
+            ):
+                if hasattr(declaration, "get_value_type"):
+                    value_type = declaration.get_value_type()
+                    if isinstance(value_type, FactValueType):
+                        return value_type
+        return self._declared_collection_field_type(name)
+
+    def _declared_collection_field_type(self, name: str) -> Optional[FactValueType]:
+        if self.__node_set is None or not isinstance(name, str):
+            return None
+
+        candidate = name.strip()
+        field_candidates = {candidate}
+        if "." in candidate:
+            field_candidates.add(candidate.split(".", 1)[1].strip())
+
+        for type_metadata in self.__node_set.get_type_dictionary().values():
+            fields = type_metadata.get("fields", {})
+            for field_name, field_type in fields.items():
+                if (
+                    field_name in field_candidates
+                    or candidate.endswith(f"  {field_name}")
+                    or candidate.endswith(f".{field_name}")
+                ) and isinstance(field_type, FactValueType):
+                    return field_type
+
+        for collection_metadata in self.__node_set.get_collection_dictionary().values():
+            for field_name, field_type in collection_metadata.get("fields", {}).items():
+                if (
+                    field_name in field_candidates
+                    or candidate.endswith(f"  {field_name}")
+                    or candidate.endswith(f".{field_name}")
+                ) and isinstance(field_type, FactValueType):
+                    return field_type
+        return None
+
+    def _infer_question_value_type(
+        self,
+        node: Node,
+        question_name: str,
+    ) -> FactValueType:
+        """
+        Protected Helper: Infers the expected answer type for a question key.
+        """
+        declared_type = self._declared_value_type(question_name)
+        if declared_type is not None:
+            return declared_type
+
+        line_type = node.get_line_type()
+        node_name = node.get_node_name()
+        if question_name == node_name:
+            return self._infer_node_value_type(node)
+
+        if line_type == LineType.COMPARISON and hasattr(node, "get_rhs"):
+            rhs = node.get_rhs()
+            if hasattr(rhs, "get_value"):
+                rhs_value = rhs.get_value()
+                if isinstance(rhs_value, str):
+                    rhs_declared_type = self._declared_value_type(rhs_value)
+                    if rhs_declared_type is not None:
+                        return rhs_declared_type
+            if hasattr(rhs, "get_value_type"):
+                rhs_type = rhs.get_value_type()
+                if isinstance(rhs_type, FactValueType) and rhs_type != FactValueType.UNKNOWN:
+                    return rhs_type
+
+        if line_type == LineType.VALUE_CONCLUSION and hasattr(node, "get_is_plain_statement"):
+            if node.get_is_plain_statement():
+                return FactValueType.BOOLEAN
+
+        fact_value = node.get_fact_value()
+        if hasattr(fact_value, "get_value_type"):
+            value_type = fact_value.get_value_type()
+            if isinstance(value_type, FactValueType):
+                return value_type
+        return FactValueType.UNKNOWN
+
+    def _infer_node_value_type(self, node: Node) -> FactValueType:
+        """
+        Protected Helper: Infers the result type produced by a node.
+        """
+        line_type = node.get_line_type()
+        if line_type == LineType.COMPARISON:
+            return FactValueType.BOOLEAN
+        if line_type == LineType.VALUE_CONCLUSION and hasattr(node, "get_is_plain_statement"):
+            if node.get_is_plain_statement():
+                return FactValueType.BOOLEAN
+
+        fact_value = node.get_fact_value()
+        if hasattr(fact_value, "get_value_type"):
+            value_type = fact_value.get_value_type()
+            if isinstance(value_type, FactValueType):
+                return value_type
+        return FactValueType.UNKNOWN
+
     def get_next_question_with_goal_name(self, goal_name: str) -> Optional[Node]:
         """
         Public API: Gets next question node with specific goal name.
@@ -419,7 +619,10 @@ class InferenceEngine:
                     self._process_parent_dependencies(target_node, ass)
                 
                 if self._should_ask_node(target_node, ass, index):
-                    return ass.get_node_to_be_asked()
+                    node_to_be_asked = ass.get_node_to_be_asked()
+                    if node_to_be_asked is not None and node_to_be_asked.get_line_type() == LineType.ITERATE:
+                        return ass.get_aux_node_to_be_asked() or node_to_be_asked
+                    return node_to_be_asked
                 elif self._has_children_to_process(target_node, ass):
                     self._add_child_rule_into_inclusive_list(target_node)
 
@@ -469,14 +672,68 @@ class InferenceEngine:
             return self._handle_iterate_node(target_node, ass, index)
         elif not self._has_children(node_name) \
                 and node_name in self.__ast.get_inclusive_list() \
-                and self.__question_resolver.find_next_question_node(
-                    target_node, self.__ast.get_working_memory(), has_children=False
-                ) is not None \
+                and self._question_strategy_allows_ask(
+                    target_node,
+                    has_children=False,
+                ) \
                 and not self._can_evaluate(target_node):
             ass.set_node_to_be_asked(target_node)
             _logger.info("index Of Rule To Be Asked : " + str(index))
             return True
         return False
+
+    def _question_strategy_allows_ask(
+        self,
+        target_node: Node,
+        *,
+        has_children: bool,
+    ) -> bool:
+        if self.__question_strategy is not None:
+            return self.__question_strategy.should_ask(
+                target_node,
+                self.__ast.get_working_memory(),
+                has_children=has_children,
+            )
+        return self.__question_resolver.find_next_question_node(
+            target_node,
+            self.__ast.get_working_memory(),
+            has_children=has_children,
+        ) is not None
+
+    def _handle_iterate_node(self, target_node: Node, ass: Assessment, index: int) -> bool:
+        """
+        Protected Helper: Selects the next sub-question for an iterate node.
+
+        The assessment keeps the iterate line as the active node so
+        feed_answer_to_node() can route through iterate-specific answer
+        handling, while the returned aux node is the concrete question shown to
+        the API caller.
+        """
+        if self.__node_set is None:
+            return False
+
+        get_iterate_next_question = getattr(target_node, "get_iterate_next_question", None)
+        if get_iterate_next_question is None:
+            return False
+
+        next_question_node = get_iterate_next_question(self.__node_set, self.__ast)
+        if next_question_node is None:
+            can_be_self_evaluated = getattr(target_node, "can_be_self_evaluated", None)
+            if callable(can_be_self_evaluated) and can_be_self_evaluated(self.__ast.get_working_memory()):
+                fact_value = target_node.self_evaluate(self.__ast.get_working_memory())
+                if fact_value is not None:
+                    self.__ast.set_fact(
+                        target_node.get_node_name(),
+                        fact_value,
+                        source=FactSource.INFERRED,
+                    )
+                    self.__ast.add_item_to_summary_list(target_node.get_node_name())
+            return False
+
+        ass.set_node_to_be_asked(target_node)
+        ass.set_aux_node_to_be_asked(next_question_node)
+        _logger.info("index Of Rule To Be Asked : " + str(index))
+        return True
 
     def _has_children_to_process(self, target_node: Node, ass: Assessment) -> bool:
         """
@@ -538,6 +795,7 @@ class InferenceEngine:
             self.__ast.set_fact(question_name, fact_value)
             self.__ast.add_item_to_summary_list(question_name)
             self._handle_node_evaluation(target_node, fact_value)
+            self._propagate_inferred_truth_from(target_node.get_node_name())
             self._back_propagating(self.__node_set.find_node_index(target_node.get_node_name()))
         elif LineType.ITERATE == ass.get_node_to_be_asked().get_line_type():
             self._handle_iterate_answer(target_node, ass, question_name, node_value, node_value_type)
@@ -638,7 +896,84 @@ class InferenceEngine:
                 source=FactSource.INFERRED,
             )
             self.__ast.add_item_to_summary_list(iterate_node.get_node_name())
+            self._propagate_inferred_truth_from(iterate_node.get_node_name())
             self._back_propagating(self.__node_set.find_node_index(iterate_node.get_node_name()))
+            ass.set_node_to_be_asked(None)
+            ass.set_aux_node_to_be_asked(None)
+
+    def _propagate_inferred_truth_from(
+        self,
+        child_node_name: str,
+        visited: Optional[Set[str]] = None,
+    ) -> None:
+        """
+        Protected Helper: Propagates an inferred child truth value to parents.
+
+        This is especially important for iterate conclusions, which are derived
+        from a nested node set and then copied back into the parent engine.
+        """
+        if self.__dependency_graph is None:
+            return
+        visited = visited or set()
+        if child_node_name in visited:
+            return
+        visited.add(child_node_name)
+
+        for parent_name in self.__dependency_graph.get_parent_edges(child_node_name):
+            if parent_name in visited:
+                continue
+            parent_value = self._compute_parent_truth_from_children(parent_name)
+            if parent_value is None:
+                continue
+            self.__ast.set_fact(parent_name, parent_value, source=FactSource.INFERRED)
+            self.__ast.add_item_to_summary_list(parent_name)
+            self._propagate_inferred_truth_from(parent_name, visited)
+
+    def _compute_parent_truth_from_children(self, parent_name: str) -> Optional[FactValue]:
+        if self.__dependency_graph is None:
+            return None
+        working_memory = self.__ast.get_working_memory()
+        group_results: List[bool] = []
+        saw_and_group = False
+
+        for dep_type_int, children_tuple in self.__dependency_graph.get_child_groups(parent_name):
+            children = tuple(children_tuple)
+            if not children:
+                continue
+
+            child_facts = [working_memory.get(child_name) for child_name in children]
+            child_values = [
+                bool(fact_value.get_value())
+                for fact_value in child_facts
+                if fact_value is not None
+            ]
+
+            if dep_type_int & DependencyType.get_and():
+                if len(child_values) != len(children):
+                    return None
+                saw_and_group = True
+                group_value = all(child_values)
+            elif dep_type_int & DependencyType.get_or():
+                if any(child_values):
+                    group_value = True
+                elif len(child_values) == len(children):
+                    group_value = False
+                else:
+                    return None
+            else:
+                if len(child_values) != len(children):
+                    return None
+                group_value = all(child_values)
+
+            if dep_type_int & DependencyType.get_not():
+                group_value = not group_value
+            group_results.append(group_value)
+
+        if not group_results:
+            return None
+        if saw_and_group:
+            return FactValue(all(group_results), FactValueType.BOOLEAN)
+        return FactValue(any(group_results), FactValueType.BOOLEAN)
 
     # -------------------------------------------------------------------------
     # Public Access Level: API Methods (Back Propagation)

@@ -433,7 +433,7 @@ async def feed_answer(
     inference_engine.feed_answer_to_node(
         active_node,
         request.question,
-        str(request.answer.answer),
+        request.answer.answer,
         fact_value_type,
         assessment,
     )

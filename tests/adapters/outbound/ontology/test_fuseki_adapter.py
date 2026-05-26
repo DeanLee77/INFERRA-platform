@@ -14,6 +14,7 @@ from src.adapters.outbound.ontology.fuseki_adapter import (
     FusekiConnectionError,
     _auth,
     _format_object,
+    _validate_graph_uri,
 )
 
 
@@ -139,6 +140,51 @@ class TestGetRuleTriples:
                 mock_req.post.side_effect = Exception("Connection refused")
                 result = FusekiAdapter.get_rule_triples("test_rule")
                 assert result == []
+
+
+class TestNamedGraphQueries:
+    def test_list_named_graphs_parses_counts(self):
+        with patch.object(FusekiAdapter, "_execute_sparql_select") as select:
+            select.return_value = [
+                {
+                    "g": {"value": "http://inferra.ai/schema#version/hash"},
+                    "count": {"value": "12"},
+                }
+            ]
+
+            result = FusekiAdapter.list_named_graphs()
+
+        assert result == [("http://inferra.ai/schema#version/hash", 12)]
+        assert "GROUP BY ?g" in select.call_args.args[0]
+
+    def test_get_named_graph_triples_uses_safe_graph_uri_and_paging(self):
+        with patch.object(FusekiAdapter, "_execute_sparql_select") as select:
+            select.return_value = [
+                {
+                    "s": {"value": "http://s"},
+                    "p": {"value": "http://p"},
+                    "o": {"value": "http://o"},
+                }
+            ]
+
+            result = FusekiAdapter.get_named_graph_triples(
+                "http://inferra.ai/schema#version/hash",
+                offset=5,
+                limit=10,
+            )
+
+        assert result == [("http://s", "http://p", "http://o")]
+        sparql = select.call_args.args[0]
+        assert "GRAPH <http://inferra.ai/schema#version/hash>" in sparql
+        assert "OFFSET 5 LIMIT 10" in sparql
+
+    def test_get_named_graph_triples_rejects_non_uri_graph_name(self):
+        with pytest.raises(ValueError):
+            FusekiAdapter.get_named_graph_triples("not a uri")
+
+    def test_validate_graph_uri_rejects_sparql_breakout_characters(self):
+        with pytest.raises(ValueError):
+            _validate_graph_uri("http://example.org/graph> } UNION { ?s ?p ?o")
 
 
 class TestExecuteSparqlUpdate:

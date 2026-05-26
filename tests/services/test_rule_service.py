@@ -11,7 +11,7 @@ from src.domain.exceptions import RuleValidationError
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
 from src.domain.models import RuleEntity, RuleFileEntity
-from src.domain.models.rule_file_payload import PAYLOAD_TYPE
+from src.domain.models.rule_file_payload import PAYLOAD_TYPE, encode_rule_file_payload
 from src.domain.nodes.node_set import NodeSet
 from src.services.rule_validation_service import RuleValidationService
 
@@ -128,6 +128,37 @@ class TestRuleService:
         graph_payload = json.loads(stored.decode_graph_json())
         assert graph_payload["schema_version"] == 1
         assert graph_payload["nodes"]
+
+    def test_save_converted_rule_publishes_rule_updated_event(self, rule_service, mock_rule_repository):
+        mock_rule = RuleEntity(rule_id=1, name="Converted Rule", category="Category", description="Description")
+        mock_rule_repository.create_rule.return_value = 1
+        mock_rule_repository.find_rule_by_rule_name.return_value = mock_rule
+
+        with patch("src.services.rule_service.on_rule_updated", return_value="task-1") as publisher:
+            rule_service.save_converted_rule(
+                "Converted Rule",
+                "Category",
+                "Description",
+                GRAPH_RULE_TEXT,
+            )
+
+        publisher.assert_called_once_with("Converted Rule", GRAPH_RULE_TEXT)
+
+    def test_rule_updated_publish_failure_does_not_block_save(self, rule_service, mock_rule_repository):
+        mock_rule = RuleEntity(rule_id=1, name="Converted Rule", category="Category", description="Description")
+        mock_rule_repository.create_rule.return_value = 1
+        mock_rule_repository.find_rule_by_rule_name.return_value = mock_rule
+
+        with patch("src.services.rule_service.on_rule_updated", side_effect=RuntimeError("broker down")):
+            result = rule_service.save_converted_rule(
+                "Converted Rule",
+                "Category",
+                "Description",
+                GRAPH_RULE_TEXT,
+            )
+
+        assert result == mock_rule
+        mock_rule_repository.create_rule_file.assert_called_once()
     
     def test_create_rule_file_success(self, rule_service, mock_rule_repository):
         """Test creating a rule file."""
@@ -141,6 +172,17 @@ class TestRuleService:
 
         assert result == "INPUT age AS NUMBER\nage > 18\n"
         mock_rule_repository.create_rule_file.assert_called_once()
+
+    def test_create_rule_file_publishes_rule_updated_event(self, rule_service, mock_rule_repository):
+        rule_text = "INPUT age AS NUMBER\nage > 18\n"
+        mock_file = RuleFileEntity(file_id=1, rule_id=1, files=rule_text.encode())
+        mock_rule_repository.find_id_by_name.return_value = 1
+        mock_rule_repository.find_rule_text_by_rule_name.return_value = mock_file
+
+        with patch("src.services.rule_service.on_rule_updated", return_value="task-2") as publisher:
+            rule_service.create_rule_file("Test Rule", rule_text)
+
+        publisher.assert_called_once_with("Test Rule", rule_text)
     
     def test_create_rule_file_rule_not_found(self, rule_service, mock_rule_repository):
         """Test error when creating file for non-existent rule."""
@@ -658,6 +700,100 @@ class TestGetLatestRuleFile:
         mock_rule_repository.find_rule_text_by_rule_name.return_value = mock_file
         result = rule_service.get_latest_rule_file("Test Rule")
         assert result == mock_file
+
+
+class TestGetRuleGraphData:
+    def test_returns_stored_graph_payload_when_available(self, rule_service, mock_rule_repository):
+        graph = {
+            "schema_version": 1,
+            "nodes": [{"name": "eligible for benefit", "runtime_id": 0}],
+            "edges": [],
+        }
+        payload = encode_rule_file_payload(
+            rule_text=GRAPH_RULE_TEXT,
+            graph_json=json.dumps(graph),
+            source_hash="hash",
+        )
+        mock_rule_repository.find_rule_text_by_rule_name.return_value = RuleFileEntity(
+            file_id=1,
+            rule_id=1,
+            files=bytes(payload),
+        )
+
+        result = rule_service.get_rule_graph_data("Test Rule")
+
+        assert result["rule_name"] == "Test Rule"
+        assert result["source"] == "stored"
+        assert result["rule_text"] == GRAPH_RULE_TEXT
+        assert result["expanded_rule_text"] == GRAPH_RULE_TEXT
+        assert result["nodes"] == graph["nodes"]
+        assert result["edges"] == []
+
+    def test_generates_graph_payload_for_legacy_plain_rule_file(self, rule_service, mock_rule_repository):
+        graph = HyperAdjacencyGraph()
+        graph.add_dependency_group("eligible for benefit", 8, {"claimant has service"})
+        parser = MagicMock()
+        parser.get_node_set.return_value.get_graph.return_value = graph
+        rule_service._parse_rule_text = MagicMock(return_value=parser)
+        mock_rule_repository.find_rule_text_by_rule_name.return_value = RuleFileEntity(
+            file_id=1,
+            rule_id=1,
+            files=GRAPH_RULE_TEXT.encode("utf-8"),
+        )
+
+        result = rule_service.get_rule_graph_data("Test Rule")
+
+        assert result["source"] == "generated"
+        assert {node["name"] for node in result["nodes"]} == {
+            "eligible for benefit",
+            "claimant has service",
+        }
+        assert result["edges"] == [
+            {
+                "parent": "eligible for benefit",
+                "child": "claimant has service",
+                "dep_type": 8,
+            }
+        ]
+
+
+class TestRuleOntologyData:
+    def test_get_rule_ontology_data_compiles_triples_and_graph(self, rule_service, mock_rule_repository):
+        rule_text = (
+            "INPUT age AS NUMBER\n"
+            "eligible for benefit\n"
+            "    AND age >= 18\n"
+        )
+        mock_rule_repository.find_rule_text_by_rule_name.return_value = RuleFileEntity(
+            file_id=1,
+            rule_id=1,
+            files=rule_text.encode("utf-8"),
+        )
+
+        result = rule_service.get_rule_ontology_data("Eligibility Rule")
+
+        assert result["rule_name"] == "Eligibility Rule"
+        assert result["source"] == "compiled"
+        assert result["triple_count"] == len(result["triples"])
+        assert any(triple["predicate"].endswith("containsNode") for triple in result["triples"])
+        assert any(node["name"] == "eligible for benefit" for node in result["nodes"])
+        assert any(edge["predicate"].endswith("andDependsOn") for edge in result["edges"])
+
+    def test_sync_rule_ontology_publishes_expanded_rule_text(self, rule_service, mock_rule_repository):
+        rule_text = "eligible for benefit\n    AND claimant has service\n"
+        mock_rule_repository.find_rule_text_by_rule_name.return_value = RuleFileEntity(
+            file_id=1,
+            rule_id=1,
+            files=rule_text.encode("utf-8"),
+        )
+
+        with patch("src.services.rule_service.on_rule_updated", return_value="task-ontology") as publisher:
+            result = rule_service.sync_rule_ontology("Eligibility Rule")
+
+        assert result["status"] == "published"
+        assert result["task_id"] == "task-ontology"
+        assert result["triple_count"] > 0
+        publisher.assert_called_once_with("Eligibility Rule", rule_text)
 
 
 class TestGetLatestRuleHistory:

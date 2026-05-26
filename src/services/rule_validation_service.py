@@ -108,7 +108,19 @@ class RuleValidationService:
     _VALUE_CONCLUSION_PATTERN = re.compile(r"^(.+?)\s+IS\s+.+$")
     _EXPR_CONCLUSION_PATTERN = re.compile(r"^(.+?)\s+IS\s+CALC\s+.+$")
     _COMPARISON_PATTERN = re.compile(r"^(.+?)\s*(<=|>=|<|>|=)\s*.+$")
-    _ITERATE_PATTERN = re.compile(r"^(.+?)\s+FOR\s+.+$")
+    _ITERATE_PATTERN = re.compile(
+        r"^(?P<quantifier>NOT\s+ALL|NOT\s+NONE|AT\s+LEAST\s+\d+|AT\s+MOST\s+\d+|EXACTLY\s+\d+|ALL|NONE|SOME)\s+"
+        r"(?P<alias>.+?)\s+"
+        r"IN\s+(?P<collection>.+)$",
+        re.IGNORECASE,
+    )
+    _LEGACY_ITERATE_PATTERN = re.compile(r"^.+?\s+ITERATE:\s*LIST\s+OF\s+.+$", re.IGNORECASE)
+    _BARE_NUMBER_ITERATE_PATTERN = re.compile(r"^\d+\s+.+?\s+IN\s+.+$", re.IGNORECASE)
+    _EXACT_ITERATE_PATTERN = re.compile(r"^EXACT\s+\d+\s+.+?\s+IN\s+.+$", re.IGNORECASE)
+    _TYPE_PATTERN = re.compile(r"^TYPE\s+(.+?)\s*$", re.IGNORECASE)
+    _FIELD_PATTERN = re.compile(r"^FIELD\s+(.+?)\s+AS\s+(.+?)\s*$", re.IGNORECASE)
+    _SIZE_FROM_PATTERN = re.compile(r"^SIZE\s+FROM\s+(.+?)\s*$", re.IGNORECASE)
+    _ITEM_TYPE_PATTERN = re.compile(r"^ITEM\s+TYPE\s+(.+?)\s*$", re.IGNORECASE)
     _COMMENT_PATTERN = re.compile(r"^(#|//)")
     _INDENTED_LINE_PATTERN = re.compile(r"^(\s+)(.+)$")
     _QUANTIFIER_PATTERN = re.compile(
@@ -116,7 +128,6 @@ class RuleValidationService:
         r"(?:(?:MANDATORY|OPTIONALLY|POSSIBLY)\b\s*)?"
         r"(?:(?:NOT|KNOWN)\b\s*)*"
         r"(?:(?:NEEDS|WANTS)\b\s*)?",
-        re.IGNORECASE,
     )
     _IS_IN_LIST_PATTERN = re.compile(r"^(.+?)\s+IS\s+IN\s+LIST:\s*(.+)$")
     _APOSTROPHE_VARIANTS = str.maketrans({
@@ -175,6 +186,7 @@ class RuleValidationService:
             return result
 
         self._check_type_consistency(parsed, errors, warnings)
+        self._check_same_level_and_or(parsed, warnings)
 
         self._check_dag_cycles(parsed, errors)
 
@@ -208,10 +220,16 @@ class RuleValidationService:
         warnings: List[ValidationWarning],
     ) -> Dict:
         declarations: Dict[str, dict] = {}
+        type_fields: Dict[str, Dict[str, str]] = {}
+        collection_fields: Dict[str, Dict[str, str]] = {}
+        collections: Dict[str, dict] = {}
+        declaration_references: List[dict] = []
         rules: List[dict] = []
         rule_stack: List[dict] = []
         in_list = False
         list_var_name = ""
+        current_type = ""
+        current_collection = ""
         line_number = 0
 
         for raw_line in rule_text.splitlines():
@@ -220,17 +238,59 @@ class RuleValidationService:
 
             if not stripped or self._COMMENT_PATTERN.match(stripped):
                 in_list = False
+                current_type = ""
+                current_collection = ""
                 continue
 
             if in_list and stripped.startswith("ITEM"):
+                continue
+
+            type_match = self._TYPE_PATTERN.match(stripped)
+            if type_match:
+                current_type = type_match.group(1).strip()
+                current_collection = ""
+                type_fields.setdefault(current_type, {})
+                in_list = False
                 continue
 
             indent_match = self._INDENTED_LINE_PATTERN.match(raw_line)
             if indent_match:
                 indent = len(indent_match.group(1))
                 child_text = indent_match.group(2).strip()
+                field_match = self._FIELD_PATTERN.match(child_text)
+                if current_type and field_match:
+                    field_type_text = field_match.group(2).strip()
+                    type_fields.setdefault(current_type, {})[
+                        field_match.group(1).strip()
+                    ] = self._normalise_declared_type(field_type_text)
+                    option_list = self._field_option_list_from_text(field_type_text)
+                    if option_list:
+                        declaration_references.append({"name": option_list, "line": line_number})
+                    continue
+                if current_collection:
+                    size_match = self._SIZE_FROM_PATTERN.match(child_text)
+                    if size_match:
+                        size_source = size_match.group(1).strip()
+                        collections.setdefault(current_collection, {})["size_from"] = size_source
+                        declaration_references.append({"name": size_source, "line": line_number})
+                        continue
+                    field_match = self._FIELD_PATTERN.match(child_text)
+                    if field_match:
+                        field_type_text = field_match.group(2).strip()
+                        collection_fields.setdefault(current_collection, {})[
+                            field_match.group(1).strip()
+                        ] = self._normalise_declared_type(field_type_text)
+                        option_list = self._field_option_list_from_text(field_type_text)
+                        if option_list:
+                            declaration_references.append({"name": option_list, "line": line_number})
+                        continue
+                    item_type_match = self._ITEM_TYPE_PATTERN.match(child_text)
+                    if item_type_match:
+                        collections.setdefault(current_collection, {})["item_type"] = item_type_match.group(1).strip()
+                        continue
                 child_clean = self._QUANTIFIER_PATTERN.sub("", child_text).strip()
                 if child_clean:
+                    dependency_keyword = self._dependency_keyword(child_text)
                     self._parse_rule_line(
                         child_clean,
                         line_number,
@@ -240,6 +300,7 @@ class RuleValidationService:
                         indent=indent,
                         is_indented=True,
                         rule_stack=rule_stack,
+                        dependency_keyword=dependency_keyword,
                     )
                 continue
 
@@ -262,6 +323,8 @@ class RuleValidationService:
                     }
                 in_list = "AS LIST" in stripped or "IS LIST" in stripped
                 list_var_name = var_name if in_list else ""
+                current_type = ""
+                current_collection = ""
                 continue
 
             input_match = self._INPUT_PATTERN.match(stripped)
@@ -281,11 +344,25 @@ class RuleValidationService:
                         "line": line_number,
                         "meta": "INPUT",
                     }
-                in_list = "AS LIST" in stripped
+                collection_match = re.match(
+                    r"^INPUT\s+(.+?)\s+AS\s+COLLECTION\s+OF\s+(.+?)\s*$",
+                    stripped,
+                    re.IGNORECASE,
+                )
+                if collection_match:
+                    current_collection = collection_match.group(1).strip()
+                    current_type = ""
+                    collections[current_collection] = {"item_type": collection_match.group(2).strip()}
+                else:
+                    current_type = ""
+                    current_collection = ""
+                in_list = "AS LIST" in stripped and "AS COLLECTION" not in stripped
                 list_var_name = var_name if in_list else ""
                 continue
 
             in_list = False
+            current_type = ""
+            current_collection = ""
             self._parse_rule_line(
                 stripped,
                 line_number,
@@ -299,15 +376,20 @@ class RuleValidationService:
 
         return {
             "declarations": declarations,
+            "type_fields": type_fields,
+            "collection_fields": collection_fields,
+            "collections": collections,
+            "declaration_references": declaration_references,
             "rules": rules,
             "lines": line_number,
         }
 
     _KEYWORDS = frozenset({
-        "IS", "AS", "CALC", "FOR", "ALL", "NONE", "SOME",
+        "IS", "AS", "CALC", "FOR", "ALL", "NONE", "SOME", "AT", "LEAST", "MOST", "EXACT", "EXACTLY",
         "AND", "OR", "NOT", "KNOWN", "MANDATORY", "OPTIONALLY", "POSSIBLY",
         "NEEDS", "WANTS", "ITEM", "INPUT", "FIXED", "IF",
-        "IN", "LIST", "TRUE", "FALSE",
+        "IN", "LIST", "TRUE", "FALSE", "TYPE", "FIELD", "COLLECTION",
+        "OF", "SIZE", "FROM",
     })
 
     def _extract_references(self, raw: str, conclusion_var: str) -> List[str]:
@@ -342,18 +424,28 @@ class RuleValidationService:
         indent: int = 0,
         is_indented: bool = False,
         rule_stack: Optional[List[dict]] = None,
+        dependency_keyword: str = "",
     ) -> None:
         def _append_rule(rule: dict) -> None:
             rule["indent"] = indent
             rule["is_indented"] = is_indented
             rule["has_children"] = False
+            rule["dependency_keyword"] = dependency_keyword
             if rule_stack is not None:
                 while rule_stack and rule_stack[-1]["indent"] >= indent:
                     rule_stack.pop()
                 if rule_stack:
                     rule_stack[-1]["has_children"] = True
-                rule_stack.append(rule)
+            rule_stack.append(rule)
             rules.append(rule)
+
+        if (
+            self._TYPE_PATTERN.match(text)
+            or self._FIELD_PATTERN.match(text)
+            or self._SIZE_FROM_PATTERN.match(text)
+            or self._ITEM_TYPE_PATTERN.match(text)
+        ):
+            return
 
         expr_match = self._EXPR_CONCLUSION_PATTERN.match(text)
         if expr_match:
@@ -377,10 +469,46 @@ class RuleValidationService:
             _append_rule({"line": line_number, "variable_name": var_name, "kind": "COMPARISON", "raw": text, "operator": operator, "references": refs})
             return
 
+        if self._LEGACY_ITERATE_PATTERN.match(text):
+            errors.append(ValidationError(
+                code="INVALID_ITERATE_SYNTAX",
+                message=(
+                    "`ITERATE: LIST OF` is not valid INFERRA syntax. "
+                    "Use `<quantifier> <item alias> IN <collection name>`."
+                ),
+                line=line_number,
+                node_name=text,
+            ))
+            return
+
+        if self._BARE_NUMBER_ITERATE_PATTERN.match(text):
+            errors.append(ValidationError(
+                code="INVALID_ITERATE_SYNTAX",
+                message=(
+                    "Bare numeric iterate quantifiers are not valid. "
+                    "Use `AT LEAST <number> <item alias> IN <collection name>`."
+                ),
+                line=line_number,
+                node_name=text,
+            ))
+            return
+
+        if self._EXACT_ITERATE_PATTERN.match(text):
+            errors.append(ValidationError(
+                code="INVALID_ITERATE_SYNTAX",
+                message=(
+                    "`EXACT` is not valid INFERRA syntax. "
+                    "Use `EXACTLY <number> <item alias> IN <collection name>`."
+                ),
+                line=line_number,
+                node_name=text,
+            ))
+            return
+
         iter_match = self._ITERATE_PATTERN.match(text)
         if iter_match:
-            var_name = iter_match.group(1).strip()
-            refs = self._extract_references(text, var_name)
+            var_name = iter_match.group("alias").strip()
+            refs = [iter_match.group("collection").strip()]
             _append_rule({"line": line_number, "variable_name": var_name, "kind": "ITERATE", "raw": text, "references": refs})
             return
 
@@ -411,6 +539,7 @@ class RuleValidationService:
                 "DOUBLE": FactValueType.DOUBLE.value,
                 "DATE": FactValueType.DATE.value,
                 "LIST": FactValueType.LIST.value,
+                "COLLECTION": FactValueType.LIST.value,
                 "URL": FactValueType.URL.value,
                 "HASH": FactValueType.HASH.value,
                 "GUID": FactValueType.GUID.value,
@@ -435,6 +564,21 @@ class RuleValidationService:
                 return FactValueType.BOOLEAN.value
         return "UNKNOWN"
 
+    def _normalise_declared_type(self, raw_type: str) -> str:
+        return self._extract_value_type(f"INPUT __field__ AS {raw_type}", "INPUT")
+
+    def _field_option_list_from_text(self, raw_type: str) -> Optional[str]:
+        match = re.match(r"^LIST\s+OF\s+(.+?)\s*$", raw_type or "", re.IGNORECASE)
+        if match is None:
+            return None
+        return match.group(1).strip()
+
+    def _dependency_keyword(self, child_text: str) -> str:
+        match = re.match(r"^(AND|OR)\b", child_text.strip())
+        if match is None:
+            return ""
+        return match.group(1).upper()
+
     # -------------------------------------------------------------------------
     # Check 2: Type Consistency
     # -------------------------------------------------------------------------
@@ -447,9 +591,11 @@ class RuleValidationService:
     ) -> None:
         declarations = parsed["declarations"]
         rules = parsed["rules"]
+        field_names = self._collect_declared_field_names(parsed)
 
         rule_conclusion_names = self._collect_rule_conclusion_names(rules)
         reference_entries = self._collect_reference_entries(rules, declarations, rule_conclusion_names)
+        reference_entries.extend(parsed.get("declaration_references", []))
         exact_referenced_names = {entry["name"] for entry in reference_entries}
         discrepancy_declarations: Set[str] = set()
 
@@ -473,6 +619,8 @@ class RuleValidationService:
         for entry in reference_entries:
             var_name = entry["name"]
             if var_name in declared_names or var_name in rule_conclusion_names:
+                continue
+            if self._is_declared_collection_field_reference(var_name, field_names):
                 continue
 
             declaration_match = self._find_declaration_discrepancy(
@@ -507,6 +655,62 @@ class RuleValidationService:
                     message=f"Variable '{var_name}' is declared but never referenced in rule blocks",
                     line=declarations[var_name]["line"],
                     node_name=var_name,
+                ))
+
+    def _collect_declared_field_names(self, parsed: Dict) -> Set[str]:
+        field_names: Set[str] = set()
+        for fields in parsed.get("type_fields", {}).values():
+            field_names.update(fields.keys())
+        for fields in parsed.get("collection_fields", {}).values():
+            field_names.update(fields.keys())
+        return field_names
+
+    def _is_declared_collection_field_reference(self, name: str, field_names: Set[str]) -> bool:
+        if "." not in name:
+            return False
+        field_name = name.split(".", 1)[1].strip()
+        return field_name in field_names
+
+    def _check_same_level_and_or(
+        self,
+        parsed: Dict,
+        warnings: List[ValidationWarning],
+    ) -> None:
+        stack: List[dict] = []
+        grouped: Dict[Tuple[int, int], dict] = {}
+
+        for rule in parsed.get("rules", []):
+            while stack and stack[-1]["indent"] >= rule["indent"]:
+                stack.pop()
+
+            if rule.get("is_indented") and stack:
+                dependency_keyword = rule.get("dependency_keyword", "")
+                if dependency_keyword in {"AND", "OR"}:
+                    parent = stack[-1]
+                    group_key = (parent["line"], rule["indent"])
+                    group = grouped.setdefault(
+                        group_key,
+                        {
+                            "parent": parent,
+                            "keywords": set(),
+                            "first_child_line": rule["line"],
+                        },
+                    )
+                    group["keywords"].add(dependency_keyword)
+
+            stack.append(rule)
+
+        for group in grouped.values():
+            if {"AND", "OR"}.issubset(group["keywords"]):
+                parent = group["parent"]
+                warnings.append(ValidationWarning(
+                    code="MIXED_AND_OR_CHILDREN",
+                    message=(
+                        f"Rule '{parent['raw']}' mixes AND and OR children at the same level. "
+                        "Create explicit grouping rules to avoid ambiguous semantics."
+                    ),
+                    line=group["first_child_line"],
+                    node_name=parent["variable_name"],
                 ))
 
     def _collect_rule_conclusion_names(self, rules: List[dict]) -> Set[str]:

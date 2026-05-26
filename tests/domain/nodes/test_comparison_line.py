@@ -334,6 +334,15 @@ class TestSelfEvaluate:
         result = cl.self_evaluate({"x": FactValue(5, FactValueType.INTEGER)})
         assert result.get_value() is False
 
+    def test_numeric_rhs_string_value_is_coerced(self):
+        cl = _make_cl()
+        cl._variable_name = "x"
+        cl._ComparisonLine__operator_string = ">="
+        cl._ComparisonLine__lhs = "x"
+        cl._ComparisonLine__rhs = FactValue("10", FactValueType.INTEGER)
+        result = cl.self_evaluate({"x": FactValue(12.5, FactValueType.DOUBLE)})
+        assert result.get_value() is True
+
     def test_list_comparison_returns_true_when_item_matches(self):
         cl = _make_cl()
         cl._variable_name = "x"

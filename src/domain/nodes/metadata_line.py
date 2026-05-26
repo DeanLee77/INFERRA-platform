@@ -116,6 +116,9 @@ class MetadataLine(Node):
                 else:
                     self._value = FactValue('WARNING', FactValueType.WARNING)
         elif self.__meta_type == MetaType.INPUT:
+            if temp_str == "COLLECTION" and len(temp_array) >= 3 and temp_array[1] == "OF":
+                self._value = FactValue(list(), FactValueType.LIST)
+                return
             if len(temp_array) > 1:
                 temp_str_2 = temp_array[2]
                 if FactValueType.LIST.value == temp_str:

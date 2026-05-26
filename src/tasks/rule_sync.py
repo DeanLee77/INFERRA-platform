@@ -16,6 +16,8 @@ from typing import Dict, Optional
 
 import structlog
 
+from src.adapters.outbound.ontology.fuseki_adapter import FusekiAdapter
+from src.adapters.outbound.ontology.inferra_to_rdf_compiler import InferraToRdfCompiler
 from src.domain.state.feature_flags import FeatureFlags
 from src.infrastructure.secrets import redis_client_from_env
 from src.tasks.celery_app import CELERY_AVAILABLE, app
@@ -128,9 +130,8 @@ def publish_dead_letter_event(
 
 
 if CELERY_AVAILABLE:
-    from celery import shared_task
 
-    @shared_task(bind=True, max_retries=3, default_retry_delay=60, rate_limit="10/m")
+    @app.task(bind=True, max_retries=3, default_retry_delay=60, rate_limit="10/m")
     def compile_and_push_to_fuseki(
         self, rule_name: str, rule_text: str, source_hash: str
     ) -> dict:
@@ -162,10 +163,6 @@ if CELERY_AVAILABLE:
 
         try:
             task_log.info("fuseki_sync_start", rule_name=rule_name)
-
-            from src.adapters.outbound.ontology.inferra_to_rdf_compiler import (
-                InferraToRdfCompiler,
-            )
 
             rdf_triples = InferraToRdfCompiler.compile(rule_text, rule_name)
             _fuseki_write_with_breaker(rdf_triples, version=source_hash)
@@ -203,8 +200,6 @@ def _fuseki_write_with_breaker(rdf_triples, version: str) -> None:
 
         @circuit(failure_threshold=5, recovery_timeout=60)
         def _write_with_protection():
-            from src.adapters.outbound.ontology.fuseki_adapter import FusekiAdapter
-
             FusekiAdapter.execute_sparql_idempotent_insert(
                 rdf_triples, version=version
             )
@@ -216,7 +211,6 @@ def _fuseki_write_with_breaker(rdf_triples, version: str) -> None:
 
         fallback_log = structlog.get_logger()
         fallback_log.debug("circuitbreaker_not_installed_fusing_direct_write")
-        from src.adapters.outbound.ontology.fuseki_adapter import FusekiAdapter
 
         FusekiAdapter.execute_sparql_idempotent_insert(
             rdf_triples, version=version

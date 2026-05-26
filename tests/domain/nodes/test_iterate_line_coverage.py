@@ -15,6 +15,7 @@ import pytest
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
 from src.domain.graph.dependency_type import DependencyType
+from src.domain.inference.assessment_state import AssessmentState
 from src.domain.nodes.iterate_line import IterateLine
 from src.domain.nodes.line_type import LineType
 from src.domain.nodes.node import Node
@@ -75,7 +76,11 @@ def _build_parent_node_set(iterate_line, child_nodes_by_id, dep_children, child_
             return iterate_line.get_node_name()
         if node_id in node_id_dict:
             return node_id_dict[node_id]
-        node = _make_mock_node(node_id, f"node_{node_id}", LineType.COMPARISON, f"node_{node_id}")
+        if dep_children and node_id == dep_children[0]:
+            node_name = iterate_line.get_given_list_name() or f"node_{node_id}"
+            node = _make_mock_node(node_id, node_name, LineType.COMPARISON, node_name)
+        else:
+            node = _make_mock_node(node_id, f"node_{node_id}", LineType.COMPARISON, f"node_{node_id}")
         node_dict[node.get_node_name()] = node
         node_id_dict[node_id] = node.get_node_name()
         return node.get_node_name()
@@ -313,11 +318,11 @@ class TestIterateFeedAnswersWithJson:
 
 
 class TestIterateFeedAnswersLegacy:
-    def test_legacy_first_question_sets_list_size(self):
+    def test_legacy_given_list_question_sets_list_size(self):
         line = _make_iterate_line(node_id=0, list_size=0)
 
-        first_child = _make_mock_node(1, "first_child", LineType.COMPARISON, "first_child")
-        parent_ns = _build_parent_node_set(line, {1: first_child}, [1])
+        branch_child = _make_mock_node(1, "branch", LineType.VALUE_CONCLUSION, "branch")
+        parent_ns = _build_parent_node_set(line, {1: branch_child}, [1])
 
         mock_iterate_ie = MagicMock()
         mock_assessment = MagicMock()
@@ -330,12 +335,14 @@ class TestIterateFeedAnswersLegacy:
 
         with patch('src.domain.nodes.iterate_line.InferenceEngine', return_value=mock_iterate_ie), \
              patch.object(line, 'create_iterate_node_set', return_value=MagicMock()), \
-             patch.object(line, 'can_be_self_evaluated', return_value=False), \
+            patch.object(line, 'can_be_self_evaluated', return_value=False), \
              patch.object(line, '_transfer_fact_value'):
 
             target_node = MagicMock()
+            target_node.get_node_name.return_value = "services"
+            target_node.get_variable_name.return_value = "services"
             line._iterate_feed_answers_legacy(
-                target_node, "first_child", 3, FactValueType.INTEGER,
+                target_node, "services", ["one", "two", "three"], FactValueType.LIST,
                 parent_ns, parent_ast, ass,
             )
 
@@ -724,3 +731,13 @@ class TestGetIterateNodeSetWithValue:
         mock_ns = MagicMock(spec=NodeSet)
         line._IterateLine__iterate_node_set = mock_ns
         assert line.get_iterate_node_set() is mock_ns
+
+
+class TestTransferFactValue:
+    def test_accepts_assessment_state_destination(self):
+        line = _make_iterate_line()
+        parent_ast = AssessmentState()
+
+        line._transfer_fact_value({"fact": FactValue(True)}, parent_ast)
+
+        assert parent_ast.get_working_memory()["fact"].get_value() is True

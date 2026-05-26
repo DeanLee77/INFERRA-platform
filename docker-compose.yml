@@ -25,6 +25,10 @@ services:
     environment:
       INFERRA_REDIS_SESSION_STORE: "true"
       INFERRA_USE_HYPERGRAPH: "true"
+      INFERRA_ASYNC_SYNC_ENABLED: "true"
+      INFERRA_ASYNC_POST_REASONING: "true"
+      INFERRA_PROV_O_TRACE: "true"
+      INFERRA_ENRICHED_API: "true"
       INFERRA_ABDUCTION_ENABLED: "true"
       INFERRA_INDUCTION_PIPELINE: "true"
       INFERRA_REASONING_ROUTER: "true"
@@ -64,7 +68,7 @@ services:
       OTEL_EXPORTER_OTLP_INSECURE: "true"
       SQLALCHEMY_DATABASE_URI: ${SQLALCHEMY_DATABASE_URI:-postgresql://inferra:inferra@postgres:5432/inferra}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       redis:
         condition: service_healthy
@@ -93,6 +97,10 @@ services:
       FUSEKI_URL: http://fuseki:3030/inferra
       FUSEKI_USER: ${FUSEKI_USER:-admin}
       FUSEKI_PASSWORD: ${FUSEKI_PASSWORD:-admin}
+      INFERRA_ASYNC_SYNC_ENABLED: "true"
+      INFERRA_ASYNC_POST_REASONING: "true"
+      INFERRA_PROV_O_TRACE: "true"
+      INFERRA_ENRICHED_API: "true"
       INFERRA_LLM_PROVIDER: ${INFERRA_LLM_PROVIDER:-}
       INFERRA_LLM_MODEL: ${INFERRA_LLM_MODEL:-}
       INFERRA_LLM_BASE_URL: ${INFERRA_LLM_BASE_URL:-}

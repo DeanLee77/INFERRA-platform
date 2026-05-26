@@ -194,6 +194,157 @@ class TestGetNextQuestion:
 
         assert response.status_code == 404
 
+    def test_next_question_with_real_engine_returns_question(self):
+        """Regression: real InferenceEngine exposes question/type helpers used by the route."""
+        from src.adapters.inbound.http.routes.inference import _session_service
+        from src.domain.rule_parser.rule_set_parser import RuleSetParser
+        from src.domain.rule_parser.rule_set_reader import RuleSetReader
+        from src.domain.rule_parser.rule_set_scanner import RuleSetScanner
+
+        rule_text = """
+INPUT person agrees AS BOOLEAN
+
+eligible
+    AND person agrees
+"""
+        reader = RuleSetReader()
+        reader.create()
+        reader.set_file_with_text(rule_text)
+        parser = RuleSetParser()
+        parser.create()
+        parser.set_source_name("test_rule")
+        scanner = RuleSetScanner(reader, parser)
+        scanner.scan_rule_set()
+        node_set = scanner.establish_node_set()
+
+        store = InMemorySessionStore()
+        service = InferenceSessionService(store)
+        session = service.create_session("test_rule", "eligible", node_set)
+        app.dependency_overrides[_session_service] = lambda: service
+
+        try:
+            with TestClient(app) as c:
+                response = c.get(
+                    f"/api/v1/inference/next-question?session_id={session.session_id}"
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["questions"] == [
+            {
+                "question_text": "person agrees",
+                "question_value_type": "boolean",
+            }
+        ]
+        assert data["has_more_questions"] is True
+
+    def test_next_question_with_real_comparison_returns_lhs_question(self):
+        from src.adapters.inbound.http.routes.inference import _session_service
+        from src.domain.rule_parser.rule_set_parser import RuleSetParser
+        from src.domain.rule_parser.rule_set_reader import RuleSetReader
+        from src.domain.rule_parser.rule_set_scanner import RuleSetScanner
+
+        rule_text = """
+INPUT age AS NUMBER
+
+eligible
+    AND age >= 18
+"""
+        reader = RuleSetReader()
+        reader.create()
+        reader.set_file_with_text(rule_text)
+        parser = RuleSetParser()
+        parser.create()
+        parser.set_source_name("test_rule")
+        scanner = RuleSetScanner(reader, parser)
+        scanner.scan_rule_set()
+        node_set = scanner.establish_node_set()
+
+        store = InMemorySessionStore()
+        service = InferenceSessionService(store)
+        session = service.create_session("test_rule", "eligible", node_set)
+        app.dependency_overrides[_session_service] = lambda: service
+
+        try:
+            with TestClient(app) as c:
+                response = c.get(
+                    f"/api/v1/inference/next-question?session_id={session.session_id}"
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["questions"] == [
+            {
+                "question_text": "age",
+                "question_value_type": "double",
+            }
+        ]
+        assert data["has_more_questions"] is True
+
+    def test_next_question_with_iterate_skips_derived_branch_rules(self):
+        """Regression: iterate OR branch rules with children are derived, not questions."""
+        from src.adapters.inbound.http.routes.inference import _session_service
+        from src.domain.rule_parser.rule_set_parser import RuleSetParser
+        from src.domain.rule_parser.rule_set_reader import RuleSetReader
+        from src.domain.rule_parser.rule_set_scanner import RuleSetScanner
+
+        rule_text = """
+FIXED allowed service types AS LIST
+    ITEM warlike
+
+INPUT service history AS LIST
+    ITEM period one
+    ITEM period two
+INPUT service type AS LIST
+    ITEM warlike
+
+the service history meets criteria
+    AND ALL service period IN service history
+        OR one
+            AND service type IS IN LIST: allowed service types
+        OR two
+            AND service type IS IN LIST: allowed service types
+"""
+        reader = RuleSetReader()
+        reader.create()
+        reader.set_file_with_text(rule_text)
+        parser = RuleSetParser()
+        parser.create()
+        parser.set_source_name("test_rule")
+        scanner = RuleSetScanner(reader, parser)
+        scanner.scan_rule_set()
+        node_set = scanner.establish_node_set()
+
+        store = InMemorySessionStore()
+        service = InferenceSessionService(store)
+        session = service.create_session(
+            "test_rule",
+            "the service history meets criteria",
+            node_set,
+        )
+        app.dependency_overrides[_session_service] = lambda: service
+
+        try:
+            with TestClient(app) as c:
+                response = c.get(
+                    f"/api/v1/inference/next-question?session_id={session.session_id}"
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        question_texts = [item["question_text"] for item in data["questions"]]
+        assert question_texts
+        assert "one" not in question_texts
+        assert "two" not in question_texts
+        assert question_texts[0] == "1st  service period  service type"
+        assert data["iterate_progress"]["list_name"] == "service history"
+
 
 # =============================================================================
 # GET /api/v1/inference/summary
@@ -264,6 +415,67 @@ class TestGetSummary:
 
 class TestFeedAnswer:
     """Tests for POST /api/v1/inference/feed-answer — idempotency + 409."""
+
+    def test_feed_answer_with_real_engine_materializes_derived_goal(self):
+        """Answered leaf facts propagate to the parent goal returned by the API."""
+        from src.adapters.inbound.http.routes.inference import _session_service
+        from src.domain.rule_parser.rule_set_parser import RuleSetParser
+        from src.domain.rule_parser.rule_set_reader import RuleSetReader
+        from src.domain.rule_parser.rule_set_scanner import RuleSetScanner
+
+        rule_text = """
+INPUT person agrees AS BOOLEAN
+
+eligible
+    AND person agrees
+"""
+        reader = RuleSetReader()
+        reader.create()
+        reader.set_file_with_text(rule_text)
+        parser = RuleSetParser()
+        parser.create()
+        parser.set_source_name("test_rule")
+        scanner = RuleSetScanner(reader, parser)
+        scanner.scan_rule_set()
+        node_set = scanner.establish_node_set()
+
+        store = InMemorySessionStore()
+        service = InferenceSessionService(store)
+        session = service.create_session("test_rule", "eligible", node_set)
+        app.dependency_overrides[_session_service] = lambda: service
+
+        try:
+            with TestClient(app) as c:
+                c.get(
+                    f"/api/v1/inference/next-question?session_id={session.session_id}"
+                )
+                response = c.post(
+                    f"/api/v1/inference/feed-answer?session_id={session.session_id}",
+                    json={
+                        "question": "person agrees",
+                        "answer": {"type": "BOOLEAN", "answer": True},
+                    },
+                )
+                summary = c.get(
+                    f"/api/v1/inference/summary?session_id={session.session_id}"
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "has_more_questions": False,
+            "goal_rule_name": "eligible",
+            "goal_rule_value": "True",
+            "goal_rule_type": "boolean",
+        }
+        assert summary.status_code == 200
+        assert any(
+            item["node_text"] == "eligible"
+            and item["node_value"] == "True"
+            and item["fact_source"] == "INFERRED"
+            for item in summary.json()["summary"]
+        )
 
     @patch("src.domain.inference.session_service.InferenceSessionService.get_session")
     @patch("src.domain.inference.session_service.InferenceSessionService.__init__", return_value=None)

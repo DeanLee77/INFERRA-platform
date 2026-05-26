@@ -1,6 +1,11 @@
 import hashlib
+import json
 from typing import Any, List, Optional, Set
 
+import structlog
+
+from src.adapters.outbound.ontology.fuseki_adapter import INF_NS
+from src.adapters.outbound.ontology.inferra_to_rdf_compiler import InferraToRdfCompiler
 from src.domain.exceptions import RuleValidationError
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.graph.graph_serialization import serialize_graph
@@ -21,6 +26,10 @@ from src.domain.rule_parser.rule_set_reader import RuleSetReader
 from src.domain.rule_parser.rule_set_scanner import RuleSetScanner
 from src.ports.rule_repository_port import RuleRepositoryPort
 from src.services.rule_validation_service import RuleValidationService, ValidationError
+from src.tasks.event_publisher import on_rule_updated
+
+
+log = structlog.get_logger()
 
 
 class RuleService:
@@ -83,6 +92,84 @@ class RuleService:
 
     def get_latest_rule_file(self, rule_name: str) -> RuleFileEntity:
         return self.get_rule_file_or_raise(rule_name)
+
+    def get_rule_graph_data(self, rule_name: str) -> dict[str, Any]:
+        latest_file = self.get_latest_rule_file(rule_name)
+        rule_text = self.decode_rule_file(latest_file)
+        expanded_rule_text = self._build_import_aware_rule_text(rule_name, rule_text)
+        graph_json = latest_file.decode_graph_json()
+        source = "stored"
+
+        if graph_json is None:
+            parser = self._parse_rule_text(rule_name, expanded_rule_text)
+            graph = parser.get_node_set().get_graph()
+            if graph is None:
+                raise ValueError("Parsed rule set did not produce a dependency graph")
+            graph_json = serialize_graph(graph)
+            source = "generated"
+
+        graph_payload = json.loads(graph_json)
+        return {
+            "rule_name": rule_name,
+            "source": source,
+            "rule_text": rule_text,
+            "expanded_rule_text": expanded_rule_text,
+            "schema_version": graph_payload.get("schema_version", 1),
+            "nodes": graph_payload.get("nodes", []),
+            "edges": graph_payload.get("edges", []),
+        }
+
+    def get_rule_ontology_data(self, rule_name: str) -> dict[str, Any]:
+        rule_text = self.get_rule_text(rule_name)
+        expanded_rule_text = self._build_import_aware_rule_text(rule_name, rule_text)
+        triples = InferraToRdfCompiler.compile(expanded_rule_text, rule_name)
+        return {
+            "rule_name": rule_name,
+            "source": "compiled",
+            "triple_count": len(triples),
+            "triples": [
+                {"subject": subject, "predicate": predicate, "object": obj}
+                for subject, predicate, obj in triples
+            ],
+            **self._ontology_graph_from_triples(triples),
+        }
+
+    def sync_rule_ontology(self, rule_name: str) -> dict[str, Any]:
+        rule_text = self.get_rule_text(rule_name)
+        expanded_rule_text = self._build_import_aware_rule_text(rule_name, rule_text)
+        triples = InferraToRdfCompiler.compile(expanded_rule_text, rule_name)
+        task_id = on_rule_updated(rule_name, expanded_rule_text)
+        return {
+            "rule_name": rule_name,
+            "status": "published" if task_id else "skipped",
+            "task_id": task_id,
+            "triple_count": len(triples),
+        }
+
+    @staticmethod
+    def _ontology_graph_from_triples(triples: list[tuple[str, str, str]]) -> dict[str, Any]:
+        node_map: dict[str, dict[str, Any]] = {}
+        edges: list[dict[str, str]] = []
+
+        def ensure_node(uri: str) -> dict[str, Any]:
+            node = node_map.setdefault(uri, {"uri": uri, "name": None, "types": []})
+            return node
+
+        for subject, predicate, obj in triples:
+            ensure_node(subject)
+            if predicate == f"{INF_NS}name":
+                node_map[subject]["name"] = obj
+                continue
+            if predicate.endswith("#type"):
+                node = ensure_node(subject)
+                if obj not in node["types"]:
+                    node["types"].append(obj)
+                continue
+            if obj.startswith("http://") or obj.startswith("https://"):
+                ensure_node(obj)
+                edges.append({"subject": subject, "predicate": predicate, "object": obj})
+
+        return {"nodes": list(node_map.values()), "edges": edges}
 
     def get_latest_rule_history(self, rule_name: str) -> dict[str, Any]:
         result = self._repository.find_rule_by_rule_name_with_latest_history(rule_name)
@@ -148,6 +235,7 @@ class RuleService:
             rule_id,
             self._encode_rule_file(rule_text, name, require_graph=not bypass_validation),
         )
+        self._publish_rule_updated(name, rule_text)
 
         rule = self._repository.find_rule_by_rule_name(name)
         if rule is None:
@@ -172,7 +260,19 @@ class RuleService:
             rule_id,
             self._encode_rule_file(rule_text, rule_name, require_graph=not bypass_validation),
         )
+        self._publish_rule_updated(rule_name, rule_text)
         return self.get_rule_text(rule_name)
+
+    def _publish_rule_updated(self, rule_name: str, rule_text: str) -> None:
+        """Publish async ontology sync without making rule persistence fragile."""
+        try:
+            on_rule_updated(rule_name, self._build_import_aware_rule_text(rule_name, rule_text))
+        except Exception as exc:
+            log.warning(
+                "rule_updated_event_publish_failed",
+                rule_name=rule_name,
+                error=str(exc),
+            )
 
     def get_history_for_ml_inference(self, rule_name: str) -> dict | None:
         """Get the history dictionary for ML-enhanced inference.

@@ -132,6 +132,63 @@ class TestExprConclusionLineSelfEvaluate:
         with pytest.raises(ValueError, match="Evaluation failed"):
             ecl.self_evaluate(working_memory)
 
+    def test_self_evaluate_ternary_true_branch(self):
+        ecl = _make_ecl()
+        ecl.set_equation(FactValue("(distance > threshold ? 100 : 50)", FactValueType.STRING))
+        ecl._variable_name = "result"
+        ecl._node_name = "test_node"
+        working_memory = {
+            "distance": FactValue(60, FactValueType.INTEGER),
+            "threshold": FactValue(50, FactValueType.INTEGER),
+        }
+        result = ecl.self_evaluate(working_memory)
+        assert float(result.get_value()) == 100.0
+
+    def test_self_evaluate_ternary_false_branch(self):
+        ecl = _make_ecl()
+        ecl.set_equation(FactValue("(distance > threshold ? 100 : 50)", FactValueType.STRING))
+        ecl._variable_name = "result"
+        ecl._node_name = "test_node"
+        working_memory = {
+            "distance": FactValue(40, FactValueType.INTEGER),
+            "threshold": FactValue(50, FactValueType.INTEGER),
+        }
+        result = ecl.self_evaluate(working_memory)
+        assert float(result.get_value()) == 50.0
+
+    def test_self_evaluate_ternary_string_equality_condition(self):
+        ecl = _make_ecl()
+        ecl.set_equation(
+            FactValue(
+                '(decoration type = "Victoria Cross" ? victoria cross allowance rate : decoration allowance rate)',
+                FactValueType.STRING,
+            )
+        )
+        ecl._variable_name = "result"
+        ecl._node_name = "test_node"
+        working_memory = {
+            "decoration type": FactValue("Victoria Cross", FactValueType.STRING),
+            "victoria cross allowance rate": FactValue(100, FactValueType.INTEGER),
+            "decoration allowance rate": FactValue(50, FactValueType.INTEGER),
+        }
+        result = ecl.self_evaluate(working_memory)
+        assert float(result.get_value()) == 100.0
+
+    def test_self_evaluate_round_max_min_functions(self):
+        ecl = _make_ecl()
+        ecl.set_equation(FactValue("MAX(base amount, minimum amount) + MIN(ROUND(rate * days), cap)", FactValueType.STRING))
+        ecl._variable_name = "result"
+        ecl._node_name = "test_node"
+        working_memory = {
+            "base amount": FactValue(10, FactValueType.INTEGER),
+            "minimum amount": FactValue(20, FactValueType.INTEGER),
+            "rate": FactValue(2.4, FactValueType.DOUBLE),
+            "days": FactValue(2, FactValueType.INTEGER),
+            "cap": FactValue(5, FactValueType.INTEGER),
+        }
+        result = ecl.self_evaluate(working_memory)
+        assert float(result.get_value()) == 25.0
+
     def test_self_evaluate_with_list_value(self):
         ecl = _make_ecl()
         ecl.set_equation(FactValue("x", FactValueType.STRING))

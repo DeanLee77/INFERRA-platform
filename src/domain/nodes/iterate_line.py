@@ -26,12 +26,14 @@ from src.domain.nodes.expression_conclusion_line import ExprConclusionLine
 from src.domain.nodes.iterate_context import IterateContext
 from src.domain.nodes.line_type import LineType
 from src.domain.nodes.meta_data import MetaData
+from src.domain.nodes.metadata_line import MetadataLine
 from src.domain.nodes.node import Node
 from src.domain.nodes.node_set import NodeSet
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.nodes.value_conclusion_line import ValueConclusionLine
+from src.domain.rule_parser.iterate_syntax import parse_iterate
 from src.domain.state.feature_flags import FeatureFlags
-from src.domain.tokens import Token
+from src.domain.tokens import Token, Tokenizer
 
 # Protected Module-Level Logger (Access Level: Protected)
 _logger = get_logger(__name__)
@@ -137,7 +139,7 @@ class IterateLine(Node):
 
         Args:
             list_size: Number of items in the iterate list
-            quantifier: Quantifier string (ALL / NONE / SOME / N). Falls back to
+            quantifier: Quantifier string (ALL / NONE / SOME / AT LEAST N / AT MOST N / EXACTLY N). Falls back to
                 self.__number_of_target if not supplied.
         """
         q = quantifier or self.__number_of_target or "ALL"
@@ -251,13 +253,10 @@ class IterateLine(Node):
         new_node_set.add_node(self)
         this_node_dictionary[self._node_name] = self
 
-        child_names = self._iterate_child_names(parent_node_set)
-        first_child_name = child_names[0] if child_names else None
+        child_names = self._iterable_rule_child_names(parent_node_set)
 
         for nth in range(1, self.__given_list_size + 1):
             for child_name in child_names:
-                if child_name == first_child_name:
-                    continue
                 temp_child_node = parent_node_dictionary.get(child_name)
                 if temp_child_node is None:
                     continue
@@ -292,6 +291,9 @@ class IterateLine(Node):
 
         new_node_set.set_node_dictionary(this_node_dictionary)
         new_node_set.set_fact_dictionary(parent_node_set.get_fact_dictionary())
+        new_node_set.set_input_dictionary(parent_node_set.get_input_dictionary())
+        new_node_set.set_type_dictionary(parent_node_set.get_type_dictionary())
+        new_node_set.set_collection_dictionary(parent_node_set.get_collection_dictionary())
         sorted_names = new_node_set.get_graph().topological_sort()
         if sorted_names:
             sorted_nodes = [this_node_dictionary[name] for name in sorted_names if name in this_node_dictionary]
@@ -410,6 +412,39 @@ class IterateLine(Node):
         single-threaded by design — this path is NOT protected by the
         asyncio.Lock used in `feed_iterate_answer()`.
         """
+        if self._is_collection_size_question(target_node, question_name, parent_node_set):
+            fact_value = self._fact_value_from_iterate_list_answer(node_value, node_value_type)
+            parent_ast.set_fact(question_name, fact_value, source=FactSource.ASSERTED)
+            self.__given_list_size = self._fact_value_to_int(fact_value)
+            if self.__iterate_node_set is None and self.__given_list_size != 0:
+                self.__iterate_node_set = self.create_iterate_node_set(parent_node_set)
+                self.__iterate_ie = InferenceEngine(self.__iterate_node_set)
+
+                if self.__iterate_ie.get_assessment_of_rule(self.get_node_name()) is None:
+                    self.__iterate_ie.add_assessment_into_assessment_list(
+                        Assessment(self.__iterate_node_set, self.get_node_name()))
+            return
+
+        if self._is_given_list_question(target_node, question_name):
+            fact_value = self._fact_value_from_iterate_list_answer(
+                node_value,
+                node_value_type,
+            )
+            parent_ast.set_fact(
+                self.__given_list_name or question_name,
+                fact_value,
+                source=FactSource.ASSERTED,
+            )
+            self._set_given_list_size_from_fact_value(fact_value)
+            if self.__iterate_node_set is None and self.__given_list_size != 0:
+                self.__iterate_node_set = self.create_iterate_node_set(parent_node_set)
+                self.__iterate_ie = InferenceEngine(self.__iterate_node_set)
+
+                if self.__iterate_ie.get_assessment_of_rule(self.get_node_name()) is None:
+                    self.__iterate_ie.add_assessment_into_assessment_list(
+                        Assessment(self.__iterate_node_set, self.get_node_name()))
+            return
+
         if self.__iterate_node_set is None:
             first_iterate_question_node = self._first_iterate_question_node(parent_node_set)
             if first_iterate_question_node is not None and question_name == first_iterate_question_node.get_node_name():
@@ -447,6 +482,27 @@ class IterateLine(Node):
         block carries the list size as its value; subsequent answers populate
         `__context.progress` keyed by ordinal index.
         """
+        if self._is_collection_size_question(target_node, question_name, parent_node_set):
+            fact_value = self._fact_value_from_iterate_list_answer(node_value, node_value_type)
+            parent_ast.set_fact(question_name, fact_value, source=FactSource.ASSERTED)
+            self.__given_list_size = self._fact_value_to_int(fact_value)
+            self._ensure_iterate_context(self.__given_list_size, self.__number_of_target or "ALL")
+            return
+
+        if self._is_given_list_question(target_node, question_name):
+            fact_value = self._fact_value_from_iterate_list_answer(
+                node_value,
+                node_value_type,
+            )
+            parent_ast.set_fact(
+                self.__given_list_name or question_name,
+                fact_value,
+                source=FactSource.ASSERTED,
+            )
+            self._set_given_list_size_from_fact_value(fact_value)
+            self._ensure_iterate_context(self.__given_list_size, self.__number_of_target or "ALL")
+            return
+
         if self.__given_list_size == 0 or self.__context is None:
             first_iterate_question_node = self._first_iterate_question_node(parent_node_set)
             if first_iterate_question_node is not None and question_name == first_iterate_question_node.get_node_name():
@@ -567,6 +623,8 @@ class IterateLine(Node):
         Returns:
             Next question Node or None
         """
+        self._set_given_list_size_from_known_list(parent_node_set, parent_ast)
+
         if self.__iterate_node_set is None and self.__given_list_size != 0:
             self.__iterate_node_set = self.create_iterate_node_set(parent_node_set)
             self.__iterate_ie = InferenceEngine(self.__iterate_node_set)
@@ -575,16 +633,20 @@ class IterateLine(Node):
                 self.__iterate_ie.add_assessment_into_assessment_list(
                     Assessment(self.__iterate_node_set, self.get_node_name()))
 
-        first_iterate_question_node = self._first_iterate_question_node(parent_node_set)
+        if self.get_node_name() in parent_ast.get_working_memory().keys():
+            return None
+
+        if self.__given_list_size == 0:
+            first_iterate_question_node = self._first_iterate_question_node(parent_node_set)
+            if first_iterate_question_node is not None and first_iterate_question_node.get_node_name() not in parent_ast.get_working_memory().keys():
+                return first_iterate_question_node
+            return None
+
         question_node: Optional[Node] = None
 
-        if str(self._value.get_value()) not in parent_ast.get_working_memory().keys():
-            if first_iterate_question_node is not None and first_iterate_question_node.get_node_name() not in parent_ast.get_working_memory().keys():
-                question_node = first_iterate_question_node
-            else:
-                if not self.can_be_self_evaluated(parent_ast.get_working_memory()):
-                    question_node = self.__iterate_ie.get_next_question(
-                        self.__iterate_ie.get_assessment_of_rule(self.get_node_name()))
+        if self.__iterate_ie is not None and not self.can_be_self_evaluated(parent_ast.get_working_memory()):
+            question_node = self.__iterate_ie.get_next_question(
+                self.__iterate_ie.get_assessment_of_rule(self.get_node_name()))
 
         return question_node
 
@@ -615,12 +677,25 @@ class IterateLine(Node):
         q = self.__number_of_target or "ALL"
         if q == "ALL":
             return FactValue(true_count == list_size)
+        if q == "NOT ALL":
+            return FactValue(true_count != list_size)
         if q == "NONE":
             return FactValue(true_count == 0)
+        if q == "NOT NONE":
+            return FactValue(true_count > 0)
         if q == "SOME":
             return FactValue(true_count > 0)
+        exact_match = re.match(r"^EXACT(?:LY)?\s+(\d+)$", str(q).strip(), re.IGNORECASE)
+        if exact_match:
+            return FactValue(true_count == int(exact_match.group(1)))
+        at_least_match = re.match(r"^AT\s+LEAST\s+(\d+)$", str(q).strip(), re.IGNORECASE)
+        if at_least_match:
+            return FactValue(true_count >= int(at_least_match.group(1)))
+        at_most_match = re.match(r"^AT\s+MOST\s+(\d+)$", str(q).strip(), re.IGNORECASE)
+        if at_most_match:
+            return FactValue(true_count <= int(at_most_match.group(1)))
         try:
-            return FactValue(true_count == int(q))
+            return FactValue(true_count >= int(q))
         except (ValueError, TypeError):
             return FactValue(False)
 
@@ -668,12 +743,9 @@ class IterateLine(Node):
             if temp_child_node is None:
                 continue
 
-            temp_node_name = (
-                next_nth_in_string
-                + "  "
-                + self.get_variable_name()
-                + "  "
-                + temp_child_node.get_node_name()
+            temp_node_name = self._iterated_node_text(
+                temp_child_node.get_node_name(),
+                next_nth_in_string,
             )
             temp_node = this_node_dictionary.get(temp_node_name)
             if temp_node is None:
@@ -682,28 +754,31 @@ class IterateLine(Node):
                     next_nth_in_string,
                 )
 
-            if temp_node and temp_node.get_node_name() not in this_node_dictionary:
-                self._register_iterate_clone(
-                    iterate_node_set,
-                    this_node_dictionary,
-                    temp_node,
-                    temp_child_node,
-                    parent_node_set.get_node_set_name(),
-                )
+            if temp_node:
+                is_new_clone = temp_node.get_node_name() not in this_node_dictionary
+                if is_new_clone:
+                    self._register_iterate_clone(
+                        iterate_node_set,
+                        this_node_dictionary,
+                        temp_node,
+                        temp_child_node,
+                        parent_node_set.get_node_set_name(),
+                    )
                 dep_type = self._dependency_type(parent_node_set, original_parent_name, child_name)
                 iterate_node_set.get_graph().add_dependency_group(
                     modified_parent_name,
                     dep_type,
                     {temp_node.get_node_name()},
                 )
-                self._create_iterate_node_set_aux(
-                    parent_node_set,
-                    iterate_node_set,
-                    this_node_dictionary,
-                    child_name,
-                    temp_node.get_node_name(),
-                    next_nth_in_string,
-                )
+                if is_new_clone:
+                    self._create_iterate_node_set_aux(
+                        parent_node_set,
+                        iterate_node_set,
+                        this_node_dictionary,
+                        child_name,
+                        temp_node.get_node_name(),
+                        next_nth_in_string,
+                    )
 
     def _iterate_child_names(self, parent_node_set: NodeSet) -> List[str]:
         graph = parent_node_set.get_graph()
@@ -721,16 +796,229 @@ class IterateLine(Node):
         )
 
     def _first_iterate_question_node(self, parent_node_set: NodeSet) -> Optional[Node]:
+        collection_size_question = self._collection_size_question_node(parent_node_set)
+        if collection_size_question is not None:
+            return collection_size_question
+        explicit_list_question = self._explicit_list_question_node(parent_node_set)
+        if explicit_list_question is not None:
+            return explicit_list_question
+        if self._declared_given_list_fact(parent_node_set) is not None:
+            return self._synthetic_list_question_node(parent_node_set)
         child_names = self._iterate_child_names(parent_node_set)
-        if not child_names:
-            return None
-        return parent_node_set.get_node_dictionary().get(child_names[0])
+        if child_names:
+            return parent_node_set.get_node_dictionary().get(child_names[0])
+        return self._synthetic_list_question_node(parent_node_set)
 
     def _iterable_child_names(self, node_set: NodeSet) -> List[str]:
-        child_names = self._iterate_child_names(node_set)
-        if not child_names:
-            return []
-        return child_names[1:]
+        return self._iterable_rule_child_names(node_set)
+
+    def _iterable_rule_child_names(self, parent_node_set: NodeSet) -> List[str]:
+        explicit_list_question = self._explicit_list_question_node(parent_node_set)
+        explicit_list_question_name = (
+            explicit_list_question.get_node_name()
+            if explicit_list_question is not None
+            else None
+        )
+        return [
+            child_name
+            for child_name in self._iterate_child_names(parent_node_set)
+            if child_name != explicit_list_question_name
+        ]
+
+    def _explicit_list_question_node(self, parent_node_set: NodeSet) -> Optional[Node]:
+        list_name = self.__given_list_name or str(self._value.get_value())
+        if not list_name:
+            return None
+        for child_name in self._iterate_child_names(parent_node_set):
+            child_node = parent_node_set.get_node_dictionary().get(child_name)
+            if child_node is None:
+                continue
+            if child_node.get_node_name() == list_name or child_node.get_variable_name() == list_name:
+                return child_node
+        return None
+
+    def _synthetic_list_question_node(self, parent_node_set: NodeSet) -> Optional[Node]:
+        list_name = self.__given_list_name or str(self._value.get_value())
+        if not list_name:
+            return None
+        declared_fact = self._declared_given_list_fact(parent_node_set)
+        value_type = (
+            declared_fact.get_value_type()
+            if declared_fact is not None
+            else FactValueType.LIST
+        )
+        type_name = "NUMBER" if value_type == FactValueType.DOUBLE else value_type.value
+        node_text = f"INPUT {list_name} AS {type_name}"
+        return MetadataLine(
+            node_text=node_text,
+            tokens=Tokenizer.get_tokens(node_text),
+        )
+
+    def _collection_metadata(self, parent_node_set: NodeSet) -> Dict[str, Any]:
+        list_name = self.__given_list_name or str(self._value.get_value())
+        if not list_name:
+            return {}
+        return parent_node_set.get_collection_dictionary().get(list_name, {})
+
+    def _collection_size_source(self, parent_node_set: NodeSet) -> Optional[str]:
+        metadata = self._collection_metadata(parent_node_set)
+        size_from = metadata.get("size_from")
+        return size_from if isinstance(size_from, str) and size_from else None
+
+    def _collection_size_question_node(self, parent_node_set: NodeSet) -> Optional[Node]:
+        size_source = self._collection_size_source(parent_node_set)
+        if not size_source:
+            return None
+        declared_fact = (
+            parent_node_set.get_input_dictionary().get(size_source)
+            or parent_node_set.get_fact_dictionary().get(size_source)
+        )
+        value_type = (
+            declared_fact.get_value_type()
+            if hasattr(declared_fact, "get_value_type")
+            else FactValueType.DOUBLE
+        )
+        type_name = "NUMBER" if value_type in {FactValueType.DOUBLE, FactValueType.INTEGER} else value_type.value
+        node_text = f"INPUT {size_source} AS {type_name}"
+        return MetadataLine(
+            node_text=node_text,
+            tokens=Tokenizer.get_tokens(node_text),
+        )
+
+    def _declared_given_list_fact(self, parent_node_set: NodeSet) -> Optional[FactValue]:
+        list_name = self.__given_list_name or str(self._value.get_value())
+        if not list_name:
+            return None
+        for declaration in (
+            parent_node_set.get_input_dictionary().get(list_name),
+            parent_node_set.get_fact_dictionary().get(list_name),
+        ):
+            if isinstance(declaration, FactValue):
+                return declaration
+        return None
+
+    def _set_given_list_size_from_known_list(
+        self,
+        parent_node_set: NodeSet,
+        parent_ast: AssessmentState,
+    ) -> None:
+        if self.__given_list_size != 0:
+            return
+        list_name = self.__given_list_name or str(self._value.get_value())
+        fact_value = parent_ast.get_working_memory().get(list_name)
+        if fact_value is None:
+            fact_value = self._declared_given_list_fact(parent_node_set)
+        if fact_value is not None:
+            self._set_given_list_size_from_fact_value(fact_value)
+        if self.__given_list_size != 0:
+            return
+        size_source = self._collection_size_source(parent_node_set)
+        if not size_source:
+            return
+        size_fact_value = parent_ast.get_working_memory().get(size_source)
+        if size_fact_value is None:
+            size_fact_value = parent_node_set.get_fact_dictionary().get(size_source)
+        if size_fact_value is not None:
+            self.__given_list_size = self._fact_value_to_int(size_fact_value)
+
+    def _set_given_list_size_from_fact_value(self, fact_value: FactValue) -> None:
+        raw_value = fact_value.get_value()
+        if isinstance(raw_value, list):
+            self.__given_list_size = len(raw_value)
+            return
+        if isinstance(raw_value, int):
+            self.__given_list_size = raw_value
+            return
+        if isinstance(raw_value, str):
+            stripped_value = raw_value.strip()
+            try:
+                parsed_value = json.loads(stripped_value)
+            except json.JSONDecodeError:
+                parsed_value = None
+            if isinstance(parsed_value, list):
+                self.__given_list_size = len(parsed_value)
+                return
+            if stripped_value.isdigit():
+                self.__given_list_size = int(stripped_value)
+                return
+            if stripped_value:
+                self.__given_list_size = len(
+                    [item for item in stripped_value.split(",") if item.strip()]
+                )
+
+    def _is_given_list_question(self, target_node: Node, question_name: str) -> bool:
+        list_name = self.__given_list_name or str(self._value.get_value())
+        if not list_name:
+            return False
+        node_name = target_node.get_node_name() if target_node is not None else None
+        variable_name = target_node.get_variable_name() if target_node is not None else None
+        return list_name in {question_name, node_name, variable_name}
+
+    def _is_collection_size_question(
+        self,
+        target_node: Node,
+        question_name: str,
+        parent_node_set: NodeSet,
+    ) -> bool:
+        size_source = self._collection_size_source(parent_node_set)
+        if not size_source:
+            return False
+        node_name = target_node.get_node_name() if target_node is not None else None
+        variable_name = target_node.get_variable_name() if target_node is not None else None
+        return size_source in {question_name, node_name, variable_name}
+
+    def _fact_value_to_int(self, fact_value: FactValue) -> int:
+        raw_value = fact_value.get_value() if hasattr(fact_value, "get_value") else fact_value
+        if isinstance(raw_value, bool):
+            return int(raw_value)
+        if isinstance(raw_value, int):
+            return raw_value
+        if isinstance(raw_value, float):
+            return int(raw_value)
+        if isinstance(raw_value, str):
+            try:
+                return int(float(raw_value.strip()))
+            except (TypeError, ValueError):
+                return 0
+        return 0
+
+    def _fact_value_from_iterate_list_answer(
+        self,
+        node_value: Any,
+        node_value_type: FactValueType,
+    ) -> FactValue:
+        if node_value_type == FactValueType.LIST:
+            if isinstance(node_value, list):
+                return FactValue(
+                    [
+                        item if isinstance(item, FactValue) else FactValue(item)
+                        for item in node_value
+                    ],
+                    FactValueType.LIST,
+                )
+            if isinstance(node_value, str):
+                stripped_value = node_value.strip()
+                try:
+                    parsed_value = json.loads(stripped_value)
+                except json.JSONDecodeError:
+                    parsed_value = None
+                if isinstance(parsed_value, list):
+                    return FactValue(
+                        [
+                            item if isinstance(item, FactValue) else FactValue(item)
+                            for item in parsed_value
+                        ],
+                        FactValueType.LIST,
+                    )
+                return FactValue(
+                    [
+                        FactValue(item.strip())
+                        for item in stripped_value.split(",")
+                        if item.strip()
+                    ],
+                    FactValueType.LIST,
+                )
+        return FactValue(node_value, node_value_type)
 
     def _dependency_type(self, node_set: NodeSet, parent_name: str, child_name: str) -> int:
         graph = node_set.get_graph()
@@ -744,7 +1032,7 @@ class IterateLine(Node):
         child_node: Node,
         nth: str,
     ) -> Optional[Node]:
-        node_text = nth + "  " + self.get_variable_name() + "  " + child_node.get_node_name()
+        node_text = self._iterated_node_text(child_node.get_node_name(), nth)
         line_type = child_node.get_line_type()
         temp_node: Optional[Node] = None
 
@@ -755,22 +1043,28 @@ class IterateLine(Node):
             )
         elif line_type == LineType.COMPARISON:
             temp_node = ComparisonLine(
-                node_text=node_text,
+                child_text=node_text,
                 tokens=child_node.get_tokens(),
             )
             temp_node_fact_value = temp_node.get_rhs()
             if temp_node_fact_value.get_value_type().value == FactValueType.STRING.value:
                 temp_fact_value = FactValue(
-                    nth + "  " + self.get_variable_name() + "  " + temp_node_fact_value.get_value(),
+                    self._iterated_node_text(str(temp_node_fact_value.get_value()), nth),
                     FactValueType.STRING,
                 )
                 temp_node.set_value(temp_fact_value)
         elif line_type == LineType.EXPR_CONCLUSION:
             temp_node = ExprConclusionLine(
-                node_text=node_text,
+                parent_text=node_text,
                 tokens=child_node.get_tokens(),
             )
         return temp_node
+
+    def _iterated_node_text(self, node_text: str, nth: str) -> str:
+        alias = self.get_variable_name()
+        if isinstance(alias, str) and alias and node_text.startswith(f"{alias}."):
+            return nth + "  " + node_text
+        return nth + "  " + str(alias) + "  " + node_text
 
     def _register_iterate_clone(
         self,
@@ -794,10 +1088,18 @@ class IterateLine(Node):
             working_memory_one: Source working memory
             working_memory_two: Destination working memory
         """
+        target_set_fact = None
+        if hasattr(working_memory_two, "get_working_memory"):
+            target_set_fact = getattr(working_memory_two, "set_fact", None)
+            working_memory_two = working_memory_two.get_working_memory()
+
         key_sets_one = set(working_memory_one.keys())
         for each_key_one in key_sets_one:
             if each_key_one not in working_memory_two.keys():
-                working_memory_two[each_key_one] = working_memory_one[each_key_one]
+                if callable(target_set_fact):
+                    target_set_fact(each_key_one, working_memory_one[each_key_one])
+                else:
+                    working_memory_two[each_key_one] = working_memory_one[each_key_one]
 
     def _number_of_true_children(self, working_memory: Dict[str, Any]) -> int:
         """
@@ -883,6 +1185,15 @@ class IterateLine(Node):
         _logger.info("Generating Iterate Line with : " + str(parent_text))
 
         self._node_name = parent_text
+        parsed = parse_iterate(parent_text)
+        if parsed is not None:
+            quantifier, alias, list_name = parsed
+            self.__number_of_target = quantifier
+            self._variable_name = alias
+            self.set_value("L", list_name)
+            self.__given_list_name = list_name
+            return
+
         self.__number_of_target = tokens.get_tokens_list()[0]
         self._variable_name = tokens.get_tokens_list()[1]
         token_string_list_size = len(tokens.get_tokens_string_list())

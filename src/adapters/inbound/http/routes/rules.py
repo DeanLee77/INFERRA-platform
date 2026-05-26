@@ -8,6 +8,9 @@ from src.adapters.inbound.http.schemas.rules import (
     LatestRuleFileResponse,
     LatestRuleHistoryResponse,
     RuleCreatedResponse,
+    RuleGraphResponse,
+    RuleOntologyResponse,
+    RuleOntologySyncResponse,
     RuleSetCreateRequest,
     RuleSetDetailResponse,
     RuleSetSummaryResponse,
@@ -94,6 +97,30 @@ async def get_rule_set(
     db: Session = Depends(get_db_session),
 ) -> RuleSetDetailResponse:
     return _to_modern_detail(_service(db), rule_name)
+
+
+@modern_router.get("/{rule_name}/graph", response_model=RuleGraphResponse)
+async def get_rule_set_graph(
+    rule_name: str,
+    db: Session = Depends(get_db_session),
+) -> RuleGraphResponse:
+    return RuleGraphResponse.model_validate(_service(db).get_rule_graph_data(rule_name))
+
+
+@modern_router.get("/{rule_name}/ontology", response_model=RuleOntologyResponse)
+async def get_rule_set_ontology(
+    rule_name: str,
+    db: Session = Depends(get_db_session),
+) -> RuleOntologyResponse:
+    return RuleOntologyResponse.model_validate(_service(db).get_rule_ontology_data(rule_name))
+
+
+@modern_router.post("/{rule_name}/ontology/sync", response_model=RuleOntologySyncResponse)
+async def sync_rule_set_ontology(
+    rule_name: str,
+    db: Session = Depends(get_db_session),
+) -> RuleOntologySyncResponse:
+    return RuleOntologySyncResponse.model_validate(_service(db).sync_rule_ontology(rule_name))
 
 
 @modern_router.post(

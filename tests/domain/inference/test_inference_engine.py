@@ -5,6 +5,10 @@ from unittest.mock import MagicMock, patch, PropertyMock
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
 from src.domain.inference.inference_engine import InferenceEngine
+from src.domain.inference.question_strategy import (
+    OntologyReachabilityQuestionStrategy,
+    ReachabilityEvidence,
+)
 from src.domain.inference.assessment import Assessment
 from src.domain.inference.assessments import Assessments
 from src.domain.inference.assessment_state import AssessmentState
@@ -266,6 +270,97 @@ class TestCreateFactValue:
         engine = InferenceEngine()
         fv = engine._create_fact_value("x", FactValueType.WARNING)
         assert fv is None
+
+
+class TestQuestionShape:
+    def test_value_conclusion_question_uses_declared_input_type(self):
+        node = _make_node(
+            node_name="person agrees",
+            variable_name="person agrees",
+            line_type=LineType.VALUE_CONCLUSION,
+            is_plain_statement=True,
+        )
+        ns = _make_node_set(
+            nodes={"person agrees": node},
+            fact_dict={},
+            id_dict={0: "person agrees"},
+        )
+        ns.get_input_dictionary.return_value = {
+            "person agrees": FactValue(None, FactValueType.BOOLEAN)
+        }
+        engine = InferenceEngine(ns)
+
+        assert engine.get_questions_from_node_to_be_asked(node) == ["person agrees"]
+        assert engine.find_type_of_element_to_be_asked(node)["person agrees"] == FactValueType.BOOLEAN
+
+    def test_is_in_list_question_uses_variable_name_not_node_name(self):
+        node = _make_node(
+            node_name="service type IS IN LIST: DVA operational service type",
+            variable_name="service type",
+            line_type=LineType.VALUE_CONCLUSION,
+            is_plain_statement=False,
+            fact_value=FactValue("DVA operational service type"),
+        )
+        ns = _make_node_set(
+            nodes={node.get_node_name(): node},
+            fact_dict={},
+            id_dict={0: node.get_node_name()},
+        )
+        ns.get_input_dictionary.return_value = {
+            "service type": FactValue([], FactValueType.LIST)
+        }
+        engine = InferenceEngine(ns)
+
+        assert engine.get_questions_from_node_to_be_asked(node) == ["service type"]
+        assert engine.find_type_of_element_to_be_asked(node)["service type"] == FactValueType.LIST
+
+    def test_comparison_question_uses_lhs_declared_type(self):
+        node = _make_node(
+            node_name="period of service in days >= threshold",
+            variable_name="period of service in days",
+            line_type=LineType.COMPARISON,
+            fact_value=FactValue(True, FactValueType.BOOLEAN),
+        )
+        node.get_lhs.return_value = "period of service in days"
+        node.get_rhs.return_value = FactValue("threshold")
+        ns = _make_node_set(
+            nodes={node.get_node_name(): node},
+            fact_dict={"threshold": FactValue(365, FactValueType.INTEGER)},
+            id_dict={0: node.get_node_name()},
+        )
+        ns.get_input_dictionary.return_value = {
+            "period of service in days": FactValue(None, FactValueType.DOUBLE)
+        }
+        engine = InferenceEngine(ns)
+
+        question_types = engine.find_type_of_element_to_be_asked(node)
+
+        assert engine.get_questions_from_node_to_be_asked(node) == ["period of service in days"]
+        assert question_types["period of service in days"] == FactValueType.DOUBLE
+        assert question_types["period of service in days >= threshold"] == FactValueType.BOOLEAN
+
+    def test_iterate_prefixed_question_uses_base_declared_type(self):
+        node = _make_node(
+            node_name="1st  service period  period of service in days >= threshold",
+            variable_name="1st  service period  period of service in days",
+            line_type=LineType.COMPARISON,
+            fact_value=FactValue(True, FactValueType.BOOLEAN),
+        )
+        node.get_lhs.return_value = "1st  service period  period of service in days"
+        node.get_rhs.return_value = FactValue("threshold")
+        ns = _make_node_set(
+            nodes={node.get_node_name(): node},
+            fact_dict={"threshold": FactValue(30, FactValueType.INTEGER)},
+            id_dict={0: node.get_node_name()},
+        )
+        ns.get_input_dictionary.return_value = {
+            "period of service in days": FactValue(None, FactValueType.DOUBLE)
+        }
+        engine = InferenceEngine(ns)
+
+        question_types = engine.find_type_of_element_to_be_asked(node)
+
+        assert question_types["1st  service period  period of service in days"] == FactValueType.DOUBLE
 
 
 class TestTypeAlreadySet:
@@ -560,6 +655,67 @@ class TestGetNextQuestion:
         engine.get_assessment_state().set_fact("goal", FactValue(True))
         result = engine.get_next_question(ass)
         assert result is None or isinstance(result, Node)
+
+    def test_ontology_strategy_can_skip_unreachable_branch(self):
+        goal = _make_node(node_id=0, node_name="goal", variable_name="goal")
+        unreachable = _make_node(
+            node_id=1,
+            node_name="clinical_note_branch",
+            variable_name="clinical_note_available",
+        )
+        reachable = _make_node(
+            node_id=2,
+            node_name="face_to_face_branch",
+            variable_name="face_to_face_exam_documented",
+        )
+        ns = _make_node_set(
+            nodes={
+                "goal": goal,
+                "clinical_note_branch": unreachable,
+                "face_to_face_branch": reachable,
+            },
+            id_dict={
+                0: "goal",
+                1: "clinical_note_branch",
+                2: "face_to_face_branch",
+            },
+            edges=[
+                ("goal", "clinical_note_branch", DependencyType.get_and()),
+                ("goal", "face_to_face_branch", DependencyType.get_and()),
+            ],
+        )
+
+        baseline = InferenceEngine(node_set=ns)
+        baseline_assessment = Assessment()
+        baseline_assessment._Assessment__goal_node = goal
+        baseline_assessment._Assessment__goal_node_index = 0
+        assert baseline.get_next_question(baseline_assessment) is unreachable
+
+        strategy = OntologyReachabilityQuestionStrategy(
+            [
+                ReachabilityEvidence(
+                    fact_name="clinical_note_available",
+                    reachable=False,
+                    reason="not connected to the DME request class",
+                    ontology_snapshot_ref="synthetic-pa-ontology-v1",
+                ),
+                ReachabilityEvidence(
+                    fact_name="face_to_face_exam_documented",
+                    reachable=True,
+                    reason="reachable DME documentation evidence",
+                    ontology_snapshot_ref="synthetic-pa-ontology-v1",
+                ),
+            ]
+        )
+        guided = InferenceEngine(node_set=ns, question_strategy=strategy)
+        guided_assessment = Assessment()
+        guided_assessment._Assessment__goal_node = goal
+        guided_assessment._Assessment__goal_node_index = 0
+
+        assert guided.get_next_question(guided_assessment) is reachable
+        trace = list(strategy.get_trace())
+        assert trace[0]["questionName"] == "clinical_note_available"
+        assert trace[0]["action"] == "skipped"
 
 
 class TestGetNextQuestionWithGoalName:
@@ -1142,6 +1298,42 @@ class TestShouldAskNode:
             result = engine._should_ask_node(node, ass, 0)
             assert result is True
 
+    def test_handle_iterate_node_sets_active_iterate_and_aux_question(self):
+        engine = InferenceEngine()
+        iterate_node = _make_node(node_id=0, line_type=LineType.ITERATE, node_name="iter_node")
+        sub_question = _make_node(node_id=1, node_name="1st  item  eligible")
+        iterate_node.get_iterate_next_question.return_value = sub_question
+        ns = _make_node_set(
+            nodes={"iter_node": iterate_node, "1st  item  eligible": sub_question},
+            id_dict={0: "iter_node", 1: "1st  item  eligible"},
+        )
+        engine.set_node_set(ns)
+        ass = Assessment()
+
+        result = engine._handle_iterate_node(iterate_node, ass, 3)
+
+        assert result is True
+        assert ass.get_node_to_be_asked() is iterate_node
+        assert ass.get_aux_node_to_be_asked() is sub_question
+        iterate_node.get_iterate_next_question.assert_called_once_with(
+            ns,
+            engine.get_assessment_state(),
+        )
+
+    def test_handle_iterate_node_self_evaluates_when_no_sub_question_remains(self):
+        engine = InferenceEngine()
+        iterate_node = _make_node(node_id=0, line_type=LineType.ITERATE, node_name="iter_node")
+        iterate_node.get_iterate_next_question.return_value = None
+        iterate_node.can_be_self_evaluated.return_value = True
+        iterate_node.self_evaluate.return_value = FactValue(True)
+        ns = _make_node_set(nodes={"iter_node": iterate_node}, id_dict={0: "iter_node"})
+        engine.set_node_set(ns)
+
+        result = engine._handle_iterate_node(iterate_node, Assessment(), 0)
+
+        assert result is False
+        assert engine.get_assessment_state().get_working_memory()["iter_node"].get_value() is True
+
     def test_leaf_node_in_inclusive_list_should_ask(self):
         engine = InferenceEngine()
         node = _make_node(node_id=0, node_name="leaf", variable_name="var1",
@@ -1468,6 +1660,38 @@ class TestGetNextQuestionProcessDependencies:
         assert result is iterate_node
         assert ass.get_aux_node_to_be_asked() is iterate_node
 
+    def test_get_next_question_returns_iterate_sub_question(self):
+        engine = InferenceEngine()
+        goal = _make_node(node_id=0, node_name="goal", variable_name="goal")
+        iterate_node = _make_node(
+            node_id=1,
+            line_type=LineType.ITERATE,
+            node_name="iter_rule",
+            variable_name="items",
+        )
+        sub_question = _make_node(node_id=2, node_name="1st  items  eligible")
+        iterate_node.get_iterate_next_question.return_value = sub_question
+        ns = _make_node_set(
+            nodes={
+                "goal": goal,
+                "iter_rule": iterate_node,
+                "1st  items  eligible": sub_question,
+            },
+            id_dict={0: "goal", 1: "iter_rule", 2: "1st  items  eligible"},
+            edges=[("goal", "iter_rule", DependencyType.get_and())],
+        )
+        ns.find_node_index.return_value = 0
+        engine.set_node_set(ns)
+        ass = Assessment()
+        ass._Assessment__goal_node = goal
+        ass._Assessment__goal_node_index = 0
+
+        result = engine.get_next_question(ass)
+
+        assert result is sub_question
+        assert ass.get_node_to_be_asked() is iterate_node
+        assert ass.get_aux_node_to_be_asked() is sub_question
+
 
 class TestProcessNodeDependencies:
     def test_no_node_set_returns(self):
@@ -1540,6 +1764,84 @@ class TestIsIterateLineChildAuxNoNodeSet:
     def test_no_node_set_returns(self):
         engine = InferenceEngine()
         assert engine._is_iterate_line_child("ghost") is False
+
+
+class TestCollectionInIteration:
+    def test_in_iteration_asks_size_from_before_item_fields(self):
+        from src.domain.rule_parser.rule_set_parser import RuleSetParser
+        from src.domain.rule_parser.rule_set_reader import RuleSetReader
+        from src.domain.rule_parser.rule_set_scanner import RuleSetScanner
+
+        rule_text = """
+TYPE service period
+    FIELD period of service in days AS NUMBER
+
+INPUT number of service periods AS NUMBER
+INPUT service history AS COLLECTION OF service period
+    SIZE FROM number of service periods
+
+service history ok
+    AND ALL period IN service history
+        AND period.period of service in days >= 30
+"""
+        reader = RuleSetReader()
+        reader.create()
+        reader.set_file_with_text(rule_text)
+        parser = RuleSetParser()
+        parser.create()
+        scanner = RuleSetScanner(reader, parser)
+        scanner.scan_rule_set()
+        node_set = scanner.establish_node_set()
+
+        engine = InferenceEngine(node_set)
+        assessment = Assessment(node_set, "service history ok")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        first_question = engine.get_next_question(assessment)
+
+        assert engine.get_questions_from_node_to_be_asked(first_question) == ["number of service periods"]
+        assert engine.find_type_of_element_to_be_asked(first_question)["number of service periods"] == FactValueType.DOUBLE
+
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "number of service periods",
+            2,
+            FactValueType.DOUBLE,
+            assessment,
+        )
+        second_question = engine.get_next_question(assessment)
+
+        assert engine.get_questions_from_node_to_be_asked(second_question) == [
+            "1st  period.period of service in days"
+        ]
+        assert engine.find_type_of_element_to_be_asked(second_question)[
+            "1st  period.period of service in days"
+        ] == FactValueType.DOUBLE
+
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "1st  period.period of service in days",
+            45,
+            FactValueType.DOUBLE,
+            assessment,
+        )
+        third_question = engine.get_next_question(assessment)
+
+        assert engine.get_questions_from_node_to_be_asked(third_question) == [
+            "2nd  period.period of service in days"
+        ]
+
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "2nd  period.period of service in days",
+            31,
+            FactValueType.DOUBLE,
+            assessment,
+        )
+
+        working_memory = engine.get_assessment_state().get_working_memory()
+        assert working_memory["ALL period ITERATE: LIST OF service history"].get_value() is True
+        assert working_memory["service history ok"].get_value() is True
 
 
 class TestResetWorkingMemoryClear:

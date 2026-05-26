@@ -18,7 +18,7 @@ from src.domain.fact_values import FactValue
 from src.domain.state.feature_flags import FeatureFlags
 from src.infrastructure.convergence_metrics import convergence_metrics
 from src.infrastructure.secrets import redis_client_from_env
-from src.tasks.celery_app import CELERY_AVAILABLE
+from src.tasks.celery_app import CELERY_AVAILABLE, app
 
 log = structlog.get_logger(__name__)
 
@@ -274,9 +274,8 @@ def _sanitize_uri(value: str) -> str:
 _ontology_post_reasoner_task = None
 
 if CELERY_AVAILABLE:
-    from celery import shared_task
 
-    @shared_task(bind=True, max_retries=3, default_retry_delay=30, rate_limit="10/m")
+    @app.task(bind=True, max_retries=3, default_retry_delay=30, rate_limit="10/m")
     def _ontology_post_reasoner_task(
         self,
         session_id: str,

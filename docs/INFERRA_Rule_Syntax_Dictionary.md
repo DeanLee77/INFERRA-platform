@@ -1,7 +1,9 @@
 ﻿# INFERRA Rule Syntax Dictionary
-## Version 0.2 — Comprehensive Reference
+## Version 0.3 — Current Implemented Reference
 
-**Purpose:** This dictionary provides an exhaustive explanation of every keyword, operator, and structural convention in the INFERRA rule syntax. It is written for rule engineers, engine developers, and non-technical stakeholders alike. Each entry explains what a keyword does in plain English, how it works technically, when to use it, when not to use it, and illustrates with real Australian legislative examples.
+**Purpose:** This dictionary describes the current implemented INFERRA rule grammar: every supported keyword, operator, line type, and structural convention. It is written for rule engineers, engine developers, and non-technical stakeholders alike. Each entry explains what a keyword does in plain English, how it works technically, when to use it, when not to use it, and illustrates with real Australian legislative examples.
+
+**Scope:** This document is the current grammar reference, not a future-language proposal. Intended future grammar should be recorded separately until the parser, validator, inference engine, and tests support it.
 
 **How to Read This Dictionary:**
 - Each keyword entry follows this structure:
@@ -16,20 +18,74 @@
 
 ## 1. Structural Overview
 
-An INFERRA rule set is a plain-text file with three sections, always in this order:
+An INFERRA rule set is a plain-text file with these sections, always in this order:
 
 ```
+Optional IMPORT directives
 FIXED declarations
 INPUT declarations
 Rule blocks (with # Reference / # Section / # Original comments)
 ```
 
-**Plain English:** Think of an INFERRA rule set like a form with three parts:
-1. **FIXED** = the pre-printed constants on the form (rates, dates, definitions that never change per rule set)
-2. **INPUT** = the blank fields on the form (where a user will provide answers)
-3. **Rule blocks** = the logic that determines the outcome (the "if this, then that" rules)
+**Plain English:** Think of an INFERRA rule set like a form with four parts:
+1. **IMPORT** = other rule sets pulled in before this one is validated and parsed
+2. **FIXED** = the pre-printed constants on the form (rates, dates, definitions that never change per rule set)
+3. **INPUT** = the blank fields on the form (where a user will provide answers)
+4. **Rule blocks** = the logic that determines the outcome (the "if this, then that" rules)
 
 **Technical Detail:** At runtime, FIXED and INPUT entries populate the `FactValue` map (working memory). Rule blocks populate the `Node` map (dependency graph). The engine evaluates the dependency graph via backward chaining from a target goal.
+
+---
+
+### 1.1 Importing Rule Sets
+
+**Syntax:**
+```
+IMPORT: <rule set name>
+IMPORT: <rule set name>
+```
+
+**Plain English:** `IMPORT:` pulls another rule set into the current rule set. Use it when common definitions, policy mappings, rates, thresholds, or reusable rule blocks are maintained in separate rule sets.
+
+**Technical Detail:**
+- The keyword is exactly `IMPORT:` including the colon.
+- The rest of the line is the rule set name, trimmed of surrounding whitespace.
+- `IMPORT:` lines should appear at the top of the file before FIXED declarations.
+- Imported rule sets are resolved before validation and parsing.
+- Imported declarations and rule conclusions become visible to the root rule set during validation and runtime parsing.
+- `IMPORT:` directives themselves are stripped from the transient parsed rule text; they are not rule nodes and should not appear in the dependency graph.
+- Imports can be transitive: an imported rule set may import another rule set.
+
+**When to Use:**
+- To reuse shared definitions across related rule sets.
+- To keep rates, thresholds, or policy mappings in a central rule set.
+- To avoid copying the same declarations and helper rules into many rule files.
+
+**When NOT to Use:**
+- For one-off constants used only in the current rule set.
+- To hide required local declarations; imported rule sets should be named clearly and remain reviewable.
+- To import a rule set that depends back on the current rule set.
+
+**Failure Rules:**
+- Missing imported rule sets are invalid and should fail with `UNRESOLVED_IMPORT`.
+- Circular imports are invalid. For example, `A` imports `B`, `B` imports `C`, and `C` imports `A`.
+- Excessively deep import chains are invalid and should fail with `IMPORT_DEPTH_EXCEEDED`.
+- Imported declarations can still conflict with local declarations; duplicate variable names are invalid unless deliberately handled before save.
+
+**Examples:**
+
+```
+IMPORT: vea_common_definitions
+IMPORT: dva_operational_policy_mapping
+IMPORT: dva_rate_thresholds
+
+FIXED DVA policy continuous full time service threshold IS 365
+INPUT service type AS LIST
+    ITEM qualifying war service
+    ITEM operational service
+```
+
+**Common Mistake:** Treating `IMPORT:` as a rule statement. It is a structural directive, not a parent rule or child rule.
 
 ---
 
@@ -40,6 +96,9 @@ Rule blocks (with # Reference / # Section / # Original comments)
 **Syntax:**
 ```
 FIXED <variable name> IS <value>
+FIXED <variable name> AS LIST
+    ITEM <value>
+    ITEM <value>
 ```
 
 **Plain English:** FIXED declares a constant — a value that is known before the session starts and never changes. Think of it as a number printed in the legislation itself, like "the rate is $100" or "the threshold date is 1 July 1951".
@@ -83,9 +142,8 @@ INPUT <variable name> AS <data type> IS <default value>
 INPUT <variable name> AS LIST
     ITEM <value>
     ITEM <value>
-INPUT <variable name> AS LIST AS LIST
-    ITEM <value>
-    ITEM <value>
+INPUT <collection name> AS COLLECTION OF <record type name>
+    SIZE FROM <number input name>
 ```
 
 **Plain English:** INPUT declares a question the engine will ask the user. It defines what kind of answer is expected (a yes/no, a number, a date, text, or a choice from a list). If a default value is provided with IS, that value is pre-filled but the user can change it.
@@ -95,7 +153,7 @@ INPUT <variable name> AS LIST AS LIST
 - However, unlike FIXED, INPUT values are NOT pre-populated; the engine will prompt the user for them during the session
 - If `IS <default value>` is specified, the value is pre-populated but can be overridden by the user
 - `AS LIST` defines a list where ITEMs are the valid choices
-- `AS LIST AS LIST` defines a list of lists (a two-level list) — each ITEM is itself a list entry
+- `AS COLLECTION OF` defines repeated structured records; use this when INFERRA must ask record-level questions multiple times
 - ITEM values are stored directly in the FactValue object, not as separate objects
 
 **Data Types:**
@@ -107,6 +165,7 @@ INPUT <variable name> AS LIST AS LIST
 | DATE | Date value | `INPUT date of birth AS DATE` |
 | TEXT | Free-text string | `INPUT person's name AS TEXT` |
 | LIST | Selection from predefined options | `INPUT form of transport AS LIST` |
+| COLLECTION | Repeated structured records | `INPUT service history AS COLLECTION OF service period` |
 
 **When to Use:**
 - For every value the user must provide during a session
@@ -258,7 +317,7 @@ Dependency type keywords define the logical relationship between a parent rule a
 
 **When NOT to Use:**
 - When only ONE of several conditions needs to be met (use OR instead)
-- When mixing with OR at the same indentation level (use a virtual node instead)
+- When OR alternatives are also needed at the same indentation level. Do not mix AND and OR siblings; create explicit grouping/virtual nodes instead.
 
 **Examples:**
 
@@ -281,7 +340,7 @@ the member qualifies for the allowance
     AND service type IS IN LIST: qualifying service type
 ```
 
-**Common Mistake:** Mixing AND and OR at the same indentation level. See Virtual Nodes (section 7.3) for how to handle this.
+**Common Mistake:** Mixing AND and OR at the same indentation level. See Virtual Nodes (section 7.3) for how to handle this with explicit groups.
 
 ---
 
@@ -307,7 +366,7 @@ the member qualifies for the allowance
 
 **When NOT to Use:**
 - When ALL conditions must be met (use AND instead)
-- When mixing with AND at the same indentation level (use a virtual node instead)
+- When AND requirements are also needed at the same indentation level. Do not mix OR and AND siblings; create explicit grouping/virtual nodes instead.
 
 **Examples:**
 
@@ -348,13 +407,38 @@ OR NOT <child rule>
 - During self-evaluation, the engine inverts the boolean result of the child rule
 - NOT can only appear on child rules — never on a parent rule
 
+**AND NOT Scoping Rules:**
+- `AND NOT` asserts that the child condition must evaluate to false.
+- `AND NOT` can be used with plain rule statements, comparison lines, and list-membership lines.
+- INFERRA does not use separate negated comparison operators. Use the existing `NOT` dependency keyword instead.
+- `AND NOT` operates on the whole child line result, not on an individual token inside that line.
+
+```
+# CORRECT — AND NOT for negated rule statements:
+eligible for pension
+    AND NOT service pension exclusion applies
+    AND NOT the person receives compensation under another Act
+
+# CORRECT — AND NOT for negated comparisons:
+the value is within range
+    AND NOT the person's age = 65
+    AND NOT impairment rating > 100
+
+# WRONG — trying to invent a separate negated comparison operator:
+the value is within range
+    AND the person's age [negated equals] 65
+    AND impairment rating [negated greater than] 100
+```
+
 **When to Use:**
 - When the legislation uses "not", "does not", "is not", "unless", "except when"
 - When a condition must be absent (not present, not true, not met)
+- When a child rule, comparison, or list-membership check must be false
 
 **When NOT to Use:**
 - As a standalone keyword on a parent rule line (NOT can only modify a child dependency)
 - When you really mean IS FALSE (prefer explicit IS FALSE for clarity in Value Conclusion lines)
+- As a made-up inline negated comparison operator; that is not INFERRA comparison syntax
 
 **Examples:**
 
@@ -370,6 +454,13 @@ the person made it to Las Vegas
 
 service does not qualify
     AND NOT service type IS IN LIST: Operational service type
+```
+
+```
+# Original: The claim is valid if no exclusion applies and the person is not 65
+claim is valid
+    AND NOT service pension exclusion applies
+    AND NOT the person's age = 65
 ```
 
 **Common Mistake:** Writing `NOT the person missed the flight` as a parent rule. NOT must be combined with AND or OR: `AND NOT the person missed the flight`.
@@ -552,10 +643,12 @@ The keywords NOT, KNOWN, and MANDATORY/OPTIONALLY/POSSIBLY can be combined to ex
 
 **Syntax:** `AND NOT <child rule>`
 **Meaning:** The child rule must be FALSE for the parent to be true.
+**Scoping:** `AND NOT` negates the whole child result. Use it for negated rule statements, comparison lines, and list-membership checks. Do not write separate negated comparison operators.
 **Example:**
 ```
 the person is eligible
     AND NOT the person has a criminal record
+    AND NOT impairment rating > 100
 ```
 
 #### 3.8.2 OR NOT
@@ -743,18 +836,25 @@ the person's first name IS MALE
 
 **Common Mistake:** Confusing IS with comparison. `the person's age IS 18` is a Value Conclusion (the age IS the value 18). `the person's age = 18` is a Comparison (comparing the age to 18). Use IS for declaring values, use = for comparing values.
 
-**Important Rule:** A Value Conclusion Line with IS should NOT be a base child rule other than for plain statements. Use comparison (=, >, <) for child rules that compare values:
+**Important Rule:** A plain Value Conclusion Line is the preferred child syntax for checking whether a boolean rule statement is true. Do not turn a rule statement into a boolean comparison by adding `= TRUE`.
 
 ```
-# WRONG:
-Dean is a man
-    AND Dean has a wife IS TRUE
-    AND Dean is a kind man IS TRUE
-
-# CORRECT:
+# WRONG -- this treats the rule statement as a comparison:
 Dean is a man
     AND Dean has a wife = TRUE
-    AND Dean is a kind man = TRUE
+    AND Dean is a kind man IS TRUE
+
+# CORRECT -- these are rule-statement checks:
+Dean is a man
+    AND Dean has a wife
+    AND Dean is a kind man
+```
+
+Use dependency negation when the parent needs the statement to be false:
+
+```
+Dean is not eligible
+    AND NOT Dean has a wife
 ```
 
 ---
@@ -773,14 +873,14 @@ Dean is a man
 - Subset of Value Conclusion Lines
 - During `selfEvaluation()`, checks if the variable's value is TRUE or FALSE
 - Only valid as a parent rule or as a child rule with appropriate modifiers
-- As a child rule, prefer using comparison (`= TRUE`, `= FALSE`) instead of IS TRUE / IS FALSE
+- As a child dependency, prefer the plain statement form for true checks and dependency negation for false checks
 
 **When to Use:**
 - When the legislation states a boolean conclusion: "the person IS eligible", "the exemption IS FALSE"
 - As a plain statement parent rule
 
 **When NOT to Use:**
-- As a child rule under another rule — use `= TRUE` or `= FALSE` comparison instead
+- As a child rule under another rule when the child is itself a rule statement. Use `AND <statement>` to check true, or `AND NOT <statement>` to check false.
 - When you really mean the variable has a text value (use `IS "value"` instead)
 
 **Examples:**
@@ -789,10 +889,14 @@ Dean is a man
 # Plain statement (parent):
 part 2 creates no enforceable rights IS TRUE
 
-# As a child, use comparison:
+# As a child, use the plain statement:
 Dean is a man
-    AND Dean has a wife = TRUE
-    AND Dean is a kind man = TRUE
+    AND Dean has a wife
+    AND Dean is a kind man
+
+# To require false, use NOT:
+Dean is not eligible
+    AND NOT Dean has a wife
 ```
 
 ---
@@ -847,7 +951,7 @@ the rectangle area IS CALC (the rectangle height * the rectangle width)
 
 ```
 # Original: The adjusted area is the height times the width if height is known, otherwise width times width
-the another rectangle area IS CALC (the height ? (the height * the width : the width * the width))
+the another rectangle area IS CALC (the height ? (the height * the width) : (the width * the width))
     WANTS the height
     NEEDS the width
 ```
@@ -1154,7 +1258,7 @@ allowance amount IS CALC (distance > threshold ? 100 : 50)
 
 ```
 # Original: The area is height * width if height is known, otherwise width * width
-the another rectangle area IS CALC (the height ? (the height * the width : the width * the width))
+the another rectangle area IS CALC (the height ? (the height * the width) : (the width * the width))
     WANTS the height
     NEEDS the width
 ```
@@ -1179,78 +1283,142 @@ In this example:
 
 ## 6. Iteration Keywords
 
-### 6.1 ITERATE
+### 6.1 Collection Declarations
 
 **Syntax:**
 ```
-<quantifier> <variable name> ITERATE: LIST OF <list name>
-    <child rules follow immediately>
+TYPE <record type name>
+    FIELD <field name> AS <data type>
+    FIELD <field name> AS LIST
+    FIELD <field name> AS LIST OF <option list name>
+
+INPUT <collection name> AS COLLECTION OF <record type name>
+    SIZE FROM <number input name>
 ```
 
-**Plain English:** ITERATE means "go through each item in this list and check the conditions". It is like a loop — for every item in a list (e.g., every service record in a person's service history), the engine evaluates the child rules.
+**Plain English:** A COLLECTION is a repeated set of structured records. Use it when the rule needs to ask about zero, one, or many things of the same shape, such as service periods, dependants, claims, payments, treatments, or workflow steps.
 
 **Technical Detail:**
-- Creates an Iterate Line node in the dependency graph
-- The engine iterates over each item in the specified list and evaluates the child rules for each item
-- Child rules must be defined immediately below the ITERATE line (with proper indentation)
-- Only valid as a child rule — cannot be a parent rule
-- The quantifier determines how many items must pass the conditions (see ALL, NONE below)
-- Can be combined with NOT for negation
+- `TYPE` declares the shape of one repeated item.
+- `FIELD` declares the facts that can be asked for each item.
+- `FIELD ... AS LIST` declares that the field is list-valued or option-valued; it does not declare the allowed ITEM set for that field.
+- `FIELD ... AS LIST OF <option list name>` binds the list-valued field to a separately declared option list.
+- Allowed option values must be declared separately with `FIXED <option list> AS LIST` or `INPUT <option list> AS LIST`; do not nest `ITEM` entries under `FIELD`.
+- `INPUT ... AS COLLECTION OF ...` declares the collection itself.
+- `SIZE FROM ...` declares the numeric fact that tells INFERRA how many records to expand.
+- `LIST` remains for option values; `COLLECTION` is for repeated structured records.
+- A collection item field can be referenced with dot notation: `<alias>.<field name>`.
 
-**When to Use:**
-- When the legislation refers to "each" or "every" item in a collection
-- When a person can have multiple records (e.g., multiple periods of service, multiple dependants)
-- When the same conditions must be checked for each item in a list
-
-**When NOT to Use:**
-- When there is only one item (use a simple rule instead)
-- When the conditions don't involve iterating over a collection
-- As a parent rule
+**Failure Rules:**
+- `INPUT <collection> AS COLLECTION OF <type>` is invalid if `<type>` has not been declared with `TYPE`.
+- `SIZE FROM <number input>` is invalid if the referenced input/fixed fact is not declared as `NUMBER`, `INTEGER`, or equivalent numeric type.
+- `FIELD <field> AS LIST OF <option list>` is invalid if `<option list>` is not declared as a FIXED or INPUT list.
+- A collection used in an `IN` line should either have `SIZE FROM` or be supplied externally as a list/collection payload.
+- `<alias>.<field name>` is invalid if `<field name>` is not declared on the collection item type.
+- Circular type/collection declarations are invalid. A collection may contain items of a type, but the type must not be defined as a collection of itself.
 
 **Examples:**
 
 ```
-# Original: Check each service record in the person's service history
-NOT ALL service ITERATE: LIST OF service history
-    OR one
-        AND enlistment date >= 01/07/1951
-        AND discharge date <= 06/12/1972
-        AND NOT service type IS IN LIST: Operational service type
-    OR two
-        AND enlistment date >= 07/04/1994
-```
+TYPE service period
+    FIELD service type AS LIST OF DVA service type options
+    FIELD period of service in days AS NUMBER
 
-**Common Mistake:** Defining child rules separately from the ITERATE line. Child rules must follow immediately after ITERATE with proper indentation.
+FIXED DVA service type options AS LIST
+    ITEM qualifying war service
+    ITEM operational service
+    ITEM peacekeeping service
+    ITEM non-qualifying service
+
+INPUT number of service periods AS NUMBER
+
+INPUT service history AS COLLECTION OF service period
+    SIZE FROM number of service periods
+```
 
 ---
 
-### 6.2 LIST OF
+### 6.2 IN
 
 **Syntax:**
 ```
-<quantifier> <variable name> ITERATE: LIST OF <list name>
+<quantifier> <item alias> IN <collection name>
+    <child rules follow immediately>
 ```
 
-**Plain English:** LIST OF specifies which list the ITERATE should loop over. It references a FIXED or INPUT list by name.
+**Plain English:** `IN` means "for each item in this collection, evaluate the child rules". The alias names the current item while the child rules are being evaluated.
 
 **Technical Detail:**
-- The list name must reference a FIXED or INPUT declaration with ITEM entries
-- The list must be defined before it is referenced in an ITERATE statement
-- The ITEMS in the list become the individual records that the iteration processes
+- Creates an Iterate Line node in the dependency graph.
+- The right side of `IN` must reference an `INPUT ... AS COLLECTION OF ...` declaration or a supplied list/collection payload.
+- The child rules are evaluated once per item in the collection.
+- `SIZE FROM` tells INFERRA what count question to ask before expanding the child rules.
+- Use dot notation to ask item fields: `period.period of service in days >= 30`.
+- Supported quantifiers are `ALL`, `NONE`, `SOME`, `NOT ALL`, `NOT NONE`, `AT LEAST N`, `AT MOST N`, and `EXACTLY N`.
+- Only valid as a child rule; it should not be the top-level parent rule.
 
 **When to Use:**
-- Always paired with ITERATE — you cannot have ITERATE without LIST OF
+- When legislation, policy, or workflow rules refer to each item, every item, no item, at least one item, or at least N items in a repeated set.
+- When the same conditions must be checked across a collection.
+- When the end user/system must provide the number of repeated records before INFERRA can ask record-level questions.
 
 **When NOT to Use:**
-- Outside of ITERATE statements
+- When there is only one fact to ask.
+- When the values are simple options; use `LIST` and `IS IN LIST` for those.
+- When the rule can be written as a direct comparison or plain child rule.
+
+**Examples:**
+
+```
+the service history meets DVA criteria
+    AND ALL period IN service history
+        AND period.service type IS IN LIST: DVA operational service type
+        AND period.period of service in days >= DVA policy minimum operational period
+```
+
+```
+the workflow is ready for approval
+    AND NONE step IN unresolved workflow steps
+        AND step.blocker is critical
+```
+
+**Common Mistake:** Declaring only `INPUT service history AS LIST` without saying how many service periods exist or what fields each period contains. Prefer `COLLECTION` plus `SIZE FROM` when INFERRA must ask item-level questions.
 
 ---
 
-### 6.3 ALL
+### 6.3 LIST vs COLLECTION
 
 **Syntax:**
 ```
-ALL <variable name> ITERATE: LIST OF <list name>
+FIXED <option list name> AS LIST
+    ITEM <allowed value>
+
+INPUT <collection name> AS COLLECTION OF <record type>
+    SIZE FROM <number input>
+```
+
+**Plain English:** Use `LIST` when the answer is one value chosen from a set. Use `COLLECTION` when INFERRA must repeat a group of questions for multiple records.
+
+**Technical Detail:**
+- `LIST` values are options and are checked with `IS IN LIST`.
+- `COLLECTION` values are repeated records and are traversed with `IN`.
+- A `COLLECTION` usually needs a `SIZE FROM` declaration so INFERRA can ask how many records to process.
+
+**When to Use:**
+- `LIST`: service type, country, status, payment method, decision outcome.
+- `COLLECTION`: service history, dependants, claims, invoices, treatments, workflow steps.
+
+**When NOT to Use:**
+- Do not use `LIST` for records that have fields.
+- Do not use `COLLECTION` for a fixed set of allowed values.
+
+---
+
+### 6.4 ALL
+
+**Syntax:**
+```
+ALL <item alias> IN <collection name>
 ```
 
 **Plain English:** ALL means "every single item in the list must pass the conditions". Think of it as a universal quantifier — "for ALL items, this must be true".
@@ -1266,33 +1434,33 @@ ALL <variable name> ITERATE: LIST OF <list name>
 - When every record must meet the criteria
 
 **When NOT to Use:**
-- When only some items need to pass (use a number or NONE instead)
+- When only some items need to pass (use SOME, AT LEAST, or NONE as appropriate)
 - When you need at least one to pass (omit ALL or use NOT NONE)
 
 **Examples:**
 
 ```
 # Original: ALL service records must meet the qualifying criteria
-ALL service ITERATE: LIST OF service history
-    AND service type IS IN LIST: Qualifying service type
-    AND period of service >= minimum period
+ALL period IN service history
+    AND period.service type IS IN LIST: Qualifying service type
+    AND period.period of service in days >= minimum period
 ```
 
 ```
 # Original: NOT ALL service records are non-qualifying (i.e., at least one IS qualifying)
-NOT ALL service ITERATE: LIST OF service history
+NOT ALL period IN service history
     OR one
-        AND enlistment date >= 01/07/1951
-        AND discharge date <= 06/12/1972
+        AND period.enlistment date >= 01/07/1951
+        AND period.discharge date <= 06/12/1972
 ```
 
 ---
 
-### 6.4 NONE
+### 6.5 NONE
 
 **Syntax:**
 ```
-NONE <variable name> ITERATE: LIST OF <list name>
+NONE <item alias> IN <collection name>
 ```
 
 **Plain English:** NONE means "not a single item in the list passes the conditions". Think of it as "for NONE of the items is this true".
@@ -1315,32 +1483,63 @@ NONE <variable name> ITERATE: LIST OF <list name>
 
 ```
 # Original: NONE of the service records qualify as operational service
-NONE service ITERATE: LIST OF service history
-    AND service type IS IN LIST: Operational service type
+NONE period IN service history
+    AND period.service type IS IN LIST: Operational service type
 ```
 
 ---
 
-### 6.5 Number Quantifier
+### 6.6 Count Quantifiers
 
 **Syntax:**
 ```
-<number> <variable name> ITERATE: LIST OF <list name>
+AT LEAST <number> <item alias> IN <collection name>
+AT MOST <number> <item alias> IN <collection name>
+EXACTLY <number> <item alias> IN <collection name>
 ```
 
-**Plain English:** A number quantifier means "at least this many items must pass the conditions". For example, `3 service ITERATE: LIST OF service history` means "at least 3 service records must meet the criteria".
+**Plain English:** Count quantifiers say how many collection items must pass the child conditions. `AT LEAST 3 period IN service history` means "3 or more service records must meet the criteria". `AT MOST 3 period IN service history` means "3 or fewer records may meet the criteria". `EXACTLY 3 period IN service history` means "3 service records must meet the criteria, no more and no less".
 
 **Technical Detail:**
-- The iteration evaluates to TRUE if the specified number (or more) of items satisfy the child conditions
-- Example: `2 service ITERATE: LIST OF service history` requires at least 2 qualifying records
+- `AT LEAST <number>` evaluates to TRUE if the specified number or more items satisfy the child conditions.
+- `AT MOST <number>` evaluates to TRUE if the specified number or fewer items satisfy the child conditions.
+- `EXACTLY <number>` evaluates to TRUE only if that exact number of items satisfy the child conditions.
+- Numeric quantifiers must be explicit. Write `AT LEAST 3 period IN service history`, not `3 period IN service history`.
+- Use `EXACTLY <number>` for exact counts.
 
 **When to Use:**
-- When the legislation specifies a minimum count: "at least 3 periods of service"
-- When you need a specific number of qualifying records
+- Use `AT LEAST` when the source says "at least", "not less than", "minimum", or "3 or more".
+- Use `AT MOST` when the source says "at most", "not more than", "maximum", or "no more than".
+- Use `EXACTLY` when the source says "exactly", "only", or "no more and no less".
 
 **When NOT to Use:**
 - When you need ALL items to pass (use ALL)
 - When you need NO items to pass (use NONE)
+- Do not use bare `N`; write `AT LEAST <N>` explicitly when the rule means "N or more".
+
+---
+
+### 6.7 SOME
+
+**Syntax:**
+```
+SOME <item alias> IN <collection name>
+```
+
+**Plain English:** SOME means "at least one item must pass the child conditions". It is the positive existential quantifier.
+
+**Technical Detail:**
+- `SOME` evaluates to TRUE when one or more items satisfy the child conditions.
+- `SOME` is equivalent in truth conditions to `NOT NONE`, but `SOME` reads better when the source rule positively requires at least one matching item.
+- Use `NOT NONE` when the source rule is naturally phrased as "not none" or when preserving that wording matters.
+
+**Examples:**
+
+```
+the person has an operational service period
+    AND SOME period IN service history
+        AND period.service type IS IN LIST: DVA operational service type
+```
 
 ---
 
@@ -1350,9 +1549,12 @@ NONE service ITERATE: LIST OF service history
 |------------|---------|---------------------|
 | ALL | Every item must pass | All items satisfy conditions |
 | NONE | No item must pass | Zero items satisfy conditions |
+| SOME | At least one item must pass | One or more items satisfy conditions |
 | NOT ALL | At least one must fail | Not every item satisfies conditions |
 | NOT NONE | At least one must pass | At least one item satisfies conditions |
-| `<N>` | At least N must pass | N or more items satisfy conditions |
+| `AT LEAST <N>` | At least N must pass | N or more items satisfy conditions |
+| `AT MOST <N>` | At most N may pass | N or fewer items satisfy conditions |
+| `EXACTLY <N>` | Exactly N must pass | Exactly N items satisfy conditions |
 
 ---
 
@@ -1380,7 +1582,7 @@ NONE service ITERATE: LIST OF service history
 
 ### 7.2 Comment Blocks
 
-**Rule:** Every rule block MUST be preceded by three comment lines:
+**Rule:** For authored and reviewable rule sets, every rule block should be preceded by three comment lines:
 
 ```
 # Reference: [URL or document reference]
@@ -1395,11 +1597,11 @@ NONE service ITERATE: LIST OF service history
 
 **Technical Detail:**
 - These are metadata comments — the engine does not evaluate them
-- They are required for traceability and auditability
+- They are an authoring and audit convention, not parser-enforced grammar
 - The Original text should be the exact wording from the legislation, not a paraphrase
 - Comments start with `#` (hash symbol)
 
-**When to Use:** Before EVERY rule block — no exceptions.
+**When to Use:** Before every substantive rule block that models legislation, policy, or workflow text.
 
 **Examples:**
 
@@ -1416,36 +1618,76 @@ the person has qualifying service
 
 ### 7.3 Virtual Nodes
 
-**Rule:** When a parent rule has both AND and OR children at the same indentation level, you MUST create a virtual node to ensure correct logical evaluation.
+**Rule:** Do not put AND and OR children at the same indentation level. Create explicit grouping/virtual nodes so the intended logic is unambiguous.
 
-**Plain English:** If a rule needs both "all of these" (AND) and "any of these" (OR) at the same level, the engine gets confused. You need to create a helper group (virtual node) that bundles one side together, so the logic is clear.
+**Plain English:** If a rule needs both "all of these" (AND) and "any of these" (OR), group the alternatives explicitly. Same-level mixing can be read in more than one way, so create helper rules that name each path.
 
 **Technical Detail:**
-- Virtual nodes are automatically created by the engine when AND and OR are mixed at the same level
-- However, the official guidance recommends creating them explicitly for clarity
+- Virtual nodes may be automatically created by the engine when AND and OR are mixed at the same level
+- However, official rule-writing guidance is to avoid relying on auto-generation. Create the grouping explicitly for clarity.
 - Virtual nodes are NOT visible to the user — they are structural aids for the engine
-- Name virtual nodes descriptively: e.g., "attendant scenario one", "distance condition met"
 - Virtual nodes appear in the NodeMap but not in the question flow
 
+**Virtual Node Naming Conventions:**
+
+| Keyword | Meaning | When to Use |
+|---------|---------|--------------|
+| `virtual ONE` | Existential quantifier — any ONE of the children being true satisfies the group | Use ONLY for OR groupings (alternatives) |
+| `virtual ALL` | Universal quantifier — ALL of the children must be true to satisfy the group | Use ONLY for AND groupings (conjunctions) |
+
+**Virtual ONE (OR Groupings):**
+- `virtual ONE` means "at least one of these must be true" — it is the quantifier for OR alternatives
+- Append `virtual ONE` to a rule name when creating an explicit OR group
+- Example: `service qualifies virtual ONE` groups alternatives where any one path suffices
+
+**Virtual ALL (AND Groupings):**
+- `virtual ALL` means "all of these must be true" — it is the quantifier for AND conjunctions
+- Append `virtual ALL` to a rule name when creating an explicit AND group
+- Example: `complete application virtual ALL` groups required conditions that must all be satisfied
+
+**Important:** Never swap the quantifiers. `virtual ONE` is ONLY for OR groupings. `virtual ALL` is ONLY for AND groupings. The naming reflects the quantifier semantics of the underlying logic.
+
 **When to Use:**
-- When a rule needs both AND and OR children at the same level
-- When multiple conditions are chained at the same level under OR/AND without grouping
+- When the intended logic would otherwise require both AND and OR children under one parent
+- When multiple conditions are chained under OR/AND and need an explicit named group
+- Use `virtual ONE` for OR-alternative groups (any one path suffices)
+- Use `virtual ALL` for AND-conjunction groups (all conditions must hold)
 
 **When NOT to Use:**
 - When the rule has only AND or only OR children (no virtual node needed)
 - When the logic is already clear with proper nesting
+- Never use `virtual ONE` for AND groupings or `virtual ALL` for OR groupings
 
 **Examples:**
 
 ```
 # WRONG — ambiguous AND/OR mixing:
 meals only reimbursement
-    OR meals required AND number of nights = 0 AND distance to treatment > minimum distance threshold
-        AND meals only reimbursement = meals short distance rate
+    OR meals required
+    AND number of nights = 0
+    AND distance to treatment > minimum distance threshold
+```
 
-# CORRECT — with virtual nodes:
+```
+# WRONG — same-level OR and AND can be read ambiguously:
+veteran family pathway
+    OR veteran is from qualifying service
+    AND veteran's son is from qualifying service
+```
+
+```
+# CORRECT — explicit grouped paths with virtual ONE:
+veteran family pathway
+    OR veteran qualifies directly
+        AND veteran is from qualifying service
+    OR veteran qualifies through family pathway
+        AND veteran's son is from qualifying service
+```
+
+```
+# CORRECT — OR grouping using virtual ONE:
 meals only reimbursement
-    OR meals required virtual one
+    OR meals required virtual ONE
         AND meals required
         AND number of nights = 0
         AND distance to treatment > minimum distance threshold
@@ -1453,6 +1695,31 @@ meals only reimbursement
         AND meals only reimbursement = meals short distance rate
     OR meals condition not met
         AND meals only reimbursement = 0
+```
+
+```
+# CORRECT — AND grouping using virtual ALL:
+complete application
+    AND eligibility requirements virtual ALL
+        AND proof of identity provided
+        AND proof of service provided
+        AND proof of residence provided
+```
+
+```
+# CORRECT — combined virtual ONE and virtual ALL:
+service pension eligibility
+    OR age service pension virtual ONE
+        AND age requirement virtual ALL
+            AND the person's age >= qualifying age
+            AND the person has qualifying service
+        AND residence requirement virtual ALL
+            AND the person is an Australian resident
+            AND years of Australian residence >= 10
+    OR invalidity service pension virtual ONE
+        AND permanent incapacity virtual ALL
+            AND the person is permanently blind
+            AND impairment rating >= 40
 ```
 
 ---
@@ -1537,25 +1804,33 @@ AND the person's last name = another person's last name
 **Key Rules:**
 1. As a parent: cannot use NOT or KNOWN modifiers
 2. As a child: can use NOT, KNOWN, MANDATORY, OPTIONALLY, POSSIBLY and their combinations
-3. Should NOT be used as a base child rule for comparisons -- use Comparison Conclusion Lines (`= TRUE`) instead
-4. Plain statements (no IS keyword) are valid and common -- the engine will prompt the user
+3. Plain statements are the preferred child syntax for checking a boolean rule statement
+4. Do not use Comparison Conclusion Lines (`= TRUE` or `= FALSE`) to check whether a derived rule statement is true or false
+5. Plain statements (no IS keyword) are valid and common -- the engine will prompt the user or check working memory
 
-**Critical Rule:** When used as a child, prefer comparison syntax (`= TRUE`, `= FALSE`) instead of IS TRUE / IS FALSE:
+**Critical Rule:** When a child needs to check whether a rule statement is true, write the rule statement itself. When it needs to check false, use dependency negation (`AND NOT` or `OR NOT`).
 
 ```
-# WRONG -- IS TRUE as child dependency:
-Dean is a man
-    AND Dean has a wife IS TRUE
-    AND Dean is a kind man IS TRUE
-
-# CORRECT -- comparison as child dependency:
-Dean is a man
+# WRONG -- boolean rule statements written as comparisons:
+Dean is eligible
     AND Dean has a wife = TRUE
-    AND Dean is a kind man = TRUE
-    AND Dean was born as a man
+    AND Dean is a kind man IS TRUE
+    AND Dean has a disqualifying condition = FALSE
+
+# CORRECT -- child rule-statement checks:
+Dean is eligible
+    AND Dean has a wife
+    AND Dean is a kind man
+    AND NOT Dean has a disqualifying condition
 ```
 
-**Why?** As a child rule, the engine determines the value by either asking a question or checking working memory. The comparison form (`= TRUE`) is the proper way to express this as a child dependency.
+```
+# CORRECT -- false check:
+Dean is not eligible
+    AND NOT Dean has a wife
+```
+
+**Why?** A plain child rule statement is a Value Conclusion Line. The engine can evaluate or ask for that statement as a boolean fact. Writing `person is a veteran = TRUE` makes the parser treat it as a Comparison Conclusion Line, which is for comparing values, not for checking whether a rule statement has been satisfied.
 
 ---
 
@@ -1583,6 +1858,8 @@ Dean is a man
 **When to Use vs Value Conclusion:**
 - Use Comparison when checking a relationship (equals, greater than, less than)
 - Use Value Conclusion (IS) when declaring what something IS
+- Use plain Value Conclusion statements for boolean rule-statement checks. For example, use `AND person is a veteran`, not `AND person is a veteran = TRUE`.
+- Use `AND NOT person is a veteran` when the parent requires that rule statement to be false.
 
 **Common Mistake:** Adding NEEDS to comparison lines. The engine automatically prompts for missing values in comparisons -- NEEDS is only for IS CALC expressions.
 
@@ -1615,12 +1892,12 @@ Dean is a man
 Dean is a man
     AND Dean's age IS CALC (today's date - Dean's dob)
         NEEDS Dean's dob
-    AND Dean has a wife = TRUE
+    AND Dean has a wife
 
 # CORRECT -- IS CALC as a separate rule:
 Dean is a man
     AND Dean's age > 18
-    AND Dean has a wife = TRUE
+    AND Dean has a wife
     AND Dean was born as a man
 
 Dean's age IS CALC (today's date - Dean's dob)
@@ -1635,17 +1912,16 @@ Dean's age IS CALC (today's date - Dean's dob)
 
 **Syntax:**
 ```
-<quantifier> <variable name> ITERATE: LIST OF <list name>
+<quantifier> <item alias> IN <collection name>
     <child rules>
 ```
 
 **Plain English:** An Iterate Line loops through each item in a list and evaluates conditions for each one. It is the INFERRA equivalent of a `for each` loop in programming.
 
 **Technical Detail:**
-- Iterates over each item in the specified list
-- Child rules are evaluated for EACH item in the list
-- Quantifiers: ALL, NONE, or a number (minimum count)
-- Can be combined with NOT for negation
+- Iterates over each item in the specified collection
+- Child rules are evaluated for EACH item in the collection
+- Quantifiers: ALL, NONE, SOME, NOT ALL, NOT NONE, AT LEAST N, AT MOST N, EXACTLY N
 - Only valid as a child rule
 - Child rules must follow immediately with proper indentation
 - Does NOT support KNOWN modifier
@@ -1660,35 +1936,35 @@ Dean's age IS CALC (today's date - Dean's dob)
 ```
 # Original: A person must meet military service criteria if NOT ALL of their service records fail the qualifying conditions
 person must meet military service criteria
-    AND NOT ALL service ITERATE: LIST OF service history
+    AND NOT ALL period IN service history
         AND iterate rules
             OR one
-                AND enlistment date >= 01/07/1951
-                AND discharge date <= 06/12/1972
-                AND NOT service type IS IN LIST: Operational service type
+                AND period.enlistment date >= 01/07/1951
+                AND period.discharge date <= 06/12/1972
+                AND NOT period.service type IS IN LIST: Operational service type
             OR two
-                AND enlistment date >= 22/05/1986
-                AND yearly period of service by 06/04/1994 >= 3
+                AND period.enlistment date >= 22/05/1986
+                AND period.yearly period of service by 06/04/1994 >= 3
 ```
 
 ---
 
 ### 8.5 Virtual Line
 
-**Plain English:** A Virtual Line is a helper rule that the engine creates automatically when a parent rule has both AND and OR children at the same level. It ensures the logic is grouped correctly.
+**Plain English:** A Virtual Line is a helper rule used to group logic that would otherwise mix AND and OR children under one parent. The engine can create one automatically, but rule authors should write explicit helper rules so the intended meaning is clear.
 
 **Technical Detail:**
-- Auto-generated by the engine -- not written in the rule file
+- May be auto-generated by the engine when same-level AND/OR mixing appears
 - Invisible to the user
 - Ensures correct logical grouping when AND and OR are mixed
-- Can also be explicitly created by the rule engineer for clarity
+- Should be explicitly created by the rule engineer for clarity
 - Can be a parent (but never a child)
 - Always evaluated during self-evaluation
 
-**Example of Auto-Generation:**
+**Example of What to Avoid:**
 
 ```
-# What you write:
+# Same-level AND/OR mixing:
 person must meet military service criteria
     AND number of services
     OR one
@@ -1696,10 +1972,13 @@ person must meet military service criteria
         AND discharge date <= 06/12/1972
     OR two
         AND enlistment date >= 22/05/1986
+```
 
-# What the engine creates internally:
+**Preferred Explicit Grouping:**
+
+```
 person must meet military service criteria
-    OR VirtualNode - person must meet military service criteria
+    OR service count pathway
         AND number of services
     OR one
         AND enlistment date >= 01/07/1951
@@ -1708,21 +1987,23 @@ person must meet military service criteria
         AND enlistment date >= 22/05/1986
 ```
 
-**Best Practice:** Create virtual nodes explicitly in your rule file rather than relying on the engine to auto-generate them. This makes the logic clearer and prevents unexpected evaluation order.
+**Best Practice:** Create grouping rules explicitly in your rule file rather than relying on the engine to auto-generate virtual nodes. This makes the logic clearer and prevents unexpected evaluation order.
 ---
 
 ## 9. Rule Type Matrix (Expanded)
 
 The following table describes the characteristics of each rule type in the INFERRA Inference Engine. It distinguishes between behavior in the **Rule Format** (as written in rule files) and **Rule Structure** (as represented internally in the engine).
 
+**Important:** Dependency modifiers such as `NOT`, `KNOWN`, `MANDATORY`, `OPTIONALLY`, and `POSSIBLY` are child-line prefixes. The scanner removes them from an indented child line and stores them as dependency-edge flags in the graph. They are not independent parent-rule grammar.
+
 | Rule Type | Option / Keyword | In Rule Format | In Rule Structure | Can Be Child | Can Be Parent | Needs Self-Eval |
 |-----------|-----------------|----------------|-------------------|--------------|---------------|-----------------|
 | **Value Conclusion** | No Keywords | Yes | Yes | Yes | Yes | Only if not plain |
 | | NOT | Yes | Yes | Yes | No | Yes |
 | | KNOWN | Yes | Yes | Yes | No | Yes |
-| | MANDATORY | Yes | Yes | Yes | Yes | No |
-| | OPTIONALLY | Yes | Yes | Yes | Yes | No |
-| | POSSIBLY | Yes | Yes | Yes | Yes | No |
+| | MANDATORY | Yes | Yes | Yes | No | No |
+| | OPTIONALLY | Yes | Yes | Yes | No | No |
+| | POSSIBLY | Yes | Yes | Yes | No | No |
 | | MANDATORY NOT | Yes | Yes | Yes | No | Yes |
 | | POSSIBLY NOT | Yes | Yes | Yes | No | Yes |
 | | MANDATORY KNOWN | Yes | Yes | Yes | No | Yes |
@@ -1730,7 +2011,7 @@ The following table describes the characteristics of each rule type in the INFER
 | | MANDATORY NOT KNOWN | Yes | Yes | Yes | No | Yes |
 | | POSSIBLY NOT KNOWN | Yes | Yes | Yes | No | Yes |
 | **Comparison** | No Keywords | Yes | Yes | Yes | No | Yes |
-| | NOT | Yes | Yes | Yes | Yes | Yes |
+| | NOT | Yes | Yes | Yes | No | Yes |
 | | KNOWN | No | No | No | No | No |
 | | MANDATORY | Yes | Yes | Yes | No | No |
 | | OPTIONALLY | Yes | Yes | Yes | No | No |
@@ -1744,7 +2025,7 @@ The following table describes the characteristics of each rule type in the INFER
 | | NEEDS (same as MANDATORY) | Yes | Yes | Yes | No | No |
 | | WANTS (same as OR) | Yes | Yes | Yes | No | No |
 | | Others | No | No | No | No | No |
-| **Iterate** | ALL, NONE, or number | Yes | Yes | Yes | No | Yes |
+| **Iterate** | ALL, NONE, SOME, AT LEAST N, AT MOST N, EXACTLY N | Yes | Yes | Yes | No | Yes |
 | | NOT | Yes | Yes | Yes | No | Yes |
 | | KNOWN | No | No | No | No | No |
 | | MANDATORY | Yes | Yes | Yes | No | No |
@@ -1822,12 +2103,12 @@ AND service type IS IN LIST: qualifying service type
 ### 10.4 Anti-Pattern: Mixing AND/OR at Same Level
 
 ```
-# WRONG -- ambiguous:
+# WRONG -- same-level AND/OR is semantically ambiguous:
 the person qualifies
     AND the person is a veteran
     OR the person is a reservist
 
-# CORRECT -- with virtual node:
+# CORRECT -- explicit grouped paths:
 the person qualifies
     OR the person qualifies via veteran status
         AND the person is a veteran
@@ -1865,18 +2146,20 @@ the total amount
     AND the subtotal
 ```
 
-### 10.7 Anti-Pattern: IS TRUE / IS FALSE as Child Rules
+### 10.7 Anti-Pattern: Boolean Rule Statements as Comparisons
 
 ```
 # WRONG:
-Dean is a man
-    AND Dean has a wife IS TRUE
+Dean is eligible
+    AND Dean has a wife = TRUE
     AND Dean is a kind man IS TRUE
+    AND Dean has a disqualifying condition = FALSE
 
 # CORRECT:
-Dean is a man
-    AND Dean has a wife = TRUE
-    AND Dean is a kind man = TRUE
+Dean is eligible
+    AND Dean has a wife
+    AND Dean is a kind man
+    AND NOT Dean has a disqualifying condition
 ```
 
 ### 10.8 Pattern: Date Logic (Modelled Externally)
@@ -1897,6 +2180,12 @@ INPUT the claim due date AS DATE
 
 ## 11. Quick Reference Card
 
+### Structural Directives
+
+| Keyword | Purpose | Example |
+|---------|---------|---------|
+| IMPORT: | Import another rule set by name | `IMPORT: dva_rate_thresholds` |
+
 ### Declaration Keywords
 
 | Keyword | Purpose | Example |
@@ -1906,6 +2195,11 @@ INPUT the claim due date AS DATE
 | AS | Specify data type | `INPUT name AS TEXT` |
 | IS | Assign value (in declarations) | `FIXED rate IS 31.35` |
 | ITEM | Define a list option | `ITEM warlike service` |
+| TYPE | Declare a repeated record shape | `TYPE service period` |
+| FIELD | Declare a record field | `FIELD period of service in days AS NUMBER` |
+| FIELD AS LIST OF | Bind a list field to an option list | `FIELD service type AS LIST OF DVA service type options` |
+| COLLECTION | Declare repeated structured records | `INPUT service history AS COLLECTION OF service period` |
+| SIZE FROM | Declare the collection count source | `SIZE FROM number of service periods` |
 
 ### Dependency Type Keywords
 
@@ -1913,7 +2207,7 @@ INPUT the claim due date AS DATE
 |---------|---------|-------------------|
 | AND | All must be true | All must be answered |
 | OR | Any one must be true | At least one must be answered |
-| NOT | Inverts the child result | No change |
+| NOT | Inverts the child result; use `AND NOT` or `OR NOT` on the whole child line | No change |
 | KNOWN | Checks if value exists | No change |
 | MANDATORY | Must ask and must answer | CANNOT converge without answer |
 | OPTIONALLY | Ask but answer optional | CAN converge without answer |
@@ -1937,20 +2231,24 @@ INPUT the claim due date AS DATE
 
 | Keyword | Purpose | Example |
 |---------|---------|---------|
-| ITERATE: LIST OF | Loop over list | `ALL service ITERATE: LIST OF service history` |
-| ALL | Every item must pass | `ALL service ITERATE: ...` |
-| NONE | No item must pass | `NONE service ITERATE: ...` |
-| NOT ALL | At least one must fail | `NOT ALL service ITERATE: ...` |
-| N (number) | At least N must pass | `3 service ITERATE: ...` |
+| IN | Loop over a collection | `ALL period IN service history` |
+| ALL | Every item must pass | `ALL period IN service history` |
+| NONE | No item must pass | `NONE period IN service history` |
+| NOT ALL | At least one must fail | `NOT ALL period IN service history` |
+| NOT NONE | At least one must pass | `NOT NONE period IN service history` |
+| AT LEAST N | At least N must pass | `AT LEAST 3 period IN service history` |
+| AT MOST N | At most N may pass | `AT MOST 3 period IN service history` |
+| EXACTLY N | Exactly N must pass | `EXACTLY 3 period IN service history` |
 
 ### Structural Conventions
 
 | Convention | Rule |
 |-----------|------|
 | Indentation | 4 spaces per level |
-| Comments | `# Reference:`, `# Section:`, `# Original:` before every rule block |
+| Comments | Authoring convention: `# Reference:`, `# Section:`, `# Original:` before substantive rule blocks |
 | Naming | Use exact legislative phrasing with spaces (never snake_case) |
-| Virtual Nodes | Create explicitly when mixing AND/OR at same level |
+| Virtual Nodes | `virtual ONE` for OR groupings, `virtual ALL` for AND groupings; never mix same-level AND/OR |
+| AND NOT | Negates the whole child line; use it for negated statements, comparisons, and list checks |
 | Literals | Double-quoted strings (e.g., `"MALE"`) |
 | Variables | Unquoted names reference other variables (e.g., `another person's last name`) |
-| Order | FIXED first, then INPUT, then rule blocks |
+| Order | Optional IMPORT directives first, then FIXED, then INPUT, then rule blocks |

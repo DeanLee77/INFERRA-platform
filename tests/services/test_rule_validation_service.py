@@ -186,6 +186,196 @@ class TestSyntaxValidation:
         result = service.validate(rule_text)
         assert not any(e.code == "DUPLICATE_DECLARATION" for e in result.errors)
 
+    def test_collection_iteration_with_size_from_is_valid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND ALL period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is True
+        assert not result.errors
+
+    def test_exact_collection_iteration_with_size_from_is_valid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND EXACTLY 2 period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is True
+        assert not result.errors
+
+    def test_at_least_collection_iteration_with_size_from_is_valid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND AT LEAST 2 period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is True
+        assert not result.errors
+
+    def test_at_most_collection_iteration_with_size_from_is_valid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND AT MOST 2 period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is True
+        assert not result.errors
+
+    def test_legacy_iterate_list_of_syntax_is_invalid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND ALL period ITERATE: LIST OF service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is False
+        assert any(error.code == "INVALID_ITERATE_SYNTAX" for error in result.errors)
+
+    def test_bare_number_iteration_quantifier_is_invalid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND 2 period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is False
+        assert any(error.code == "INVALID_ITERATE_SYNTAX" for error in result.errors)
+
+    def test_exact_iteration_alias_is_invalid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND EXACT 2 period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is False
+        assert any(error.code == "INVALID_ITERATE_SYNTAX" for error in result.errors)
+
+    def test_field_list_of_option_binding_is_valid_when_options_declared(self, service):
+        rule_text = (
+            'FIXED DVA service type options AS LIST\n'
+            '    ITEM operational service\n'
+            '    ITEM peacekeeping service\n'
+            '\n'
+            'TYPE service period\n'
+            '    FIELD service type AS LIST OF DVA service type options\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND SOME period IN service history\n'
+            '        AND period.service type IS IN LIST: DVA service type options\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is True
+        assert not result.errors
+
+    def test_field_list_of_option_binding_requires_declared_options(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD service type AS LIST OF DVA service type options\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND SOME period IN service history\n'
+            '        AND period.service type = "operational service"\n'
+        )
+        result = service.validate(rule_text)
+        assert any(
+            e.code == "UNDECLARED_REFERENCE"
+            and e.node_name == "DVA service type options"
+            for e in result.errors
+        )
+
+    def test_same_level_and_or_mixing_warns(self, service):
+        rule_text = (
+            'INPUT person served AS BOOLEAN\n'
+            'INPUT person discharged AS BOOLEAN\n'
+            'INPUT person has reserve service AS BOOLEAN\n'
+            '\n'
+            'person qualifies\n'
+            '    AND person served\n'
+            '    OR person discharged\n'
+            '    OR person has reserve service\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is True
+        assert any(w.code == "MIXED_AND_OR_CHILDREN" for w in result.warnings)
+
+    def test_collection_size_from_requires_declared_count(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND ALL period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert any(e.code == "UNDECLARED_REFERENCE" for e in result.errors)
+
     def test_fixed_list_with_is(self, service):
         rule_text = (
             'FIXED items IS LIST\n'

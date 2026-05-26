@@ -26,6 +26,7 @@ from src.domain.nodes.meta_data import MetaData
 from src.domain.nodes.value_conclusion_line import ValueConclusionLine
 from src.domain.rule_parser.dependency_type_string_matcher import DependencyTypeStringMatcher
 from src.domain.rule_parser.i_scan_feeder import IScanFeeder
+from src.domain.rule_parser.iterate_syntax import canonicalise_iterate_syntax
 from src.domain.rule_parser.line_matcher_constant import LineMatcherConstant
 from src.domain.tokens import Tokenizer
 from src.infrastructure.logging_config import get_logger
@@ -127,6 +128,10 @@ class RuleSetParser(IScanFeeder, ABC):
             line_number: Line number in source file
             meta_data: Metadata for the rule
         """
+        parent_text = canonicalise_iterate_syntax(parent_text)
+        if self._handle_type_parent(parent_text):
+            return
+
         node_data = None
         next_node_id = self.__node_set.get_next_node_id()
         
@@ -147,6 +152,7 @@ class RuleSetParser(IScanFeeder, ABC):
                 if node_data.get_fact_value().get_value() == 'WARNING':
                     self.handle_warning(parent_text)
                 self._parent_node_data_set(node_data, line_number, meta_data)
+                self._register_collection_input(parent_text)
             else:
                 for i in range(len(line_match_patterns)):
                     pattern = re.compile(line_match_patterns[i])
@@ -178,7 +184,12 @@ class RuleSetParser(IScanFeeder, ABC):
             first_key_words_group: First keywords group
             line_number: Line number in source file
         """
+        parent_text = canonicalise_iterate_syntax(parent_text)
+        child_text = canonicalise_iterate_syntax(child_text)
         dependency_type = 0
+
+        if self._handle_declaration_child(parent_text, child_text):
+            return
         
         if re.match(r"(ITEM)(.*)", child_text):
             self._handle_item_child(parent_text, child_text, first_key_words_group, line_number)
@@ -335,6 +346,134 @@ class RuleSetParser(IScanFeeder, ABC):
         identifier = node_data.get_variable_name() or node_data.get_node_name() or "__anonymous__"
         line_number = node_data.get_node_line() if node_data.get_node_line() is not None else 0
         node_data.set_debug_label(f"{self.__source_name}:{line_number}:{identifier}")
+
+    def _handle_type_parent(self, parent_text: str) -> bool:
+        type_name = self._parse_type_name(parent_text)
+        if type_name is None:
+            return False
+        self.__node_set.register_type(type_name)
+        return True
+
+    def _register_collection_input(self, parent_text: str) -> None:
+        parsed = self._parse_collection_input(parent_text)
+        if parsed is None:
+            return
+        collection_name, item_type = parsed
+        self.__node_set.register_collection(collection_name, item_type=item_type)
+
+    def _handle_declaration_child(self, parent_text: str, child_text: str) -> bool:
+        type_name = self._parse_type_name(parent_text)
+        if type_name is not None:
+            field = self._parse_field_declaration(child_text)
+            if field is None:
+                self.handle_warning(child_text)
+                return True
+            field_name, field_type, option_list_name = field
+            self.__node_set.register_type_field(type_name, field_name, field_type)
+            if option_list_name:
+                self.__node_set.register_type_field_options(
+                    type_name,
+                    field_name,
+                    option_list_name,
+                )
+            return True
+
+        collection = self._parse_collection_input(parent_text)
+        if collection is None:
+            return False
+
+        collection_name, _ = collection
+        size_from = self._parse_size_from(child_text)
+        if size_from is not None:
+            self.__node_set.register_collection(collection_name, size_from=size_from)
+            return True
+
+        field = self._parse_field_declaration(child_text)
+        if field is not None:
+            field_name, field_type, option_list_name = field
+            self.__node_set.register_collection_field(collection_name, field_name, field_type)
+            if option_list_name:
+                self.__node_set.register_collection_field_options(
+                    collection_name,
+                    field_name,
+                    option_list_name,
+                )
+            return True
+
+        item_type = self._parse_item_type(child_text)
+        if item_type is not None:
+            self.__node_set.register_collection(collection_name, item_type=item_type)
+            return True
+
+        self.handle_warning(child_text)
+        return True
+
+    def _parse_type_name(self, text: str) -> Optional[str]:
+        match = re.match(r"^TYPE\s+(.+?)\s*$", text or "", re.IGNORECASE)
+        if match is None:
+            return None
+        return match.group(1).strip()
+
+    def _parse_collection_input(self, text: str) -> Optional[tuple[str, str]]:
+        match = re.match(
+            r"^INPUT\s+(.+?)\s+AS\s+COLLECTION\s+OF\s+(.+?)\s*$",
+            text or "",
+            re.IGNORECASE,
+        )
+        if match is None:
+            return None
+        return match.group(1).strip(), match.group(2).strip()
+
+    def _parse_field_declaration(self, text: str) -> Optional[tuple[str, FactValueType, Optional[str]]]:
+        match = re.match(r"^FIELD\s+(.+?)\s+AS\s+(.+?)\s*$", text or "", re.IGNORECASE)
+        if match is None:
+            return None
+        type_text = match.group(2).strip()
+        return (
+            match.group(1).strip(),
+            self._field_type_from_text(type_text),
+            self._field_option_list_from_text(type_text),
+        )
+
+    def _parse_size_from(self, text: str) -> Optional[str]:
+        match = re.match(r"^SIZE\s+FROM\s+(.+?)\s*$", text or "", re.IGNORECASE)
+        if match is None:
+            return None
+        return match.group(1).strip()
+
+    def _parse_item_type(self, text: str) -> Optional[str]:
+        match = re.match(r"^ITEM\s+TYPE\s+(.+?)\s*$", text or "", re.IGNORECASE)
+        if match is None:
+            return None
+        return match.group(1).strip()
+
+    def _field_type_from_text(self, type_text: str) -> FactValueType:
+        type_name = (type_text or "").strip().split()[0].upper()
+        if type_name in {"NUMBER", "DECIMAL", "DOUBLE"}:
+            return FactValueType.DOUBLE
+        if type_name in {"INTEGER", "INT"}:
+            return FactValueType.INTEGER
+        if type_name in {"TEXT", "STRING"}:
+            return FactValueType.STRING
+        if type_name == "BOOLEAN":
+            return FactValueType.BOOLEAN
+        if type_name == "DATE":
+            return FactValueType.DATE
+        if type_name == "LIST":
+            return FactValueType.LIST
+        if type_name == "URL":
+            return FactValueType.URL
+        if type_name == "HASH":
+            return FactValueType.HASH
+        if type_name == "GUID":
+            return FactValueType.GUID
+        return FactValueType.UNKNOWN
+
+    def _field_option_list_from_text(self, type_text: str) -> Optional[str]:
+        match = re.match(r"^LIST\s+OF\s+(.+?)\s*$", type_text or "", re.IGNORECASE)
+        if match is None:
+            return None
+        return match.group(1).strip()
 
     def _handle_value_conclusion_node(self, node_data: ValueConclusionLine, parent_text: str) -> None:
         """

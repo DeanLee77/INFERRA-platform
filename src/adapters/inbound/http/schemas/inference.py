@@ -37,7 +37,7 @@ class IterateProgress(BaseModel):
     """Progress indicator for an iterate node."""
     answered: int = Field(..., description="Number of iterate questions answered")
     total: int = Field(..., description="Total iterate questions")
-    quantifier: str = Field("ALL", description="Quantifier for evaluation (ALL/NONE/SOME/N)")
+    quantifier: str = Field("ALL", description="Quantifier for evaluation (ALL/NONE/SOME/AT LEAST N/AT MOST N/EXACTLY N)")
     list_name: str = Field("", description="Name of the iterate list")
 
 
@@ -59,7 +59,7 @@ class NextQuestionResponse(BaseModel):
 class AnswerEntry(BaseModel):
     """An answer entry from the user."""
     type: str = Field(..., description="Answer type (boolean, string, number, etc.)")
-    answer: Union[bool, int, float, str] = Field(..., description="The answer value (scalar types only)")
+    answer: Union[bool, int, float, str, List[Any]] = Field(..., description="The answer value")
 
 
 class IterateAnswerPayload(BaseModel):

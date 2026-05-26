@@ -120,6 +120,9 @@ class QuestionResolver:
         if line_type == LineType.ITERATE:
             return True
 
+        if line_type == LineType.COMPARISON:
+            return not has_children
+
         if line_type == LineType.VALUE_CONCLUSION:
             return not has_children
 

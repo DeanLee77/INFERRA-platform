@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from numbers import Number
 from typing import Any, Dict, Optional
 from src.infrastructure.logging_config import get_logger
 from src.domain.nodes.node import Node
@@ -250,6 +251,16 @@ class ComparisonLine(Node):
         Returns:
             Boolean result of comparison
         """
+        try:
+            lhs = self._coerce_numeric_operand(lhs)
+            rhs = self._coerce_numeric_operand(rhs)
+        except (TypeError, ValueError):
+            _logger.debug(
+                "numeric_comparison_invalid_operand",
+                node_name=self.get_node_name(),
+            )
+            return False
+
         if self.__operator_string == ">":
             return lhs > rhs
         elif self.__operator_string == ">=":
@@ -261,6 +272,19 @@ class ComparisonLine(Node):
         elif self.__operator_string == "==":
             return lhs == rhs
         return False
+
+    @staticmethod
+    def _coerce_numeric_operand(value: Any) -> Number:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, Number):
+            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("empty numeric operand")
+            return float(stripped) if any(marker in stripped for marker in (".", "e", "E")) else int(stripped)
+        raise TypeError(f"unsupported numeric operand: {type(value)!r}")
 
     def _compare_strings(self, lhs: str, rhs: str) -> bool:
         """
