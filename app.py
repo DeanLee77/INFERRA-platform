@@ -20,11 +20,30 @@ from project.repository import update_rule_name_and_category
 from project.repository import create_rule
 from project.repository import find_id_by_name
 from project.repository import create_rule_history
+from project.demo import build_decision_receipt, build_fixture_manifest
 
 app = create_app()
 
 rule_prefix_url = '/service/rule/'
 inference_prefix_url = '/service/inference/'
+
+
+@app.route(rule_prefix_url + 'syntheticDecisionReceiptFixture')
+def get_synthetic_decision_receipt_fixture():
+    response = jsonify(build_fixture_manifest())
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
+
+
+@app.route(inference_prefix_url + 'syntheticDecisionReceipt')
+def get_synthetic_decision_receipt():
+    case_id = request.args.get('caseId', 'certify-ready')
+    try:
+        response = jsonify(build_decision_receipt(case_id))
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
 
 
 @app.route(rule_prefix_url + 'searchRuleByName')

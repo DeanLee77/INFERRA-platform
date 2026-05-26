@@ -5,3 +5,9 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+# Paperclip release/IP-gate work products must not be committed to product repos.
+INFA-*.md
+.infa*-audit/
+demo_artifacts/
+*.log
