@@ -7,7 +7,7 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-MODULE_PATH = PROJECT_ROOT / "project" / "demo" / "synthetic_decision_receipt.py"
+MODULE_PATH = PROJECT_ROOT / "src" / "domain" / "demo" / "synthetic_decision_receipt.py"
 spec = importlib.util.spec_from_file_location("synthetic_decision_receipt", MODULE_PATH)
 synthetic_decision_receipt = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(synthetic_decision_receipt)

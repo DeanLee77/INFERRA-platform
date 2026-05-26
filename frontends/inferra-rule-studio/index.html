@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>INFERRA Rule Studio</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="mark">IR</span>
+          <div>
+            <strong>INFERRA Rule Studio</strong>
+            <span>Graph-native rule authoring</span>
+          </div>
+        </div>
+        <nav class="nav-tabs" aria-label="Rule studio views">
+          <button class="tab active" data-view="graph">Graph</button>
+          <button class="tab" data-view="rules">Rules</button>
+          <button class="tab" data-view="trace">Trace</button>
+        </nav>
+        <div class="metric-grid" id="coverageMetrics"></div>
+      </aside>
+
+      <main class="workspace">
+        <section class="toolbar" aria-label="Rule commands">
+          <div class="tool-group">
+            <button id="validateBtn" title="Run validation">Validate</button>
+            <button id="layoutBtn" title="Refresh graph layout">Layout</button>
+            <button id="exportBtn" title="Build backend payload">Export</button>
+          </div>
+          <output id="statusLine">Ready</output>
+        </section>
+
+        <section class="view active" id="graphView">
+          <canvas id="graphCanvas" width="1120" height="640" aria-label="Rule dependency graph"></canvas>
+          <div class="node-inspector" id="nodeInspector">
+            <strong>No node selected</strong>
+            <span>Click a node to inspect it.</span>
+          </div>
+        </section>
+
+        <section class="view" id="rulesView">
+          <textarea id="ruleText" spellcheck="false"></textarea>
+          <pre id="validationOutput"></pre>
+        </section>
+
+        <section class="view" id="traceView">
+          <pre id="traceOutput"></pre>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

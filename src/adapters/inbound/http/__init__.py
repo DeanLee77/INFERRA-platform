@@ -1,0 +1,3 @@
+from src.adapters.inbound.http.routes import api_router
+
+__all__ = ["api_router"]

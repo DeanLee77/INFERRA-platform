@@ -1,0 +1,32 @@
+"""
+Pydantic schemas for rule validation API endpoints.
+"""
+
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field
+
+
+# =============================================================================
+# Validation Request / Response
+# =============================================================================
+
+class RuleValidateRequest(BaseModel):
+    """Request to validate rule text."""
+    rule_text: str = Field(..., max_length=1_000_000, description="The raw rule text to validate")
+    rule_name: Optional[str] = Field(None, max_length=255, description="Optional rule name for import scope")
+
+
+class ValidationEntryDetail(BaseModel):
+    """Detail for a single validation error or warning."""
+    code: str = Field(..., description="Machine-readable error/warning code")
+    message: str = Field(..., description="Human-readable description")
+    waiver_id: str = Field(..., description="Stable identifier for human-review waiver matching")
+    line: Optional[int] = Field(None, description="Line number (if applicable)")
+    node_name: Optional[str] = Field(None, description="Node/variable name (if applicable)")
+
+
+class RuleValidateResponse(BaseModel):
+    """Response from rule validation."""
+    valid: bool = Field(..., description="Whether the rule text is valid")
+    errors: List[ValidationEntryDetail] = Field(default_factory=list, description="Validation errors")
+    warnings: List[ValidationEntryDetail] = Field(default_factory=list, description="Validation warnings")

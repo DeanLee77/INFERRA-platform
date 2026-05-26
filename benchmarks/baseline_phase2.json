@@ -1,0 +1,84 @@
+{
+  "forward_propagate_1k_5pct": {
+    "iterations": 200,
+    "avg_ms": 0.609,
+    "p50_ms": 0.335,
+    "p95_ms": 1.911,
+    "p99_ms": 4.649
+  },
+  "topo_sort_cached_5nodes": {
+    "iterations": 200,
+    "avg_ms": 0.003,
+    "p50_ms": 0.002,
+    "p95_ms": 0.003,
+    "p99_ms": 0.007
+  },
+  "iteration_record_answer_100": {
+    "iterations": 200,
+    "avg_ms": 5.319,
+    "p50_ms": 4.931,
+    "p95_ms": 8.773,
+    "p99_ms": 15.261
+  },
+  "iteration_evaluate_100": {
+    "iterations": 200,
+    "avg_ms": 4.328,
+    "p50_ms": 4.299,
+    "p95_ms": 6.699,
+    "p99_ms": 7.668
+  },
+  "import_resolve_20_modules": {
+    "iterations": 200,
+    "avg_ms": 7.888,
+    "p50_ms": 7.457,
+    "p95_ms": 11.686,
+    "p99_ms": 14.228
+  },
+  "import_cycle_detection": {
+    "iterations": 200,
+    "avg_ms": 1.116,
+    "p50_ms": 1.018,
+    "p95_ms": 1.91,
+    "p99_ms": 3.308
+  },
+  "module_registry_get_put_256": {
+    "iterations": 200,
+    "avg_ms": 5.119,
+    "p50_ms": 5.268,
+    "p95_ms": 7.77,
+    "p99_ms": 8.62
+  },
+  "module_registry_hit_rate": 1.0,
+  "node_set_merger_5x100": {
+    "iterations": 200,
+    "avg_ms": 9.517,
+    "p50_ms": 8.374,
+    "p95_ms": 13.328,
+    "p99_ms": 19.796
+  },
+  "session_migration_v1_v2_1k": {
+    "iterations": 200,
+    "avg_ms": 11.253,
+    "p50_ms": 10.612,
+    "p95_ms": 19.997,
+    "p99_ms": 38.19
+  },
+  "full_scan_baseline_1k": {
+    "iterations": 200,
+    "avg_ms": 78.848,
+    "p50_ms": 71.163,
+    "p95_ms": 121.4,
+    "p99_ms": 167.324
+  },
+  "_metadata": {
+    "generated_at": "2026-05-04T17:27:06Z",
+    "python_version": "3.10",
+    "platform": "windows",
+    "phase": 2,
+    "success_criteria": {
+      "forward_propagation_lt_200ms": "forward_propagate_1k_5pct.p95_ms < 200",
+      "topo_sort_cache_hit_gt_90pct": "topo_sort_cached_5nodes avg near 0ms (cache hit)",
+      "module_registry_hit_rate_gt_90pct": "module_registry_hit_rate > 0.90"
+    }
+  }
+}

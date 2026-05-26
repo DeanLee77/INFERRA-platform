@@ -44,8 +44,8 @@ Runtime dependencies:
 
 Platform fixtures:
 
-- Rule fixture: `project/demo/fixtures/synthetic_dmepos_power_mobility_rule.txt`
-- Case fixture: `project/demo/fixtures/synthetic_decision_cases.json`
+- Rule fixture: `src/domain/demo/fixtures/synthetic_dmepos_power_mobility_rule.txt`
+- Case fixture: `src/domain/demo/fixtures/synthetic_decision_cases.json`
 - Rule route: `GET http://127.0.0.1:8000/service/rule/syntheticDecisionReceiptFixture`
 - Receipt route: `GET http://127.0.0.1:8000/service/inference/syntheticDecisionReceipt?caseId=<case-id>`
 

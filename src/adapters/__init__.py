@@ -1,0 +1,1 @@
+"""Adapters package - inbound and outbound implementations."""

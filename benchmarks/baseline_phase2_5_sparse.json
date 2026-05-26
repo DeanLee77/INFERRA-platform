@@ -1,0 +1,162 @@
+{
+  "sparse_graph_1k_fanout4": {
+    "nodes": 1000,
+    "edges": 3990,
+    "fanout": 4,
+    "dense_matrix_cells": 1000000,
+    "dense_matrix_cell_ref_mb": 7.629,
+    "edge_to_dense_cell_ratio": 0.00399,
+    "dense_cells_per_graph_edge": 250.627,
+    "build_graph": {
+      "iterations": 10,
+      "avg_ms": 38.426,
+      "p50_ms": 39.269,
+      "p95_ms": 58.496,
+      "p99_ms": 58.496
+    },
+    "topological_sort": {
+      "iterations": 20,
+      "avg_ms": 4.038,
+      "p50_ms": 4.019,
+      "p95_ms": 6.48,
+      "p99_ms": 6.48
+    },
+    "ml_topological_sort": {
+      "iterations": 20,
+      "avg_ms": 28.852,
+      "p50_ms": 27.03,
+      "p95_ms": 43.193,
+      "p99_ms": 43.193
+    },
+    "ml_depth_first_sort": {
+      "iterations": 20,
+      "avg_ms": 30.849,
+      "p50_ms": 30.634,
+      "p95_ms": 37.389,
+      "p99_ms": 37.389
+    },
+    "back_propagate": {
+      "iterations": 20,
+      "avg_ms": 1.781,
+      "p50_ms": 1.962,
+      "p95_ms": 2.924,
+      "p99_ms": 2.924
+    },
+    "edge_iteration": {
+      "iterations": 20,
+      "avg_ms": 0.846,
+      "p50_ms": 0.518,
+      "p95_ms": 2.09,
+      "p99_ms": 2.09
+    }
+  },
+  "sparse_graph_5k_fanout4": {
+    "nodes": 5000,
+    "edges": 19990,
+    "fanout": 4,
+    "dense_matrix_cells": 25000000,
+    "dense_matrix_cell_ref_mb": 190.735,
+    "edge_to_dense_cell_ratio": 0.0007996,
+    "dense_cells_per_graph_edge": 1250.625,
+    "build_graph": {
+      "iterations": 5,
+      "avg_ms": 160.843,
+      "p50_ms": 155.719,
+      "p95_ms": 207.977,
+      "p99_ms": 207.977
+    },
+    "topological_sort": {
+      "iterations": 10,
+      "avg_ms": 35.183,
+      "p50_ms": 34.456,
+      "p95_ms": 44.109,
+      "p99_ms": 44.109
+    },
+    "ml_topological_sort": {
+      "iterations": 10,
+      "avg_ms": 293.191,
+      "p50_ms": 277.684,
+      "p95_ms": 494.352,
+      "p99_ms": 494.352
+    },
+    "ml_depth_first_sort": {
+      "iterations": 10,
+      "avg_ms": 198.525,
+      "p50_ms": 168.794,
+      "p95_ms": 353.563,
+      "p99_ms": 353.563
+    },
+    "back_propagate": {
+      "iterations": 10,
+      "avg_ms": 9.655,
+      "p50_ms": 9.253,
+      "p95_ms": 12.117,
+      "p99_ms": 12.117
+    },
+    "edge_iteration": {
+      "iterations": 10,
+      "avg_ms": 3.378,
+      "p50_ms": 3.251,
+      "p95_ms": 4.493,
+      "p99_ms": 4.493
+    }
+  },
+  "sparse_graph_10k_fanout4": {
+    "nodes": 10000,
+    "edges": 39990,
+    "fanout": 4,
+    "dense_matrix_cells": 100000000,
+    "dense_matrix_cell_ref_mb": 762.939,
+    "edge_to_dense_cell_ratio": 0.0003999,
+    "dense_cells_per_graph_edge": 2500.625,
+    "build_graph": {
+      "iterations": 3,
+      "avg_ms": 368.089,
+      "p50_ms": 370.068,
+      "p95_ms": 416.284,
+      "p99_ms": 416.284
+    },
+    "topological_sort": {
+      "iterations": 5,
+      "avg_ms": 64.927,
+      "p50_ms": 61.432,
+      "p95_ms": 79.599,
+      "p99_ms": 79.599
+    },
+    "ml_topological_sort": {
+      "iterations": 5,
+      "avg_ms": 305.17,
+      "p50_ms": 306.657,
+      "p95_ms": 354.981,
+      "p99_ms": 354.981
+    },
+    "ml_depth_first_sort": {
+      "iterations": 5,
+      "avg_ms": 314.176,
+      "p50_ms": 330.557,
+      "p95_ms": 347.382,
+      "p99_ms": 347.382
+    },
+    "back_propagate": {
+      "iterations": 5,
+      "avg_ms": 15.399,
+      "p50_ms": 15.217,
+      "p95_ms": 16.567,
+      "p99_ms": 16.567
+    },
+    "edge_iteration": {
+      "iterations": 5,
+      "avg_ms": 11.247,
+      "p50_ms": 10.845,
+      "p95_ms": 16.098,
+      "p99_ms": 16.098
+    }
+  },
+  "_metadata": {
+    "generated_at": "2026-05-11T01:13:29Z",
+    "phase": 2.5,
+    "purpose": "1k/5k/10k sparse graph bridge acceptance",
+    "fanout": 4,
+    "matrix_baseline": "1k materialized for adapter parity; 5k/10k use dense matrix cell-count and memory projections because dense Python matrices are deprecated compatibility payloads."
+  }
+}
