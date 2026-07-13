@@ -4,6 +4,7 @@ from src.domain.nodes.value_conclusion_line import ValueConclusionLine
 from src.domain.nodes.line_type import LineType
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.tokens import Token
+from src.domain.tokens.tokenizer import Tokenizer
 from src.domain.nodes.meta_data import MetaData
 
 
@@ -178,6 +179,22 @@ class TestValueConclusionLineInitialisation:
         with patch.object(ValueConclusionLine, '_set_value', create=True):
             vcl.initialisation("name IS hello", tokens)
         assert vcl.get_variable_name() == "name"
+
+    def test_initialisation_is_in_list_preserves_acronym_prefixed_list_name(self):
+        line = "service type IS IN LIST: DVA operational service type"
+        vcl = ValueConclusionLine(node_text=line, tokens=Tokenizer.get_tokens(line))
+
+        working_memory = {
+            "DVA operational service type": FactValue(
+                [FactValue("warlike service", FactValueType.STRING)],
+                FactValueType.LIST,
+            ),
+            "service type": FactValue("warlike service", FactValueType.STRING),
+        }
+
+        assert vcl.get_variable_name() == "service type"
+        assert vcl.get_fact_value().get_value() == "DVA operational service type"
+        assert vcl.self_evaluate(working_memory).get_value() is True
 
     def test_initialisation_is_date(self):
         vcl = ValueConclusionLine()

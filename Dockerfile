@@ -1,4 +1,4 @@
-FROM python:3.10-slim AS builder
+FROM python:3.10-slim@sha256:70f65c721aaddfb22b20ed6ec12606c59d9592493c5fcb6639f3d0e8ba3fbc10 AS builder
 
 WORKDIR /app
 
@@ -12,9 +12,13 @@ COPY docs/inferra_prompt.md ./inferra_prompt.md
 RUN pip install --no-cache-dir ".[async,semantic,reasoning,observability]" \
     && find /usr/local -type d -name __pycache__ -prune -exec rm -rf {} +
 
-FROM python:3.10-slim
+FROM python:3.10-slim@sha256:70f65c721aaddfb22b20ed6ec12606c59d9592493c5fcb6639f3d0e8ba3fbc10
 
-RUN groupadd --system inferra \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pandoc \
+    && command -v pandoc \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system inferra \
     && useradd --system --gid inferra --home-dir /app --shell /usr/sbin/nologin inferra
 
 WORKDIR /app

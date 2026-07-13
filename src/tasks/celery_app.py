@@ -11,6 +11,12 @@ on bulk rule saves. Submission-level idempotency skips duplicate tasks.
 
 from src.infrastructure.secrets import redis_url_from_env
 
+TASK_MODULES = (
+    "src.tasks.rule_sync",
+    "src.tasks.ontology_post_reasoner",
+    "src.tasks.induction",
+)
+
 try:
     from celery import Celery
 
@@ -18,6 +24,7 @@ try:
         "inferra",
         broker=redis_url_from_env("CELERY_BROKER_URL", "redis://localhost:6379/0", 0),
         backend=redis_url_from_env("CELERY_RESULT_BACKEND", "redis://localhost:6379/1", 1),
+        include=TASK_MODULES,
     )
 
     app.conf.update(
@@ -29,9 +36,8 @@ try:
         task_track_started=True,
         task_acks_late=True,
         worker_prefetch_multiplier=1,
+        imports=TASK_MODULES,
     )
-
-    app.autodiscover_tasks(["src.tasks"])
 
     CELERY_AVAILABLE = True
 except ImportError:  # pragma: no cover

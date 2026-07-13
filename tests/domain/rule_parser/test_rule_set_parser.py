@@ -157,6 +157,15 @@ class TestRuleSetParserHandleParent:
         parser.handle_parent("total IS CALC x + y", 1, MetaData())
         assert parser.get_node_set() is not None
 
+    def test_handle_parent_type_declaration(self, parser):
+        parser.handle_parent("TYPE service period", 1, MetaData())
+        assert "service period" in parser.get_node_set().get_type_dictionary()
+
+    def test_handle_parent_collection_input(self, parser):
+        parser.handle_parent("INPUT service history AS COLLECTION OF service period", 1, MetaData())
+        assert parser.get_node_set().get_input_dictionary()["service history"].get_value_type() == FactValueType.LIST
+        assert parser.get_node_set().get_collection_dictionary()["service history"]["item_type"] == "service period"
+
 
 class TestRuleSetParserHandleChild:
     def test_handle_child_item(self, parser):
@@ -188,6 +197,67 @@ class TestRuleSetParserHandleChild:
     def test_handle_child_existing_node_in_dictionary(self, parser):
         parser.handle_parent("status IS active", 1, MetaData())
         parser.handle_child("status IS active", "status IS active", "OR", 2)
+
+    def test_handle_child_type_field_declaration(self, parser):
+        parser.handle_parent("TYPE service period", 1, MetaData())
+        parser.handle_child("TYPE service period", "FIELD period of service in days AS NUMBER", "", 2)
+        fields = parser.get_node_set().get_type_dictionary()["service period"]["fields"]
+        assert fields["period of service in days"] == FactValueType.DOUBLE
+
+    def test_handle_child_type_field_option_binding(self, parser):
+        parser.handle_parent("TYPE service period", 1, MetaData())
+        parser.handle_child(
+            "TYPE service period",
+            "FIELD service type AS LIST OF DVA service type options",
+            "",
+            2,
+        )
+        metadata = parser.get_node_set().get_type_dictionary()["service period"]
+        assert metadata["fields"]["service type"] == FactValueType.LIST
+        assert metadata["field_options"]["service type"] == "DVA service type options"
+
+    def test_handle_child_collection_size_from_declaration(self, parser):
+        parser.handle_parent("INPUT service history AS COLLECTION OF service period", 1, MetaData())
+        parser.handle_child(
+            "INPUT service history AS COLLECTION OF service period",
+            "SIZE FROM number of service periods",
+            "",
+            2,
+        )
+        metadata = parser.get_node_set().get_collection_dictionary()["service history"]
+        assert metadata["size_from"] == "number of service periods"
+
+    def test_handle_child_collection_field_option_binding(self, parser):
+        parser.handle_parent("INPUT service history AS COLLECTION OF service period", 1, MetaData())
+        parser.handle_child(
+            "INPUT service history AS COLLECTION OF service period",
+            "FIELD service type AS LIST OF DVA service type options",
+            "",
+            2,
+        )
+        metadata = parser.get_node_set().get_collection_dictionary()["service history"]
+        assert metadata["fields"]["service type"] == FactValueType.LIST
+        assert metadata["field_options"]["service type"] == "DVA service type options"
+
+    def test_handle_child_in_iteration_canonicalises_to_iterate(self, parser):
+        parser.handle_parent("status IS active", 1, MetaData())
+        parser.handle_child("status IS active", "ALL period IN service history", "AND", 2)
+        assert "ALL period ITERATE: LIST OF service history" in parser.get_node_set().get_node_dictionary()
+
+    def test_handle_child_at_least_iteration_canonicalises_to_iterate(self, parser):
+        parser.handle_parent("status IS active", 1, MetaData())
+        parser.handle_child("status IS active", "AT LEAST 3 period IN service history", "AND", 2)
+        assert "AT LEAST 3 period ITERATE: LIST OF service history" in parser.get_node_set().get_node_dictionary()
+
+    def test_handle_child_at_most_iteration_canonicalises_to_iterate(self, parser):
+        parser.handle_parent("status IS active", 1, MetaData())
+        parser.handle_child("status IS active", "AT MOST 3 period IN service history", "AND", 2)
+        assert "AT MOST 3 period ITERATE: LIST OF service history" in parser.get_node_set().get_node_dictionary()
+
+    def test_handle_child_exact_iteration_canonicalises_to_iterate(self, parser):
+        parser.handle_parent("status IS active", 1, MetaData())
+        parser.handle_child("status IS active", "EXACTLY 3 period IN service history", "AND", 2)
+        assert "EXACTLY 3 period ITERATE: LIST OF service history" in parser.get_node_set().get_node_dictionary()
 
 
 class TestRuleSetParserHandleListItem:
@@ -479,3 +549,21 @@ class TestRuleSetParserHandleNotKnownManOptPos:
     def test_or_base_with_no_modifier(self, parser):
         result = parser._handle_not_known_man_opt_pos("OR something", DependencyType.get_or())
         assert result & DependencyType.get_or() == DependencyType.get_or()
+
+    def test_and_not_modifier_sets_not_bit(self, parser):
+        result = parser._handle_not_known_man_opt_pos(
+            "AND NOT something",
+            DependencyType.get_and(),
+        )
+
+        assert result & DependencyType.get_and() == DependencyType.get_and()
+        assert result & DependencyType.get_not() == DependencyType.get_not()
+
+    def test_and_mandatory_needs_modifier_sets_mandatory_bit(self, parser):
+        result = parser._handle_not_known_man_opt_pos(
+            "AND MANDATORY NEEDS something",
+            DependencyType.get_and(),
+        )
+
+        assert result & DependencyType.get_and() == DependencyType.get_and()
+        assert result & DependencyType.get_mandatory() == DependencyType.get_mandatory()

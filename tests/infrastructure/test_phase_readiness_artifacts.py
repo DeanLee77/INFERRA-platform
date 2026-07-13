@@ -140,13 +140,16 @@ def test_production_decision_and_legacy_registers_exist():
     assert "MLTopologicalSortStrategy" in legacy
 
 
-def test_ci_workflow_keeps_backend_frontend_and_docker_gates():
+def test_ci_workflow_keeps_backend_supply_chain_and_docker_gates():
     content = read_text(".github/workflows/ci.yml")
 
+    assert "python-supply-chain:" in content
+    assert "uv lock --check" in content
+    assert "pip_audit" in content
+    assert "actions/checkout@" in content
+    assert "actions/setup-python@" in content
     assert "pytest --cov=src --cov-fail-under=97" in content
     assert "lint-imports --config .importlinter" in content
-    assert "npm test" in content
-    assert "npm run check" in content
     assert "docker compose build api worker" in content
     assert "load-gate:" in content
     assert "grafana/k6:0.51.0" in content
@@ -175,13 +178,45 @@ def test_secret_template_and_compose_secret_substitution_exist():
     compose = read_text("docker-compose.yml")
     env_example = read_text(".env.example")
 
-    assert "INFERRA_AUTH_ENABLED: ${INFERRA_AUTH_ENABLED:-false}" in compose
+    assert "INFERRA_AUTH_ENABLED: ${INFERRA_AUTH_ENABLED:-true}" in compose
+    assert "INFERRA_API_KEY_SCOPES: ${INFERRA_API_KEY_SCOPES:-read,llm:read}" in compose
     assert "INFERRA_JWT_SECRET: ${INFERRA_JWT_SECRET:-}" in compose
+    assert "INFERRA_CORS_ALLOWED_ORIGINS: ${INFERRA_CORS_ALLOWED_ORIGINS:-}" in compose
+    assert "INFERRA_CORS_ALLOW_CREDENTIALS: ${INFERRA_CORS_ALLOW_CREDENTIALS:-false}" in compose
     assert "POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-inferra}" in compose
+    assert "AEGIS_SQLALCHEMY_DATABASE_URI=postgresql://inferra:replace-with-postgres-password@postgres:5432/inferra_aegis" in env_example
+    assert "AEGIS_ALLOW_SHARED_DATABASE=false" in env_example
     assert "GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}" in compose
     assert "FUSEKI_PASSWORD: ${FUSEKI_PASSWORD:-admin}" in compose
+    assert "FUSEKI_READ_PASSWORD: ${FUSEKI_READ_PASSWORD:-inferra_read}" in compose
     assert "replace-with-random-api-key" in env_example
+    assert "INFERRA_API_KEY_SCOPES=read,llm:read" in env_example
+    assert "INFERRA_CORS_ALLOWED_ORIGINS=http://localhost:5173" in env_example
     assert "replace-with-postgres-password" in env_example
+    assert "FUSEKI_READ_USER=inferra_reader" in env_example
+    assert "replace-with-distinct-fuseki-read-password" in env_example
+
+
+def test_aegis_deployment_uses_distinct_database_defaults():
+    compose = read_text("docker-compose.yml")
+    prod_compose = read_text("docker-compose.prod.yml")
+    readme = read_text("README.md")
+
+    assert "SQLALCHEMY_DATABASE_URI: ${SQLALCHEMY_DATABASE_URI:-postgresql://inferra:inferra@postgres:5432/inferra}" in compose
+    assert "AEGIS_SQLALCHEMY_DATABASE_URI: ${AEGIS_SQLALCHEMY_DATABASE_URI:-postgresql://inferra:inferra@postgres:5432/inferra_aegis}" in compose
+    assert compose.count("postgres-init:") >= 3
+    assert "AEGIS_POSTGRES_DB: ${AEGIS_POSTGRES_DB:-inferra_aegis}" in compose
+    assert "service_completed_successfully" in compose
+
+    assert "POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password" in prod_compose
+    assert "SQLALCHEMY_DATABASE_URI: \"\"" in prod_compose
+    assert "AEGIS_SQLALCHEMY_DATABASE_URI: \"\"" in prod_compose
+    assert "POSTGRES_HOST: postgres" in prod_compose
+    assert "AEGIS_POSTGRES_DB: ${AEGIS_POSTGRES_DB:-inferra_aegis}" in prod_compose
+    assert "postgres-init:" in prod_compose
+    assert "POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password" in prod_compose
+    assert "`AEGIS_SQLALCHEMY_DATABASE_URI`" in readme
+    assert "inferra_aegis" in readme
 
 
 def test_local_production_compose_overlay_and_secret_scripts_exist():
@@ -193,29 +228,36 @@ def test_local_production_compose_overlay_and_secret_scripts_exist():
     assert "restart: unless-stopped" in compose
     assert "deploy:" in compose
     assert "INFERRA_API_KEY_FILE" in compose
+    assert "INFERRA_API_KEY_SCOPES" in compose
+    assert "INFERRA_CORS_ALLOW_CREDENTIALS" in compose
     assert "POSTGRES_PASSWORD: \"\"" in compose
     assert "POSTGRES_PASSWORD_FILE" in compose
-    assert "POSTGRES_PASSWORD required" in compose
+    assert "postgres_password" in compose
     assert "GF_SECURITY_ADMIN_PASSWORD__FILE" in compose
     assert "GF_SECURITY_ADMIN_PASSWORD: \"\"" in compose
     assert "redis_password" in compose
     assert "REDIS_PASSWORD_FILE" in compose
     assert "redis-cli -a" in compose
-    assert "FUSEKI_PASSWORD required" in compose
+    assert "FUSEKI_ADMIN_PASSWORD_FILE" in compose
+    assert "FUSEKI_READ_PASSWORD_FILE" in compose
+    assert "fuseki_read_password" in compose
     assert "zai_api_key" in compose
     assert ".env.prod.local" in init_sh
     assert "inferra_jwt_secret" in init_sh
     assert 'generate_secret "redis_password"' in init_sh
+    assert 'generate_secret "fuseki_read_password"' in init_sh
     assert ".env.prod.local" in init_ps1
     assert "New-SecretFile" in init_ps1
     assert 'New-SecretFile "redis_password"' in init_ps1
+    assert 'New-SecretFile "fuseki_read_password"' in init_ps1
 
 
 def test_container_hardening_artifacts_are_enforced():
     dockerfile = read_text("Dockerfile")
     compose = read_text("docker-compose.yml")
 
-    assert "FROM python:3.10-slim AS builder" in dockerfile
+    assert "FROM python:3.10-slim@sha256:" in dockerfile
+    assert "AS builder" in dockerfile
     assert "USER inferra" in dockerfile
     assert "HEALTHCHECK" in dockerfile
     assert "read_only: true" in compose

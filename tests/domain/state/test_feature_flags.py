@@ -10,7 +10,13 @@ session termination).
 
 import pytest
 
-from src.domain.state.feature_flags import FeatureFlags, reset_feature_flags
+from src.domain.state.feature_flags import (
+    FeatureFlags,
+    feature_flags_from_snapshot,
+    normalize_ontology_flag_overrides,
+    normalize_ontology_profile,
+    reset_feature_flags,
+)
 
 
 class TestFeatureFlagStickiness:
@@ -54,8 +60,17 @@ class TestFeatureFlagStickiness:
             "modular_imports": False,
             "hybrid_orchestrator": False,
             "async_post_reasoning": False,
+            "generate_post_reasoning_ttl": False,
             "prov_o_trace": False,
             "enriched_api": False,
+            "ontology_advisory_enabled": False,
+            "ontology_auto_answer": False,
+            "ontology_auto_answer_confidence_threshold": 0.85,
+            "ontology_reasoning": False,
+            "ontology_reasoning_confidence_threshold": 0.85,
+            "ontology_reasoning_min_hierarchy_depth": 1,
+            "ontology_reasoning_max_closure_depth": 10,
+            "ontology_question_strategy": False,
             "redis_session_store": False,
             "llm_enhancements": False,
             "strict_port_contracts": True,
@@ -126,3 +141,98 @@ class TestFeatureFlagStickiness:
         assert report["legacy_iterate"]["ready"] is False
         assert report["legacy_iterate"]["expected"] is False
         assert report["ml_optimized_dfs"]["ready"] is True
+
+    def test_ontology_advisory_flag_defaults_disabled(self):
+        flags = FeatureFlags()
+        assert flags.ontology_advisory_enabled is False
+
+    def test_ontology_advisory_flag_can_be_enabled(self):
+        flags = FeatureFlags(ontology_advisory_enabled=True)
+        assert flags.ontology_advisory_enabled is True
+
+    def test_ontology_auto_answer_defaults_disabled(self):
+        flags = FeatureFlags()
+        assert flags.ontology_auto_answer is False
+        assert flags.ontology_auto_answer_confidence_threshold == 0.85
+
+    def test_ontology_auto_answer_can_be_enabled(self):
+        flags = FeatureFlags(
+            ontology_auto_answer=True,
+            ontology_auto_answer_confidence_threshold=0.95,
+        )
+        assert flags.ontology_auto_answer is True
+        assert flags.ontology_auto_answer_confidence_threshold == 0.95
+
+    def test_ontology_reasoning_defaults_disabled(self):
+        flags = FeatureFlags()
+        assert flags.ontology_reasoning is False
+        assert flags.ontology_reasoning_confidence_threshold == 0.85
+        assert flags.ontology_reasoning_min_hierarchy_depth == 1
+        assert flags.ontology_reasoning_max_closure_depth == 10
+        assert flags.ontology_question_strategy is False
+
+    def test_ontology_reasoning_can_be_enabled(self):
+        flags = FeatureFlags(
+            ontology_reasoning=True,
+            ontology_reasoning_confidence_threshold=0.9,
+            ontology_reasoning_min_hierarchy_depth=2,
+            ontology_reasoning_max_closure_depth=8,
+            ontology_question_strategy=True,
+        )
+        assert flags.ontology_reasoning is True
+        assert flags.ontology_reasoning_confidence_threshold == 0.9
+        assert flags.ontology_reasoning_min_hierarchy_depth == 2
+        assert flags.ontology_reasoning_max_closure_depth == 8
+        assert flags.ontology_question_strategy is True
+
+    def test_ontology_profile_reasoning_maps_to_expected_flags(self):
+        flags, profile = feature_flags_from_snapshot(
+            FeatureFlags().snapshot(),
+            ontology_profile="reasoning",
+        )
+
+        assert profile == "reasoning"
+        assert flags.ontology_advisory_enabled is True
+        assert flags.ontology_auto_answer is True
+        assert flags.ontology_reasoning is True
+        assert flags.ontology_question_strategy is False
+
+    def test_ontology_profile_full_semantic_pilot_enables_all_ontology_modes(self):
+        flags, profile = feature_flags_from_snapshot(
+            FeatureFlags().snapshot(),
+            ontology_profile="full-semantic-pilot",
+        )
+
+        assert profile == "full_semantic_pilot"
+        assert flags.ontology_advisory_enabled is True
+        assert flags.ontology_auto_answer is True
+        assert flags.ontology_reasoning is True
+        assert flags.ontology_question_strategy is True
+
+    def test_invalid_ontology_profile_is_rejected(self):
+        with pytest.raises(ValueError, match="Unsupported ontology_profile"):
+            normalize_ontology_profile("surprise_mode")
+
+    def test_ontology_flag_overrides_can_create_custom_case_policy(self):
+        flags, profile = feature_flags_from_snapshot(
+            FeatureFlags().snapshot(),
+            ontology_profile="reasoning",
+            ontology_flags={"auto_answer_enabled": False},
+        )
+
+        assert profile == "custom"
+        assert flags.ontology_advisory_enabled is True
+        assert flags.ontology_auto_answer is False
+        assert flags.ontology_reasoning is True
+        assert flags.ontology_question_strategy is False
+
+    def test_invalid_ontology_flag_override_is_rejected(self):
+        with pytest.raises(ValueError, match="Unsupported ontology flag override"):
+            normalize_ontology_flag_overrides({"surprise": True})
+
+    def test_question_strategy_enabled_env_name_is_supported(self, monkeypatch):
+        monkeypatch.setenv("INFERRA_ONTOLOGY_QUESTION_STRATEGY_ENABLED", "true")
+
+        flags = FeatureFlags()
+
+        assert flags.ontology_question_strategy is True

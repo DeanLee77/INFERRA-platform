@@ -50,9 +50,11 @@ app/
 # Environment
 .env
 .env.local
+.paperclip-artifacts/
 
-# Lock files (using pyproject.toml only)
+# Lock files
 *.lock
+!uv.lock
 Pipfile*
 
 # docs

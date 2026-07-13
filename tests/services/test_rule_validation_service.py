@@ -50,6 +50,10 @@ class TestValidationEntry:
             "code": "CODE",
             "message": "message",
             "waiver_id": "CODE:var",
+            "severity": "error",
+            "source": "deterministic",
+            "blocking": False,
+            "review_required": False,
             "line": 5,
             "node_name": "var",
         }
@@ -59,6 +63,9 @@ class TestValidationEntry:
         d = err.to_dict()
         assert "line" not in d
         assert "node_name" not in d
+        assert "category" not in d
+        assert "reason" not in d
+        assert "review_item_id" not in d
         assert d["waiver_id"] == "CODE"
 
     def test_waiver_id_uses_line_when_node_name_missing(self):
@@ -89,6 +96,8 @@ class TestValidationEntry:
         d = w.to_dict()
         assert "line" not in d
         assert "node_name" not in d
+        assert d["severity"] == "warning"
+        assert d["source"] == "deterministic"
 
 
 class TestValidationResult:
@@ -185,6 +194,196 @@ class TestSyntaxValidation:
         )
         result = service.validate(rule_text)
         assert not any(e.code == "DUPLICATE_DECLARATION" for e in result.errors)
+
+    def test_collection_iteration_with_size_from_is_valid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND ALL period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is True
+        assert not result.errors
+
+    def test_exact_collection_iteration_with_size_from_is_valid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND EXACTLY 2 period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is True
+        assert not result.errors
+
+    def test_at_least_collection_iteration_with_size_from_is_valid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND AT LEAST 2 period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is True
+        assert not result.errors
+
+    def test_at_most_collection_iteration_with_size_from_is_valid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND AT MOST 2 period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is True
+        assert not result.errors
+
+    def test_legacy_iterate_list_of_syntax_is_invalid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND ALL period ITERATE: LIST OF service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is False
+        assert any(error.code == "INVALID_ITERATE_SYNTAX" for error in result.errors)
+
+    def test_bare_number_iteration_quantifier_is_invalid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND 2 period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is False
+        assert any(error.code == "INVALID_ITERATE_SYNTAX" for error in result.errors)
+
+    def test_exact_iteration_alias_is_invalid(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND EXACT 2 period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is False
+        assert any(error.code == "INVALID_ITERATE_SYNTAX" for error in result.errors)
+
+    def test_field_list_of_option_binding_is_valid_when_options_declared(self, service):
+        rule_text = (
+            'FIXED DVA service type options AS LIST\n'
+            '    ITEM operational service\n'
+            '    ITEM peacekeeping service\n'
+            '\n'
+            'TYPE service period\n'
+            '    FIELD service type AS LIST OF DVA service type options\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND SOME period IN service history\n'
+            '        AND period.service type IS IN LIST: DVA service type options\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is True
+        assert not result.errors
+
+    def test_field_list_of_option_binding_requires_declared_options(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD service type AS LIST OF DVA service type options\n'
+            '\n'
+            'INPUT number of service periods AS NUMBER\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND SOME period IN service history\n'
+            '        AND period.service type = "operational service"\n'
+        )
+        result = service.validate(rule_text)
+        assert any(
+            e.code == "UNDECLARED_REFERENCE"
+            and e.node_name == "DVA service type options"
+            for e in result.errors
+        )
+
+    def test_same_level_and_or_mixing_warns(self, service):
+        rule_text = (
+            'INPUT person served AS BOOLEAN\n'
+            'INPUT person discharged AS BOOLEAN\n'
+            'INPUT person has reserve service AS BOOLEAN\n'
+            '\n'
+            'person qualifies\n'
+            '    AND person served\n'
+            '    OR person discharged\n'
+            '    OR person has reserve service\n'
+        )
+        result = service.validate(rule_text)
+        assert result.valid is True
+        assert any(w.code == "MIXED_AND_OR_CHILDREN" for w in result.warnings)
+
+    def test_collection_size_from_requires_declared_count(self, service):
+        rule_text = (
+            'TYPE service period\n'
+            '    FIELD period of service in days AS NUMBER\n'
+            '\n'
+            'INPUT service history AS COLLECTION OF service period\n'
+            '    SIZE FROM number of service periods\n'
+            '\n'
+            'service history ok\n'
+            '    AND ALL period IN service history\n'
+            '        AND period.period of service in days >= 30\n'
+        )
+        result = service.validate(rule_text)
+        assert any(e.code == "UNDECLARED_REFERENCE" for e in result.errors)
 
     def test_fixed_list_with_is(self, service):
         rule_text = (
@@ -581,6 +780,106 @@ class TestExtractValueType:
     def test_unknown_type(self, service):
         result = service._extract_value_type("INPUT x AS FOOBAR", "INPUT")
         assert result == "UNKNOWN"
+
+
+# =============================================================================
+# Ontology Advisory Semantic Tests
+# =============================================================================
+
+class TestOntologyAdvisoryValidation:
+    def test_semantic_warnings_include_severity_reason_and_review_queue(self, service):
+        rule_text = (
+            "INPUT benefit age AS FOOBAR\n"
+            "INPUT unused income AS NUMBER\n"
+            "\n"
+            "benefit eligibility\n"
+            "    AND benefit age > missing threshold\n"
+            "    AND NOT conflicting status\n"
+            "\n"
+            "Benefit Eligibility\n"
+            "    AND benefit age > 18\n"
+        )
+
+        result = service.validate(rule_text)
+
+        by_code = {warning.code: warning for warning in result.warnings}
+        assert by_code["ONTOLOGY_DECLARATION_TYPE_UNMAPPED"].severity == "high-risk"
+        assert by_code["ONTOLOGY_DECLARATION_TYPE_UNMAPPED"].source == "ontology"
+        assert by_code["ONTOLOGY_DECLARATION_TYPE_UNMAPPED"].review_required is True
+        assert by_code["ONTOLOGY_STALE_REFERENCE_CANDIDATE"].severity == "high-risk"
+        assert by_code["ONTOLOGY_DEPENDENCY_POLARITY_REVIEW"].category == "dependencies"
+        assert by_code["ONTOLOGY_ORPHAN_CONCEPT"].severity == "info"
+        assert by_code["ONTOLOGY_LEGAL_CONCEPT_UNANCHORED"].category == "legal_concepts"
+        assert by_code["ONTOLOGY_CONTRADICTORY_LABEL"].severity == "high-risk"
+        assert result.review_queue
+        assert all(item.approval_state == "candidate" for item in result.review_queue)
+        assert all(item.requires_rule_approval for item in result.review_queue)
+        assert all(item.mutates_assets is False for item in result.review_queue)
+        assert all(item.alters_deterministic_outcome is False for item in result.review_queue)
+
+    def test_statutory_sections_definitions_and_import_markers_are_advisory(self, service):
+        rule_text = (
+            "# Imported module: dva_common\n"
+            "INPUT service under section 7 AS BOOLEAN\n"
+            "FIXED definition of veteran IS true\n"
+            "\n"
+            "benefit eligibility means accepted under section 7\n"
+            "    AND service under section 7\n"
+        )
+
+        result = service.validate(rule_text)
+
+        codes = {warning.code for warning in result.warnings}
+        assert "ONTOLOGY_IMPORT_SCOPE_REVIEW" in codes
+        assert "ONTOLOGY_STATUTORY_SECTION_REFERENCE" in codes
+        assert "ONTOLOGY_STATUTORY_DEFINITION_REFERENCE" in codes
+        assert all(not warning.blocking for warning in result.warnings if warning.source == "ontology")
+
+    def test_high_risk_semantic_warning_blocks_only_when_policy_configures_it(self):
+        rule_text = (
+            "INPUT benefit age AS FOOBAR\n"
+            "benefit eligibility\n"
+            "    AND benefit age > 18\n"
+        )
+        advisory_service = RuleValidationService()
+        blocking_service = RuleValidationService(
+            ontology_blocking_warning_codes={"ONTOLOGY_DECLARATION_TYPE_UNMAPPED"}
+        )
+
+        advisory_result = advisory_service.validate(rule_text)
+        blocking_result = blocking_service.validate(rule_text)
+
+        assert advisory_result.valid is True
+        assert not advisory_result.errors
+        assert blocking_result.valid is False
+        assert any(
+            warning.code == "ONTOLOGY_DECLARATION_TYPE_UNMAPPED" and warning.blocking
+            for warning in blocking_result.warnings
+        )
+        assert any(
+            error.code == "BLOCKING_ONTOLOGY_DECLARATION_TYPE_UNMAPPED"
+            and error.reason == "policy_configured_blocking"
+            for error in blocking_result.errors
+        )
+
+    def test_review_queue_serialization_preserves_no_auto_mutation_contract(self, service):
+        rule_text = (
+            "INPUT benefit age AS FOOBAR\n"
+            "benefit eligibility\n"
+            "    AND benefit age > 18\n"
+        )
+
+        payload = service.validate(rule_text).to_dict()
+
+        assert payload["review_queue"]
+        assert payload["warnings"][0]["source"] in {"deterministic", "ontology"}
+        assert all(item["approval_state"] == "candidate" for item in payload["review_queue"])
+        assert all(item["requires_rule_approval"] for item in payload["review_queue"])
+        assert all(item["mutates_assets"] is False for item in payload["review_queue"])
+        assert all(
+            item["alters_deterministic_outcome"] is False
+            for item in payload["review_queue"]
+        )
 
 
 # =============================================================================

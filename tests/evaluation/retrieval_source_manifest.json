@@ -1,0 +1,128 @@
+{
+  "manifestVersion": "graphrag-retrieval-source-manifest-0.1",
+  "snapshot": {
+    "id": "inferra-reference-fixture-corpus-2026-05-31",
+    "capturedAt": "2026-05-31T00:00:00Z",
+    "repositoryRef": "feature/enhancement@aa0c857514a1593eecb19cd7a9fac8ff26a6b243",
+    "freshnessPolicy": {
+      "maxSnapshotAgeDays": 45,
+      "staleAfter": "2026-07-15",
+      "requiresManualRefreshWhen": [
+        "docs/reference/examples changes",
+        "active documentation source-of-truth files change",
+        "GraphRAG retrieval authority policy changes"
+      ]
+    }
+  },
+  "authorityPolicy": {
+    "mode": "evaluation_only_non_authoritative",
+    "allowedUses": [
+      "offline retrieval evaluation",
+      "explainability fixture design",
+      "future GraphRAG regression baselines"
+    ],
+    "forbiddenUses": [
+      "asserted fact creation",
+      "inferred fact creation",
+      "production answer authority",
+      "live model context injection"
+    ]
+  },
+  "requiredProvenanceFields": [
+    "source_id",
+    "snapshot_version",
+    "source_path",
+    "extraction_path",
+    "content_sha256",
+    "retrieved_at",
+    "rank",
+    "score",
+    "matched_terms",
+    "authority"
+  ],
+  "sources": [
+    {
+      "sourceId": "reference.examples.drca.part_i.sections_1_to_13a",
+      "snapshotVersion": "C2025C00670.latest.text.fixture.2026-05-31",
+      "path": "docs/reference/examples/drca_part_i_sections_1_to_13a.txt",
+      "sourceType": "reference_rule_example",
+      "extractionPath": "plain_text:full_file#sections=1-13A",
+      "freshnessPolicy": {
+        "maxSnapshotAgeDays": 45,
+        "freshnessBasis": "manual fixture snapshot from embedded source comments"
+      },
+      "expectedProvenanceFields": [
+        "reference_url",
+        "section",
+        "original_text",
+        "rule_node"
+      ]
+    },
+    {
+      "sourceId": "reference.examples.drca.part_ii.sections_14_to_33",
+      "snapshotVersion": "C2025C00670.latest.text.fixture.2026-05-31",
+      "path": "docs/reference/examples/drca_part_ii_sections_14_to_33.txt",
+      "sourceType": "reference_rule_example",
+      "extractionPath": "plain_text:full_file#sections=14-33",
+      "freshnessPolicy": {
+        "maxSnapshotAgeDays": 45,
+        "freshnessBasis": "manual fixture snapshot from embedded source comments"
+      },
+      "expectedProvenanceFields": [
+        "reference_url",
+        "section",
+        "original_text",
+        "rule_node"
+      ]
+    },
+    {
+      "sourceId": "reference.examples.mrca.chapter_11.sections_404_to_440",
+      "snapshotVersion": "C2004A01285.series.fixture.2026-05-31",
+      "path": "docs/reference/examples/mrca_chapter_11_sections_404_to_440.txt",
+      "sourceType": "reference_rule_example",
+      "extractionPath": "plain_text:full_file#sections=404-440",
+      "freshnessPolicy": {
+        "maxSnapshotAgeDays": 45,
+        "freshnessBasis": "manual fixture snapshot from embedded source comments"
+      },
+      "expectedProvenanceFields": [
+        "reference_url",
+        "section",
+        "original_text",
+        "rule_node"
+      ]
+    },
+    {
+      "sourceId": "active_docs.roadmap",
+      "snapshotVersion": "active-docs-roadmap.2026-05-16",
+      "path": "docs/ROADMAP.md",
+      "sourceType": "active_documentation_source_of_truth",
+      "extractionPath": "markdown:full_file#optional-ai-and-graphrag-track",
+      "freshnessPolicy": {
+        "maxSnapshotAgeDays": 45,
+        "freshnessBasis": "active roadmap last-updated header"
+      },
+      "expectedProvenanceFields": [
+        "document_status",
+        "last_updated",
+        "section_heading"
+      ]
+    },
+    {
+      "sourceId": "active_docs.implementation_status",
+      "snapshotVersion": "active-docs-implementation-status.2026-05-16",
+      "path": "docs/IMPLEMENTATION_STATUS.md",
+      "sourceType": "active_documentation_source_of_truth",
+      "extractionPath": "markdown:full_file#current-architecture-truth",
+      "freshnessPolicy": {
+        "maxSnapshotAgeDays": 45,
+        "freshnessBasis": "active implementation status last-updated header"
+      },
+      "expectedProvenanceFields": [
+        "document_status",
+        "last_updated",
+        "section_heading"
+      ]
+    }
+  ]
+}

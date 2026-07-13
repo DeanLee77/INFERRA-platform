@@ -17,6 +17,7 @@ import pytest
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
 from src.domain.graph.dependency_type import DependencyType
+from src.domain.iterate.iteration_engine import IterationEngine
 from src.domain.nodes.iterate_context import IterateContext
 from src.domain.nodes.iterate_line import IterateLine
 from src.domain.nodes.line_type import LineType
@@ -404,7 +405,43 @@ def test_evaluate_quantifier_some():
 def test_evaluate_quantifier_numeric():
     line = _make_iterate_line(quantifier="2")
     assert line._evaluate_quantifier(2, 3).get_value() is True
+    assert line._evaluate_quantifier(3, 3).get_value() is True
     assert line._evaluate_quantifier(1, 3).get_value() is False
+
+
+def test_evaluate_quantifier_at_least_numeric():
+    line = _make_iterate_line(quantifier="AT LEAST 2")
+    assert line._evaluate_quantifier(2, 3).get_value() is True
+    assert line._evaluate_quantifier(3, 3).get_value() is True
+    assert line._evaluate_quantifier(1, 3).get_value() is False
+
+
+def test_evaluate_quantifier_at_most_numeric():
+    line = _make_iterate_line(quantifier="AT MOST 2")
+    assert line._evaluate_quantifier(2, 3).get_value() is True
+    assert line._evaluate_quantifier(1, 3).get_value() is True
+    assert line._evaluate_quantifier(3, 3).get_value() is False
+
+
+def test_evaluate_quantifier_exactly_numeric():
+    line = _make_iterate_line(quantifier="EXACTLY 2")
+    assert line._evaluate_quantifier(2, 3).get_value() is True
+    assert line._evaluate_quantifier(3, 3).get_value() is False
+    assert line._evaluate_quantifier(1, 3).get_value() is False
+
+
+def test_evaluate_quantifier_exact_numeric_synonym():
+    line = _make_iterate_line(quantifier="EXACT 2")
+    assert line._evaluate_quantifier(2, 3).get_value() is True
+    assert line._evaluate_quantifier(3, 3).get_value() is False
+
+
+def test_iteration_engine_numeric_quantifiers_match_iterate_line_semantics():
+    assert IterationEngine._evaluate_quantifier(3, 5, "2").get_value() is True
+    assert IterationEngine._evaluate_quantifier(3, 5, "AT LEAST 2").get_value() is True
+    assert IterationEngine._evaluate_quantifier(3, 5, "AT MOST 2").get_value() is False
+    assert IterationEngine._evaluate_quantifier(3, 5, "EXACTLY 2").get_value() is False
+    assert IterationEngine._evaluate_quantifier(2, 5, "EXACT 2").get_value() is True
 
 
 def test_evaluate_quantifier_invalid_string():
@@ -427,6 +464,48 @@ def test_initialisation_sets_fields():
     assert line._IterateLine__number_of_target == "ALL"
     assert line._variable_name == "services"
     assert line._IterateLine__given_list_name == "L"
+
+
+def test_initialisation_sets_exactly_quantifier_fields_from_text():
+    line = ConcreteIterateLine()
+    from src.domain.tokens import Tokenizer
+
+    line._initialisation(
+        "EXACTLY 3 period ITERATE: LIST OF service history",
+        Tokenizer.get_tokens("EXACTLY 3 period ITERATE: LIST OF service history"),
+    )
+
+    assert line._IterateLine__number_of_target == "EXACTLY 3"
+    assert line._variable_name == "period"
+    assert line._IterateLine__given_list_name == "service history"
+
+
+def test_initialisation_sets_at_least_quantifier_fields_from_text():
+    line = ConcreteIterateLine()
+    from src.domain.tokens import Tokenizer
+
+    line._initialisation(
+        "AT LEAST 3 period ITERATE: LIST OF service history",
+        Tokenizer.get_tokens("AT LEAST 3 period ITERATE: LIST OF service history"),
+    )
+
+    assert line._IterateLine__number_of_target == "AT LEAST 3"
+    assert line._variable_name == "period"
+    assert line._IterateLine__given_list_name == "service history"
+
+
+def test_initialisation_sets_at_most_quantifier_fields_from_text():
+    line = ConcreteIterateLine()
+    from src.domain.tokens import Tokenizer
+
+    line._initialisation(
+        "AT MOST 3 period ITERATE: LIST OF service history",
+        Tokenizer.get_tokens("AT MOST 3 period ITERATE: LIST OF service history"),
+    )
+
+    assert line._IterateLine__number_of_target == "AT MOST 3"
+    assert line._variable_name == "period"
+    assert line._IterateLine__given_list_name == "service history"
 
 
 # ===================================================================

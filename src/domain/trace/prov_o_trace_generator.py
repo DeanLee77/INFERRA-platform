@@ -1,3 +1,4 @@
+import json
 from typing import Optional
 from urllib.parse import quote
 
@@ -31,6 +32,9 @@ class ProvOTraceGenerator:
         graph.add((session_uri, inf.ruleName, Literal(ctx.rule_name)))
         graph.add((session_uri, inf.target, Literal(ctx.target)))
         graph.add((session_uri, inf.iterationCount, Literal(ctx.iteration_count)))
+        graph.add((session_uri, inf.ontologyProfile, Literal(ctx.ontology_profile)))
+        graph.add((session_uri, inf.ontologyProfileSource, Literal(ctx.ontology_profile_source)))
+        graph.add((session_uri, inf.ontologyFlags, Literal(json.dumps(ctx.ontology_flags, sort_keys=True))))
 
         fact_store = ctx.fact_store
         working_memory = fact_store.get_unified_view()
@@ -43,6 +47,25 @@ class ProvOTraceGenerator:
             sources = sorted(source.value for source in fact_store.get_fact_sources(name))
             for source in sources:
                 graph.add((fact_uri, inf.factSource, Literal(source)))
+
+        for index, event in enumerate(ctx.ontology_materialization_trace):
+            event_uri = URIRef(inf[f"ontology-materialization/{self._safe(ctx.session_id)}/{index}"])
+            graph.add((event_uri, RDF.type, inf.OntologyMaterialization))
+            graph.add((event_uri, inf.status, Literal(str(event.get("status")))))
+            graph.add((event_uri, inf.factName, Literal(str(event.get("factName")))))
+            graph.add((event_uri, inf.sourceFactName, Literal(str(event.get("sourceFactName")))))
+            graph.add((event_uri, inf.sourceGraphUri, Literal(str(event.get("sourceGraphUri")))))
+            graph.add((event_uri, inf.ontologySnapshotRef, Literal(str(event.get("ontologySnapshotRef")))))
+            graph.add((event_uri, inf.ontologySnapshotHash, Literal(str(event.get("ontologySnapshotHash")))))
+            graph.add((event_uri, inf.confidence, Literal(str(event.get("confidence")))))
+            graph.add((event_uri, inf.derivationRule, Literal(str(event.get("derivationRule")))))
+            graph.add((event_uri, inf.derivationPath, Literal(str(event.get("derivationPath")))))
+            graph.add((event_uri, inf.materializedInference, Literal(str(event.get("materializedInference")))))
+            if event.get("abstentionCause") is not None:
+                graph.add((event_uri, inf.abstentionCause, Literal(str(event.get("abstentionCause")))))
+            if event.get("contradictionCause") is not None:
+                graph.add((event_uri, inf.contradictionCause, Literal(str(event.get("contradictionCause")))))
+            graph.add((event_uri, prov.wasGeneratedBy, session_uri))
 
         fmt = "json-ld" if output_format in {"json-ld", "jsonld"} else "turtle"
         result = graph.serialize(format=fmt)

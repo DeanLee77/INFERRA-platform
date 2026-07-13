@@ -194,6 +194,13 @@ PostgreSQL, and OpenTelemetry collector.
 docker compose up -d --build
 ```
 
+The graph explorer is optional and excluded from the default rebuild because it
+uses the adjacent `../graph-explorer` checkout. Start it only when needed:
+
+```powershell
+docker compose --profile explorer up -d --build explorer
+```
+
 Check service health:
 
 ```powershell
@@ -224,6 +231,10 @@ Default local Grafana login:
 | --- | --- |
 | `admin` | `admin` |
 
+These credentials, along with the local Redis, PostgreSQL, and Fuseki defaults,
+are for the loopback-bound developer stack only. Run `secrets/init-secrets.*`
+and `docker-compose.prod.yml` before any shared-network or production rehearsal.
+
 Provisioned dashboard:
 
 | Dashboard | What It Shows |
@@ -244,18 +255,25 @@ include:
 | Variable | Purpose | Typical Local Value |
 | --- | --- | --- |
 | `SQLALCHEMY_DATABASE_URI` | PostgreSQL connection string | `postgresql://inferra:inferra@localhost:5432/inferra` |
+| `AEGIS_SQLALCHEMY_DATABASE_URI` | AEGIS rule-store PostgreSQL connection string; must target a distinct database unless `AEGIS_ALLOW_SHARED_DATABASE=true` is set for explicit test/demo use | `postgresql://inferra:inferra@localhost:5432/inferra_aegis` |
 | `REDIS_URL` | Redis connection for session store | `redis://localhost:6379/0` |
 | `CELERY_BROKER_URL` | Celery broker | `redis://localhost:6379/0` |
 | `CELERY_RESULT_BACKEND` | Celery result backend | `redis://localhost:6379/1` |
 | `FUSEKI_URL` | Fuseki dataset URL | `http://localhost:3030/inferra` |
-| `FUSEKI_USER` | Fuseki username | `admin` |
-| `FUSEKI_PASSWORD` | Fuseki password | `admin` |
-| `INFERRA_AUTH_ENABLED` | Enable API key auth | `false` for local, `true` for protected environments |
+| `FUSEKI_USER` | Fuseki write/admin username for worker sync and update paths | `admin` |
+| `FUSEKI_PASSWORD` | Fuseki write/admin password; keep out of the API service in production rehearsal | `admin` |
+| `FUSEKI_READ_USER` | Fuseki read-only username for ontology chat and graph query endpoints | `inferra_reader` |
+| `FUSEKI_READ_PASSWORD` | Fuseki read-only password; must be distinct from `FUSEKI_PASSWORD` outside throwaway local dev | `inferra_read` |
+| `INFERRA_AUTH_ENABLED` | Enable API key/JWT auth; required when `INFERRA_ENV=production` | `true` for Docker Compose and protected environments |
 | `INFERRA_API_KEY` | API key when auth is enabled | Set to a secret value |
 | `INFERRA_API_KEY_OWNER_ID` | Owner identity assigned to API-key requests | `api-key` or service account ID |
+| `INFERRA_API_KEY_SCOPES` | Comma-separated API-key scopes; keep browser-facing proxy keys read-only for LLM configuration and reserve `llm:write` for a direct authenticated operator/admin path | `read,llm:read` |
 | `INFERRA_JWT_SECRET` | HS256 JWT verification secret when bearer JWT auth is used | Set to a secret value |
 | `INFERRA_CSRF_PROTECTION` | Require CSRF token on mutating authenticated requests | `false` locally; `true` for browser clients |
 | `INFERRA_CSRF_TOKEN` | Static CSRF token alternative to double-submit cookie | Set to a secret value when enabled |
+| `INFERRA_CORS_ALLOWED_ORIGINS` | Comma-separated browser origins allowed by CORS; wildcard is rejected in production | Explicit frontend origins |
+| `INFERRA_CORS_ALLOW_CREDENTIALS` | Allow credentialed CORS only for explicit origins | `false` |
+| `INFERRA_LLM_ENDPOINT_ALLOWLIST` | Optional comma-separated host/origin allowlist for sanctioned private/internal LLM gateways; unsafe loopback, link-local, metadata, and RFC1918/private targets are otherwise rejected | Empty for public HTTPS provider endpoints |
 | `INFERRA_OBSERVABILITY_ENABLED` | Enable observability integrations | `true` in compose |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTel collector endpoint | `http://localhost:4317` |
 
@@ -266,7 +284,7 @@ Feature flags use the `INFERRA_` prefix. Examples:
 | `INFERRA_USE_HYPERGRAPH` | Use graph-native dependency runtime; defaults to `true` |
 | `INFERRA_LEGACY_ITERATE` | Keep legacy iterate behavior enabled |
 | `INFERRA_LAYERED_MEMORY` | Use layered fact store |
-| `INFERRA_ML_OPTIMIZED_DFS` | Enable history-aware DFS ordering |
+| `INFERRA_ML_OPTIMIZED_DFS` | Enable history-aware DFS ordering; normal sessions use stored history for topological ordering when available |
 | `INFERRA_ASYNC_SYNC_ENABLED` | Enable async rule sync pipeline |
 | `INFERRA_MODULAR_IMPORTS` | Enable modular import resolution |
 | `INFERRA_REDIS_SESSION_STORE` | Use Redis-backed sessions |
@@ -504,15 +522,24 @@ what evidence is missing, and which rule path was followed.
 
 | Concern | Recommendation |
 | --- | --- |
-| Authentication | Enable `INFERRA_AUTH_ENABLED=true` and set `INFERRA_API_KEY` or `INFERRA_JWT_SECRET` before exposing non-health endpoints |
+| Authentication | Production startup fails closed unless `INFERRA_AUTH_ENABLED=true` and either `INFERRA_API_KEY` or `INFERRA_JWT_SECRET` is configured |
+| Authorization | Authentication only grants read identity; configure `rules:write`, `ontology:write`, `aegis:write`, `files:convert`, or `llm:read` scopes as needed |
+| CORS | Configure explicit `INFERRA_CORS_ALLOWED_ORIGINS`; production rejects wildcard origins and credentialed wildcard behavior is disabled |
 | Secrets | Use `.env.example` only as a template; place real secrets in a platform secret manager before production traffic |
 | Redis | Treat Redis as operational state, not the durable source of truth |
 | PostgreSQL | Use managed backups, migrations, and least-privilege credentials |
 | Fuseki | Protect admin access and define dataset backup/restore procedures |
 | LLM usage | Keep LLM features disabled until provider, model, budget, and evaluation policy are approved |
+| Editable AEGIS LLM keys | Set `AEGIS_LLM_API_KEY_ENCRYPTION_KEY` or `_FILE`; keep old keys in `AEGIS_LLM_API_KEY_ENCRYPTION_PREVIOUS_KEYS` during rotation until stored rows have been reread or rewritten |
 | File uploads | Keep size limits, file type validation, and sandboxing strict |
 | Observability | Keep dashboards and Prometheus alert rules live; tune thresholds and notification routing before production traffic |
 | Rule changes | Require validation, versioning, review, and rollback paths |
+
+AEGIS runtime provider keys are encrypted before persistence and decrypted only
+for runtime client resolution. Database backups and replicas remain sensitive;
+after suspected storage exposure, rotate the provider key, rotate the encryption
+key, retain the previous encryption key only for migration, and verify affected
+rows have been rewritten before removing old-key access.
 
 ## Future Roadmap
 

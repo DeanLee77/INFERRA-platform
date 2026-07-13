@@ -13,6 +13,7 @@ from src.domain.nodes.node_set import NodeSet
 from src.domain.nodes.record import HistoryRecord
 from src.domain.rule_parser.i_line_reader import ILineReader
 from src.domain.rule_parser.i_scan_feeder import IScanFeeder
+from src.domain.rule_parser.iterate_syntax import canonicalise_iterate_syntax
 from src.infrastructure.logging_config import get_logger
 
 # Protected Module-Level Logger (Access Level: Protected)
@@ -112,17 +113,10 @@ class RuleSetScanner:
                             break
                         
                         parent = parent_stack[-1]
-                        temp_line_trimmed = re.sub(
-                            r"^(?:(?:OR|AND)\b\s*)?"
-                            r"(?:(?:MANDATORY|OPTIONALLY|POSSIBLY)\b\s*)?"
-                            r"(?:(?:NOT|KNOWN)\b\s*)*"
-                            r"(?:(?:NEEDS|WANTS)\b\s*)?",
-                            "",
-                            line_trimmed.strip(),
-                            flags=re.IGNORECASE,
-                        ).strip()
-                        
-                        temp_first_keywords_group = line_trimmed.replace(temp_line_trimmed, "").strip()
+                        temp_first_keywords_group, raw_child_text = self._split_dependency_prefix(
+                            line_trimmed.strip()
+                        )
+                        temp_line_trimmed = canonicalise_iterate_syntax(raw_child_text)
                         parent_stack.append(temp_line_trimmed.strip())
                         
                         # Handle indented child
@@ -131,7 +125,7 @@ class RuleSetScanner:
                 else:
                     # Does not begin with whitespace - is a parent
                     parent_stack.clear()
-                    parent = line_trimmed
+                    parent = canonicalise_iterate_syntax(line_trimmed)
                     self.__scan_feeder.handle_parent(parent, line_number, new_meta_data)
                     parent_stack.append(parent)
                 
@@ -206,3 +200,43 @@ class RuleSetScanner:
             if len(parent_stack) > 0:
                 parent_stack.pop()
         return parent_stack
+
+    def _split_dependency_prefix(self, line_text: str) -> tuple[str, str]:
+        """
+        Split dependency keywords from a child line without consuming NOT ALL.
+
+        `NOT` can be a dependency negation (`AND NOT x`) or part of an
+        iteration quantifier (`AND NOT ALL item IN collection`). The scanner
+        keeps the latter with the rule text so IterateLine receives the
+        intended quantifier.
+        """
+        remaining = line_text.strip()
+        prefix_parts = []
+
+        for pattern in (
+            r"^(OR|AND)\b\s*",
+            r"^(MANDATORY|OPTIONALLY|POSSIBLY)\b\s*",
+        ):
+            match = re.match(pattern, remaining)
+            if match:
+                prefix_parts.append(match.group(1))
+                remaining = remaining[match.end():].strip()
+
+        while True:
+            match = re.match(r"^(NOT|KNOWN)\b\s*", remaining)
+            if match is None:
+                break
+            if match.group(1).upper() == "NOT" and re.match(
+                r"^NOT\s+(ALL|NONE)\b",
+                remaining,
+            ):
+                break
+            prefix_parts.append(match.group(1))
+            remaining = remaining[match.end():].strip()
+
+        match = re.match(r"^(NEEDS|WANTS)\b\s*", remaining)
+        if match:
+            prefix_parts.append(match.group(1))
+            remaining = remaining[match.end():].strip()
+
+        return " ".join(prefix_parts), remaining

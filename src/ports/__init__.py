@@ -3,6 +3,21 @@ from .session_store_port import SessionStorePort
 from .rule_repository_port import RuleRepositoryPort
 from .llm_client_port import LLMClientPort
 from .llm_orchestrator_port import LLMOrchestratorPort
+from .provider_verification_port import (
+    AbnLookupPort,
+    AhpraVerificationPort,
+    HposProviderVerificationPort,
+    ProviderLLMEvidencePort,
+)
+
+__all__ = [
+    "AbnLookupPort",
+    "AhpraVerificationPort",
+    "HposProviderVerificationPort",
+    "LLMClientPort",
+    "LLMOrchestratorPort",
+    "ProviderLLMEvidencePort",
+]
 from .dependency_graph_port import DependencyGraphPort
 from .iteration_port import IterationPort
 from .question_strategy_port import QuestionStrategyPort

@@ -12,6 +12,7 @@ tagging. Respects truth-maintenance: ASSERTED wins over INFERRED.
 """
 
 import asyncio
+import re
 from typing import Any, Optional, Tuple
 
 import structlog
@@ -49,7 +50,7 @@ class IterationEngine(IterationPort):
 
         Args:
             list_size: Number of items in the iterate list
-            quantifier: Quantifier string (ALL / NONE / SOME / N)
+            quantifier: Quantifier string (ALL / NONE / SOME / AT LEAST N / AT MOST N / EXACTLY N)
             list_name: Name of the iterate list
         """
         if (
@@ -218,18 +219,31 @@ class IterationEngine(IterationPort):
         Args:
             true_count: Number of items that evaluated to True
             list_size: Total number of items
-            quantifier: Quantifier string (ALL / NONE / SOME / N)
+            quantifier: Quantifier string (ALL / NONE / SOME / AT LEAST N / AT MOST N / EXACTLY N)
 
         Returns:
             FactValue with the boolean result
         """
         if quantifier == "ALL":
             return FactValue(true_count == list_size)
+        if quantifier == "NOT ALL":
+            return FactValue(true_count != list_size)
         if quantifier == "NONE":
             return FactValue(true_count == 0)
+        if quantifier == "NOT NONE":
+            return FactValue(true_count > 0)
         if quantifier == "SOME":
             return FactValue(true_count > 0)
+        exact_match = re.match(r"^EXACT(?:LY)?\s+(\d+)$", str(quantifier or "").strip(), re.IGNORECASE)
+        if exact_match:
+            return FactValue(true_count == int(exact_match.group(1)))
+        at_least_match = re.match(r"^AT\s+LEAST\s+(\d+)$", str(quantifier or "").strip(), re.IGNORECASE)
+        if at_least_match:
+            return FactValue(true_count >= int(at_least_match.group(1)))
+        at_most_match = re.match(r"^AT\s+MOST\s+(\d+)$", str(quantifier or "").strip(), re.IGNORECASE)
+        if at_most_match:
+            return FactValue(true_count <= int(at_most_match.group(1)))
         try:
-            return FactValue(true_count == int(quantifier))
+            return FactValue(true_count >= int(quantifier))
         except (ValueError, TypeError):
             return FactValue(False)

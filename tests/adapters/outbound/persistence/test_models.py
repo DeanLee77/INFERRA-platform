@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from src.adapters.outbound.persistence.models import UserORM, RuleORM, FileORM, HistoryORM
 
 
@@ -9,13 +11,17 @@ class TestUserORMInit:
 
 
 class TestRuleORMGetLatestFile:
-    def test_get_latest_file_returns_last_file(self):
+    def test_get_latest_file_returns_newest_file(self):
         rule = RuleORM(rule_name="test_rule", rule_category="cat", rule_description="desc")
         file1 = FileORM(rule_id=1, files=b"data1")
+        file1.file_id = 2
+        file1.created_date = datetime(2026, 6, 2)
         file2 = FileORM(rule_id=1, files=b"data2")
+        file2.file_id = 1
+        file2.created_date = datetime(2026, 6, 1)
         rule.rule_files = [file1, file2]
         result = rule.get_latest_file()
-        assert result is file2
+        assert result is file1
 
     def test_get_latest_file_returns_none_when_empty(self):
         rule = RuleORM(rule_name="test_rule")
@@ -25,13 +31,17 @@ class TestRuleORMGetLatestFile:
 
 
 class TestRuleORMGetLatestHistory:
-    def test_get_latest_history_returns_last_history(self):
+    def test_get_latest_history_returns_newest_history(self):
         rule = RuleORM(rule_name="test_rule")
         hist1 = HistoryORM(rule_id=1, history={"step": 1})
+        hist1.history_id = 2
+        hist1.created_date = datetime(2026, 6, 2)
         hist2 = HistoryORM(rule_id=1, history={"step": 2})
+        hist2.history_id = 1
+        hist2.created_date = datetime(2026, 6, 1)
         rule.rule_histories = [hist1, hist2]
         result = rule.get_latest_history()
-        assert result is hist2
+        assert result is hist1
 
     def test_get_latest_history_returns_none_when_empty(self):
         rule = RuleORM(rule_name="test_rule")

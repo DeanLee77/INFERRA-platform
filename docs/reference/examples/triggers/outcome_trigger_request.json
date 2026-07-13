@@ -1,0 +1,36 @@
+{
+  "policyId": "aegis-trigger-source-to-target",
+  "idempotencyKey": "example-source-run-001:trigger:v1",
+  "correlationId": "corr-example-source-run-001",
+  "depth": 0,
+  "actor": {
+    "kind": "system",
+    "id": "workflow-runtime",
+    "role": "workflow runtime"
+  },
+  "sourceResult": {
+    "ruleName": "aegis_trigger_source_assessment",
+    "outcome": true,
+    "confidence": 0.91,
+    "triggerDepth": 0,
+    "evidenceRefs": ["ev-source-assessment"],
+    "facts": {
+      "downstream age": {
+        "value": 42,
+        "source": "ASSERTED"
+      },
+      "downstream evidence packet received": {
+        "value": true,
+        "source": "INFERRED"
+      },
+      "downstream applicant identity verified": {
+        "value": true,
+        "source": "ASSERTED"
+      },
+      "semantic advisory note": {
+        "value": "not copied because SEMANTIC is not in the policy factSourceFilter",
+        "source": "SEMANTIC"
+      }
+    }
+  }
+}

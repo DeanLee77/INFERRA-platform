@@ -1,0 +1,1689 @@
+{
+  "fixture_type": "reasoning_run_review_contract",
+  "fixture_version": "ui-contract-0.1",
+  "source_issue": "INF-8",
+  "spec_references": [
+    "INF-5 workflow-spec",
+    "INF-2 architecture"
+  ],
+  "generated_at": "2026-05-31T00:00:00Z",
+  "data_policy": {
+    "synthetic_only": true,
+    "contains_customer_data": false,
+    "contains_phi": false,
+    "contains_secrets": false,
+    "uses_live_model": false,
+    "uses_production_integration": false
+  },
+  "source_rule_examples": [
+    {
+      "id": "example_mrca_master_convergence",
+      "path": "docs/reference/examples/mrca_ultimate_master_convergence_met.txt",
+      "file_type": "txt",
+      "sha256": "970a017df13eaef2fa40b1d897dc12e96553ac21e8bfd62d8fd1f18a4b9b6635",
+      "origin_module": "docs.reference.examples",
+      "fact_source": "ASSERTED",
+      "usage": "symbolic convergence source fixture"
+    },
+    {
+      "id": "example_drca_master_convergence",
+      "path": "docs/reference/examples/drca_ultimate_master_convergence_met.txt",
+      "file_type": "txt",
+      "sha256": "d553f8a5da126b3f053a6cd206417778469bffcef1e29896fd15f70885a3bc7f",
+      "origin_module": "docs.reference.examples",
+      "fact_source": "ASSERTED",
+      "usage": "symbolic convergence contrast fixture"
+    },
+    {
+      "id": "example_vea_service_options",
+      "path": "docs/reference/examples/vea_part_ii_sections_5_to_6.txt",
+      "file_type": "txt",
+      "sha256": "d9f4de6e5d566f3448dcc713964db292a9eef95359a3f1a17867119c0f6db14a",
+      "origin_module": "docs.reference.examples",
+      "fact_source": "ASSERTED",
+      "usage": "LIST-option retrieval and provenance fixture"
+    }
+  ],
+  "required_result_states": [
+    "running",
+    "success",
+    "needs_review",
+    "abstain",
+    "contradiction",
+    "error"
+  ],
+  "required_stages": [
+    "parse",
+    "retrieve",
+    "reason",
+    "verify",
+    "summarize",
+    "receipt"
+  ],
+  "stage_statuses": [
+    "pending",
+    "active",
+    "complete",
+    "failed",
+    "skipped"
+  ],
+  "check_statuses": [
+    "pass",
+    "fail",
+    "skipped",
+    "unavailable"
+  ],
+  "action_catalog": {
+    "cancel_run": {
+      "label": "Cancel run",
+      "kind": "secondary"
+    },
+    "accept_internal_use": {
+      "label": "Accept for internal use",
+      "kind": "primary"
+    },
+    "export_receipt": {
+      "label": "Export receipt",
+      "kind": "secondary"
+    },
+    "inspect_trace": {
+      "label": "Inspect trace",
+      "kind": "secondary"
+    },
+    "create_evaluation_case": {
+      "label": "Create evaluation case",
+      "kind": "secondary"
+    },
+    "rerun_revised_scope": {
+      "label": "Rerun with revised scope",
+      "kind": "secondary",
+      "preserves_original_run": true
+    },
+    "review_evidence": {
+      "label": "Review evidence",
+      "kind": "primary"
+    },
+    "revise_run": {
+      "label": "Revise run",
+      "kind": "secondary",
+      "preserves_original_run": true
+    },
+    "add_evidence": {
+      "label": "Add evidence",
+      "kind": "primary",
+      "preserves_original_run": true
+    },
+    "accept_with_caveat": {
+      "label": "Accept with caveat",
+      "kind": "secondary"
+    },
+    "export_diagnostic": {
+      "label": "Export diagnostic",
+      "kind": "secondary"
+    },
+    "request_human_review": {
+      "label": "Request human review",
+      "kind": "secondary"
+    },
+    "revise_scope": {
+      "label": "Revise scope",
+      "kind": "secondary",
+      "preserves_original_run": true
+    },
+    "create_missing_evidence_case": {
+      "label": "Create missing-evidence case",
+      "kind": "secondary"
+    },
+    "resolve_contradiction": {
+      "label": "Resolve contradiction",
+      "kind": "primary",
+      "preserves_original_run": true
+    },
+    "exclude_source_and_rerun": {
+      "label": "Exclude source and rerun",
+      "kind": "secondary",
+      "preserves_original_run": true
+    },
+    "export_contradiction_pack": {
+      "label": "Export contradiction pack",
+      "kind": "secondary"
+    },
+    "retry": {
+      "label": "Retry",
+      "kind": "primary",
+      "preserves_original_run": true
+    },
+    "copy_diagnostics": {
+      "label": "Copy diagnostics",
+      "kind": "secondary"
+    },
+    "create_bug_evaluation_case": {
+      "label": "Create bug/evaluation case",
+      "kind": "secondary"
+    },
+    "hide_evidence": {
+      "label": "Hide evidence",
+      "kind": "disallowed"
+    },
+    "answer_headline": {
+      "label": "Show answer headline",
+      "kind": "disallowed"
+    },
+    "accept_as_supported": {
+      "label": "Accept as supported",
+      "kind": "disallowed"
+    },
+    "discard_user_input": {
+      "label": "Discard user input",
+      "kind": "disallowed"
+    }
+  },
+  "state_action_matrix": {
+    "running": {
+      "primary": null,
+      "secondary": [
+        "cancel_run"
+      ],
+      "disallowed": [
+        "accept_internal_use",
+        "export_receipt"
+      ]
+    },
+    "success": {
+      "primary": "accept_internal_use",
+      "secondary": [
+        "export_receipt",
+        "inspect_trace",
+        "create_evaluation_case",
+        "rerun_revised_scope"
+      ],
+      "disallowed": [
+        "hide_evidence"
+      ]
+    },
+    "needs_review": {
+      "primary": "review_evidence",
+      "secondary": [
+        "revise_run",
+        "add_evidence",
+        "accept_with_caveat",
+        "create_evaluation_case",
+        "export_diagnostic",
+        "request_human_review"
+      ],
+      "disallowed": [
+        "accept_internal_use"
+      ]
+    },
+    "abstain": {
+      "primary": "add_evidence",
+      "secondary": [
+        "revise_scope",
+        "create_missing_evidence_case",
+        "export_diagnostic"
+      ],
+      "disallowed": [
+        "answer_headline",
+        "accept_internal_use"
+      ]
+    },
+    "contradiction": {
+      "primary": "resolve_contradiction",
+      "secondary": [
+        "exclude_source_and_rerun",
+        "add_evidence",
+        "create_evaluation_case",
+        "export_contradiction_pack"
+      ],
+      "disallowed": [
+        "accept_as_supported",
+        "accept_internal_use"
+      ]
+    },
+    "error": {
+      "primary": "retry",
+      "secondary": [
+        "revise_run",
+        "copy_diagnostics",
+        "create_bug_evaluation_case"
+      ],
+      "disallowed": [
+        "discard_user_input"
+      ]
+    }
+  },
+  "runs": [
+    {
+      "run_id": "rrr_running_001",
+      "result_state": "running",
+      "state_label": "Running",
+      "question": "Is the synthetic applicant eligible under the selected evidence scope?",
+      "evidence_scope": [
+        {
+          "id": "scope_synthetic_packet",
+          "title": "Synthetic intake packet",
+          "included": true
+        },
+        {
+          "id": "scope_rule_fixture",
+          "title": "Synthetic eligibility rule fixture",
+          "included": true
+        }
+      ],
+      "stage": {
+        "current": "retrieve",
+        "items": [
+          {
+            "key": "parse",
+            "label": "Parse",
+            "status": "complete",
+            "detail": "Question and scope parsed."
+          },
+          {
+            "key": "retrieve",
+            "label": "Retrieve",
+            "status": "active",
+            "detail": "Synthetic evidence lookup in progress."
+          },
+          {
+            "key": "reason",
+            "label": "Reason",
+            "status": "pending",
+            "detail": "Waiting for retrieval."
+          },
+          {
+            "key": "verify",
+            "label": "Verify",
+            "status": "pending",
+            "detail": "Not started."
+          },
+          {
+            "key": "summarize",
+            "label": "Summarize",
+            "status": "pending",
+            "detail": "Not started."
+          },
+          {
+            "key": "receipt",
+            "label": "Receipt",
+            "status": "pending",
+            "detail": "Not available until verification completes."
+          }
+        ]
+      },
+      "conclusion": {
+        "text": null,
+        "display_mode": "skeleton",
+        "confidence_score": null,
+        "confidence_band": "unknown",
+        "confidence_basis": [],
+        "uncertainty_reasons": [
+          "run_incomplete"
+        ],
+        "human_reason": "The run has not reached a result state."
+      },
+      "claims": [],
+      "evidence": [
+        {
+          "id": "ev_synthetic_packet",
+          "title": "Synthetic intake packet",
+          "status": "queued",
+          "relevance": "unknown",
+          "freshness": "fixture_snapshot",
+          "citation": "synthetic fixture only",
+          "fact_source": "ASSERTED",
+          "origin_module": "synthetic.review_fixture",
+          "import_metadata": {
+            "import_id": "import_running_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "check_parse_scope",
+          "label": "Question and scope parse",
+          "status": "pass",
+          "mandatory": true,
+          "reason": "Question and selected synthetic scope are syntactically valid."
+        },
+        {
+          "id": "check_retrieval_complete",
+          "label": "Evidence retrieval complete",
+          "status": "unavailable",
+          "mandatory": true,
+          "reason": "Retrieval is still active."
+        }
+      ],
+      "missing_evidence": [],
+      "assumptions": [],
+      "contradictions": [],
+      "correction_affordances": [
+        {
+          "action": "cancel_run",
+          "records_diff_summary": false
+        }
+      ],
+      "trace": {
+        "graph_available": false,
+        "timeline_available": true,
+        "raw_trace_available": false,
+        "unavailable_reason": "Graph and raw trace are not complete while the run is active.",
+        "rule_hash": "sha256:synthetic-review-rule-v01",
+        "graph_hash": null,
+        "reasoning_mode": "deduction",
+        "feature_flags": [
+          "live_llm_disabled",
+          "synthetic_fixture_mode"
+        ]
+      },
+      "allowed_actions": {
+        "primary": null,
+        "secondary": [
+          "cancel_run"
+        ],
+        "disallowed": [
+          "accept_internal_use",
+          "export_receipt"
+        ]
+      },
+      "revision_lineage": {
+        "preserves_original_run": true,
+        "original_run_id": "rrr_running_001",
+        "previous_run_id": null,
+        "diff_summary": "No correction has been submitted while the run is active."
+      },
+      "evaluation_case_export_seed": {
+        "seed_id": "eval_seed_running_001",
+        "question": "Is the synthetic applicant eligible under the selected evidence scope?",
+        "evidence_refs": [
+          "ev_synthetic_packet"
+        ],
+        "result_state": "running",
+        "checks": [
+          {
+            "id": "check_parse_scope",
+            "status": "pass"
+          },
+          {
+            "id": "check_retrieval_complete",
+            "status": "unavailable"
+          }
+        ],
+        "trace_metadata": {
+          "graph_available": false,
+          "timeline_available": true,
+          "raw_trace_available": false,
+          "rule_hash": "sha256:synthetic-review-rule-v01",
+          "graph_hash": null
+        },
+        "user_correction_notes": []
+      }
+    },
+    {
+      "run_id": "rrr_success_001",
+      "result_state": "success",
+      "state_label": "Supported",
+      "question": "Is the synthetic applicant eligible under the selected evidence scope?",
+      "evidence_scope": [
+        {
+          "id": "scope_synthetic_packet",
+          "title": "Synthetic intake packet",
+          "included": true
+        },
+        {
+          "id": "scope_rule_fixture",
+          "title": "Synthetic eligibility rule fixture",
+          "included": true
+        }
+      ],
+      "stage": {
+        "current": "receipt",
+        "items": [
+          {
+            "key": "parse",
+            "label": "Parse",
+            "status": "complete",
+            "detail": "Question and scope parsed."
+          },
+          {
+            "key": "retrieve",
+            "label": "Retrieve",
+            "status": "complete",
+            "detail": "3 synthetic evidence refs used."
+          },
+          {
+            "key": "reason",
+            "label": "Reason",
+            "status": "complete",
+            "detail": "Deduction satisfied the goal."
+          },
+          {
+            "key": "verify",
+            "label": "Verify",
+            "status": "complete",
+            "detail": "Mandatory checks passed."
+          },
+          {
+            "key": "summarize",
+            "label": "Summarize",
+            "status": "complete",
+            "detail": "Summary generated from receipt fields."
+          },
+          {
+            "key": "receipt",
+            "label": "Receipt",
+            "status": "complete",
+            "detail": "Evaluation seed is ready."
+          }
+        ]
+      },
+      "conclusion": {
+        "text": "Synthetic applicant is eligible for internal-use recommendation.",
+        "display_mode": "answer",
+        "confidence_score": 0.92,
+        "confidence_band": "high",
+        "confidence_basis": [
+          "deduction",
+          "evidence_coverage",
+          "provenance_trace"
+        ],
+        "uncertainty_reasons": [
+          "synthetic_fixture_only",
+          "policy_scope_limited_to_fixture"
+        ],
+        "human_reason": "All required synthetic evidence is present and deterministic checks passed."
+      },
+      "claims": [
+        {
+          "id": "claim_age_threshold_passes",
+          "role": "answer",
+          "text": "Age threshold passes for the synthetic applicant.",
+          "evidence_links": {
+            "supporting": [
+              "ev_age_declaration"
+            ],
+            "conflicting": [],
+            "missing": []
+          },
+          "evidence_availability": {
+            "status": "linked"
+          },
+          "fact_source": "ASSERTED",
+          "origin_module": "synthetic.review_fixture",
+          "import_metadata": {
+            "import_id": "import_success_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          },
+          "rule": {
+            "name": "synthetic_eligibility_rule",
+            "version": "synthetic-0.1",
+            "hash": "sha256:synthetic-review-rule-v01"
+          },
+          "checks": [
+            "check_age_threshold"
+          ]
+        },
+        {
+          "id": "claim_service_days_pass",
+          "role": "answer",
+          "text": "Service-day threshold passes under the fixture rule.",
+          "evidence_links": {
+            "supporting": [
+              "ev_service_record"
+            ],
+            "conflicting": [],
+            "missing": []
+          },
+          "evidence_availability": {
+            "status": "linked"
+          },
+          "fact_source": "ASSERTED",
+          "origin_module": "synthetic.review_fixture",
+          "import_metadata": {
+            "import_id": "import_success_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          },
+          "rule": {
+            "name": "synthetic_eligibility_rule",
+            "version": "synthetic-0.1",
+            "hash": "sha256:synthetic-review-rule-v01"
+          },
+          "checks": [
+            "check_service_days"
+          ]
+        },
+        {
+          "id": "claim_no_blocking_contradiction",
+          "role": "answer",
+          "text": "No blocking contradiction is present in the selected synthetic scope.",
+          "evidence_links": {
+            "supporting": [
+              "ev_verification_receipt"
+            ],
+            "conflicting": [],
+            "missing": []
+          },
+          "evidence_availability": {
+            "status": "linked"
+          },
+          "fact_source": "INFERRED",
+          "origin_module": "synthetic.verifier",
+          "import_metadata": {
+            "import_id": "import_success_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          },
+          "rule": {
+            "name": "contradiction_absence_check",
+            "version": "synthetic-0.1",
+            "hash": "sha256:synthetic-review-rule-v01"
+          },
+          "checks": [
+            "check_no_contradictions"
+          ]
+        }
+      ],
+      "evidence": [
+        {
+          "id": "ev_age_declaration",
+          "title": "Synthetic age declaration",
+          "status": "used",
+          "relevance": "high",
+          "freshness": "current_fixture",
+          "citation": "synthetic fixture row success.age",
+          "fact_source": "ASSERTED",
+          "origin_module": "synthetic.review_fixture",
+          "import_metadata": {
+            "import_id": "import_success_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          }
+        },
+        {
+          "id": "ev_service_record",
+          "title": "Synthetic service-day record",
+          "status": "used",
+          "relevance": "high",
+          "freshness": "current_fixture",
+          "citation": "synthetic fixture row success.service_days",
+          "fact_source": "ASSERTED",
+          "origin_module": "synthetic.review_fixture",
+          "import_metadata": {
+            "import_id": "import_success_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          }
+        },
+        {
+          "id": "ev_verification_receipt",
+          "title": "Synthetic verification receipt",
+          "status": "used",
+          "relevance": "high",
+          "freshness": "generated_fixture",
+          "citation": "synthetic deterministic verifier",
+          "fact_source": "INFERRED",
+          "origin_module": "synthetic.verifier",
+          "import_metadata": {
+            "import_id": "import_success_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "check_age_threshold",
+          "label": "Age threshold",
+          "status": "pass",
+          "mandatory": true,
+          "reason": "Synthetic age is above the required threshold."
+        },
+        {
+          "id": "check_service_days",
+          "label": "Service days threshold",
+          "status": "pass",
+          "mandatory": true,
+          "reason": "Synthetic service days satisfy the rule."
+        },
+        {
+          "id": "check_no_contradictions",
+          "label": "No blocking contradictions",
+          "status": "pass",
+          "mandatory": true,
+          "reason": "No conflicting selected evidence is present."
+        }
+      ],
+      "missing_evidence": [],
+      "assumptions": [
+        {
+          "id": "assumption_fixture_scope",
+          "text": "This is a synthetic fixture and not production policy."
+        }
+      ],
+      "contradictions": [],
+      "correction_affordances": [
+        {
+          "action": "rerun_revised_scope",
+          "records_diff_summary": true
+        },
+        {
+          "action": "create_evaluation_case",
+          "records_diff_summary": false
+        }
+      ],
+      "trace": {
+        "graph_available": true,
+        "timeline_available": true,
+        "raw_trace_available": true,
+        "unavailable_reason": null,
+        "rule_hash": "sha256:synthetic-review-rule-v01",
+        "graph_hash": "sha256:synthetic-success-graph-v01",
+        "reasoning_mode": "deduction",
+        "feature_flags": [
+          "live_llm_disabled",
+          "synthetic_fixture_mode"
+        ]
+      },
+      "allowed_actions": {
+        "primary": "accept_internal_use",
+        "secondary": [
+          "export_receipt",
+          "inspect_trace",
+          "create_evaluation_case",
+          "rerun_revised_scope"
+        ],
+        "disallowed": [
+          "hide_evidence"
+        ]
+      },
+      "revision_lineage": {
+        "preserves_original_run": true,
+        "original_run_id": "rrr_needs_review_001",
+        "previous_run_id": "rrr_needs_review_001",
+        "diff_summary": "Added synthetic service-day verification evidence; result moved from needs_review to success."
+      },
+      "evaluation_case_export_seed": {
+        "seed_id": "eval_seed_success_001",
+        "question": "Is the synthetic applicant eligible under the selected evidence scope?",
+        "evidence_refs": [
+          "ev_age_declaration",
+          "ev_service_record",
+          "ev_verification_receipt"
+        ],
+        "result_state": "success",
+        "checks": [
+          {
+            "id": "check_age_threshold",
+            "status": "pass"
+          },
+          {
+            "id": "check_service_days",
+            "status": "pass"
+          },
+          {
+            "id": "check_no_contradictions",
+            "status": "pass"
+          }
+        ],
+        "trace_metadata": {
+          "graph_available": true,
+          "timeline_available": true,
+          "raw_trace_available": true,
+          "rule_hash": "sha256:synthetic-review-rule-v01",
+          "graph_hash": "sha256:synthetic-success-graph-v01"
+        },
+        "user_correction_notes": [
+          "Synthetic operator added service-day evidence before rerun."
+        ]
+      }
+    },
+    {
+      "run_id": "rrr_needs_review_001",
+      "result_state": "needs_review",
+      "state_label": "Needs review",
+      "question": "Is the synthetic applicant eligible under the selected evidence scope?",
+      "evidence_scope": [
+        {
+          "id": "scope_synthetic_packet",
+          "title": "Synthetic intake packet",
+          "included": true
+        },
+        {
+          "id": "scope_rule_fixture",
+          "title": "Synthetic eligibility rule fixture",
+          "included": true
+        }
+      ],
+      "stage": {
+        "current": "receipt",
+        "items": [
+          {
+            "key": "parse",
+            "label": "Parse",
+            "status": "complete",
+            "detail": "Question and scope parsed."
+          },
+          {
+            "key": "retrieve",
+            "label": "Retrieve",
+            "status": "complete",
+            "detail": "2 synthetic evidence refs used; 1 missing."
+          },
+          {
+            "key": "reason",
+            "label": "Reason",
+            "status": "complete",
+            "detail": "Deduction produced a qualified result."
+          },
+          {
+            "key": "verify",
+            "label": "Verify",
+            "status": "complete",
+            "detail": "Mandatory evidence check failed."
+          },
+          {
+            "key": "summarize",
+            "label": "Summarize",
+            "status": "complete",
+            "detail": "Uncertainty summary required."
+          },
+          {
+            "key": "receipt",
+            "label": "Receipt",
+            "status": "complete",
+            "detail": "Draft diagnostic receipt is ready."
+          }
+        ]
+      },
+      "conclusion": {
+        "text": "Synthetic applicant appears eligible, pending residency evidence.",
+        "display_mode": "qualified_answer",
+        "confidence_score": 0.68,
+        "confidence_band": "medium",
+        "confidence_basis": [
+          "deduction",
+          "evidence_coverage"
+        ],
+        "uncertainty_reasons": [
+          "missing_evidence",
+          "weak_source",
+          "assistive_reasoning_disabled"
+        ],
+        "human_reason": "The result is plausible but one mandatory evidence item is missing."
+      },
+      "claims": [
+        {
+          "id": "claim_age_threshold_review",
+          "role": "answer",
+          "text": "Age threshold appears satisfied.",
+          "evidence_links": {
+            "supporting": [
+              "ev_review_age_declaration"
+            ],
+            "conflicting": [],
+            "missing": []
+          },
+          "evidence_availability": {
+            "status": "linked"
+          },
+          "fact_source": "ASSERTED",
+          "origin_module": "synthetic.review_fixture",
+          "import_metadata": {
+            "import_id": "import_needs_review_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          },
+          "rule": {
+            "name": "synthetic_eligibility_rule",
+            "version": "synthetic-0.1",
+            "hash": "sha256:synthetic-review-rule-v01"
+          },
+          "checks": [
+            "check_age_threshold_review"
+          ]
+        },
+        {
+          "id": "claim_residency_missing",
+          "role": "answer",
+          "text": "Residency cannot be verified from the selected scope.",
+          "evidence_links": {
+            "supporting": [],
+            "conflicting": [],
+            "missing": [
+              "missing_residency_proof"
+            ]
+          },
+          "evidence_availability": {
+            "status": "missing",
+            "reason": "No synthetic residency proof was selected."
+          },
+          "fact_source": "unknown",
+          "origin_module": "synthetic.verifier",
+          "import_metadata": {
+            "import_id": "import_needs_review_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          },
+          "rule": {
+            "name": "mandatory_residency_evidence",
+            "version": "synthetic-0.1",
+            "hash": "sha256:synthetic-review-rule-v01"
+          },
+          "checks": [
+            "check_residency_evidence_present"
+          ]
+        }
+      ],
+      "evidence": [
+        {
+          "id": "ev_review_age_declaration",
+          "title": "Synthetic age declaration",
+          "status": "used",
+          "relevance": "high",
+          "freshness": "current_fixture",
+          "citation": "synthetic fixture row needs_review.age",
+          "fact_source": "ASSERTED",
+          "origin_module": "synthetic.review_fixture",
+          "import_metadata": {
+            "import_id": "import_needs_review_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          }
+        },
+        {
+          "id": "missing_residency_proof",
+          "title": "Synthetic residency proof",
+          "status": "missing",
+          "relevance": "required",
+          "freshness": "not_available",
+          "citation": "not available in selected synthetic scope",
+          "fact_source": "unknown",
+          "origin_module": "synthetic.verifier",
+          "import_metadata": {
+            "import_id": "import_needs_review_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "check_age_threshold_review",
+          "label": "Age threshold",
+          "status": "pass",
+          "mandatory": true,
+          "reason": "Synthetic age is above the required threshold."
+        },
+        {
+          "id": "check_residency_evidence_present",
+          "label": "Residency evidence present",
+          "status": "fail",
+          "mandatory": true,
+          "reason": "Residency proof is missing from the selected scope."
+        },
+        {
+          "id": "check_assistive_reasoning",
+          "label": "Assistive reasoning route",
+          "status": "skipped",
+          "mandatory": false,
+          "reason": "Live LLM and abduction routes are disabled for this fixture."
+        }
+      ],
+      "missing_evidence": [
+        {
+          "id": "missing_residency_proof",
+          "label": "Residency proof",
+          "required_for": [
+            "claim_residency_missing"
+          ],
+          "recovery_action": "add_evidence"
+        }
+      ],
+      "assumptions": [
+        {
+          "id": "assumption_age_source_user_asserted",
+          "text": "The synthetic age declaration is user asserted."
+        }
+      ],
+      "contradictions": [],
+      "resolution_policy": {
+        "show_uncertainty_before_accept_with_caveat": true,
+        "accept_with_caveat_requires": [
+          "visible_uncertainty_reasons",
+          "user_correction_note"
+        ]
+      },
+      "correction_affordances": [
+        {
+          "action": "add_evidence",
+          "records_diff_summary": true
+        },
+        {
+          "action": "revise_run",
+          "records_diff_summary": true
+        }
+      ],
+      "trace": {
+        "graph_available": true,
+        "timeline_available": true,
+        "raw_trace_available": true,
+        "unavailable_reason": null,
+        "rule_hash": "sha256:synthetic-review-rule-v01",
+        "graph_hash": "sha256:synthetic-needs-review-graph-v01",
+        "reasoning_mode": "deduction",
+        "feature_flags": [
+          "live_llm_disabled",
+          "synthetic_fixture_mode"
+        ]
+      },
+      "allowed_actions": {
+        "primary": "review_evidence",
+        "secondary": [
+          "revise_run",
+          "add_evidence",
+          "accept_with_caveat",
+          "create_evaluation_case",
+          "export_diagnostic",
+          "request_human_review"
+        ],
+        "disallowed": [
+          "accept_internal_use"
+        ]
+      },
+      "revision_lineage": {
+        "preserves_original_run": true,
+        "original_run_id": "rrr_needs_review_001",
+        "previous_run_id": null,
+        "diff_summary": "No rerun yet; add_evidence or revise_run must create a new run and preserve this one."
+      },
+      "evaluation_case_export_seed": {
+        "seed_id": "eval_seed_needs_review_001",
+        "question": "Is the synthetic applicant eligible under the selected evidence scope?",
+        "evidence_refs": [
+          "ev_review_age_declaration",
+          "missing_residency_proof"
+        ],
+        "result_state": "needs_review",
+        "checks": [
+          {
+            "id": "check_age_threshold_review",
+            "status": "pass"
+          },
+          {
+            "id": "check_residency_evidence_present",
+            "status": "fail"
+          },
+          {
+            "id": "check_assistive_reasoning",
+            "status": "skipped"
+          }
+        ],
+        "trace_metadata": {
+          "graph_available": true,
+          "timeline_available": true,
+          "raw_trace_available": true,
+          "rule_hash": "sha256:synthetic-review-rule-v01",
+          "graph_hash": "sha256:synthetic-needs-review-graph-v01"
+        },
+        "user_correction_notes": []
+      }
+    },
+    {
+      "run_id": "rrr_abstain_001",
+      "result_state": "abstain",
+      "state_label": "Cannot answer yet",
+      "question": "Is the synthetic applicant eligible under the selected evidence scope?",
+      "evidence_scope": [
+        {
+          "id": "scope_empty_packet",
+          "title": "Empty synthetic packet",
+          "included": true
+        }
+      ],
+      "stage": {
+        "current": "receipt",
+        "items": [
+          {
+            "key": "parse",
+            "label": "Parse",
+            "status": "complete",
+            "detail": "Question parsed."
+          },
+          {
+            "key": "retrieve",
+            "label": "Retrieve",
+            "status": "complete",
+            "detail": "No authoritative evidence found."
+          },
+          {
+            "key": "reason",
+            "label": "Reason",
+            "status": "skipped",
+            "detail": "Reasoning skipped because required facts are absent."
+          },
+          {
+            "key": "verify",
+            "label": "Verify",
+            "status": "complete",
+            "detail": "Abstention threshold applied."
+          },
+          {
+            "key": "summarize",
+            "label": "Summarize",
+            "status": "complete",
+            "detail": "Diagnostic summary generated."
+          },
+          {
+            "key": "receipt",
+            "label": "Receipt",
+            "status": "complete",
+            "detail": "Diagnostic seed is ready."
+          }
+        ]
+      },
+      "conclusion": {
+        "text": null,
+        "display_mode": "abstention",
+        "confidence_score": null,
+        "confidence_band": "unknown",
+        "confidence_basis": [],
+        "uncertainty_reasons": [
+          "missing_evidence",
+          "confidence_below_threshold",
+          "trace_unavailable"
+        ],
+        "abstention_reason_code": "insufficient_evidence",
+        "human_reason": "INFERRA cannot answer because the selected scope has no authoritative synthetic evidence."
+      },
+      "claims": [
+        {
+          "id": "claim_no_answer_available",
+          "role": "diagnostic",
+          "text": "No answer claim is available for this run.",
+          "evidence_links": {
+            "supporting": [],
+            "conflicting": [],
+            "missing": []
+          },
+          "evidence_availability": {
+            "status": "none_available",
+            "reason": "The fixture intentionally omits authoritative evidence."
+          },
+          "fact_source": "unknown",
+          "origin_module": "synthetic.abstention_fixture",
+          "import_metadata": {
+            "import_id": "import_abstain_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          },
+          "rule": {
+            "name": "abstention_threshold",
+            "version": "synthetic-0.1",
+            "hash": "sha256:synthetic-review-rule-v01"
+          },
+          "checks": [
+            "check_authoritative_evidence_present"
+          ]
+        }
+      ],
+      "evidence": [
+        {
+          "id": "missing_authoritative_packet",
+          "title": "Authoritative eligibility packet",
+          "status": "missing",
+          "relevance": "required",
+          "freshness": "not_available",
+          "citation": "not available in selected synthetic scope",
+          "fact_source": "unknown",
+          "origin_module": "synthetic.abstention_fixture",
+          "import_metadata": {
+            "import_id": "import_abstain_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "check_authoritative_evidence_present",
+          "label": "Authoritative evidence present",
+          "status": "fail",
+          "mandatory": true,
+          "reason": "No authoritative synthetic evidence was retrieved."
+        },
+        {
+          "id": "check_trace_complete",
+          "label": "Trace complete",
+          "status": "unavailable",
+          "mandatory": true,
+          "reason": "No reasoning graph can be built without evidence."
+        }
+      ],
+      "missing_evidence": [
+        {
+          "id": "missing_authoritative_packet",
+          "label": "Authoritative eligibility packet",
+          "required_for": [
+            "claim_no_answer_available"
+          ],
+          "recovery_action": "add_evidence"
+        }
+      ],
+      "assumptions": [],
+      "contradictions": [],
+      "correction_affordances": [
+        {
+          "action": "add_evidence",
+          "records_diff_summary": true
+        },
+        {
+          "action": "revise_scope",
+          "records_diff_summary": true
+        }
+      ],
+      "trace": {
+        "graph_available": false,
+        "timeline_available": true,
+        "raw_trace_available": true,
+        "unavailable_reason": "Reasoning graph unavailable because no evidence was accepted.",
+        "rule_hash": "sha256:synthetic-review-rule-v01",
+        "graph_hash": null,
+        "reasoning_mode": "deduction",
+        "feature_flags": [
+          "live_llm_disabled",
+          "synthetic_fixture_mode"
+        ]
+      },
+      "allowed_actions": {
+        "primary": "add_evidence",
+        "secondary": [
+          "revise_scope",
+          "create_missing_evidence_case",
+          "export_diagnostic"
+        ],
+        "disallowed": [
+          "answer_headline",
+          "accept_internal_use"
+        ]
+      },
+      "revision_lineage": {
+        "preserves_original_run": true,
+        "original_run_id": "rrr_abstain_001",
+        "previous_run_id": null,
+        "diff_summary": "No rerun yet; recovery actions must preserve the abstention receipt."
+      },
+      "evaluation_case_export_seed": {
+        "seed_id": "eval_seed_abstain_001",
+        "question": "Is the synthetic applicant eligible under the selected evidence scope?",
+        "evidence_refs": [
+          "missing_authoritative_packet"
+        ],
+        "result_state": "abstain",
+        "checks": [
+          {
+            "id": "check_authoritative_evidence_present",
+            "status": "fail"
+          },
+          {
+            "id": "check_trace_complete",
+            "status": "unavailable"
+          }
+        ],
+        "trace_metadata": {
+          "graph_available": false,
+          "timeline_available": true,
+          "raw_trace_available": true,
+          "rule_hash": "sha256:synthetic-review-rule-v01",
+          "graph_hash": null
+        },
+        "user_correction_notes": []
+      }
+    },
+    {
+      "run_id": "rrr_contradiction_001",
+      "result_state": "contradiction",
+      "state_label": "Contradiction found",
+      "question": "Is the synthetic applicant eligible under the selected evidence scope?",
+      "evidence_scope": [
+        {
+          "id": "scope_conflicting_packet",
+          "title": "Conflicting synthetic packet",
+          "included": true
+        },
+        {
+          "id": "scope_rule_fixture",
+          "title": "Synthetic eligibility rule fixture",
+          "included": true
+        }
+      ],
+      "stage": {
+        "current": "receipt",
+        "items": [
+          {
+            "key": "parse",
+            "label": "Parse",
+            "status": "complete",
+            "detail": "Question and scope parsed."
+          },
+          {
+            "key": "retrieve",
+            "label": "Retrieve",
+            "status": "complete",
+            "detail": "Conflicting synthetic sources retrieved."
+          },
+          {
+            "key": "reason",
+            "label": "Reason",
+            "status": "complete",
+            "detail": "Incompatible outcomes detected."
+          },
+          {
+            "key": "verify",
+            "label": "Verify",
+            "status": "failed",
+            "detail": "Contradiction check failed."
+          },
+          {
+            "key": "summarize",
+            "label": "Summarize",
+            "status": "complete",
+            "detail": "Contradiction summary generated."
+          },
+          {
+            "key": "receipt",
+            "label": "Receipt",
+            "status": "complete",
+            "detail": "Contradiction pack is ready."
+          }
+        ]
+      },
+      "conclusion": {
+        "text": null,
+        "display_mode": "blocked_by_contradiction",
+        "confidence_score": 0.51,
+        "confidence_band": "low",
+        "confidence_basis": [
+          "conflicting_evidence",
+          "failed_consistency_check"
+        ],
+        "uncertainty_reasons": [
+          "unresolved_contradiction",
+          "source_conflict"
+        ],
+        "human_reason": "A blocking contradiction prevents a supported conclusion."
+      },
+      "contradiction_summary": "Synthetic income evidence is mutually incompatible across two selected sources.",
+      "claims": [
+        {
+          "id": "claim_income_below_threshold",
+          "role": "answer",
+          "text": "Income is below the eligibility threshold.",
+          "evidence_links": {
+            "supporting": [
+              "ev_income_statement_low"
+            ],
+            "conflicting": [
+              "ev_income_feed_high"
+            ],
+            "missing": []
+          },
+          "evidence_availability": {
+            "status": "linked"
+          },
+          "fact_source": "ASSERTED",
+          "origin_module": "synthetic.review_fixture",
+          "import_metadata": {
+            "import_id": "import_contradiction_fixture_a",
+            "snapshot_id": "snapshot_2026_05_31"
+          },
+          "rule": {
+            "name": "income_threshold_rule",
+            "version": "synthetic-0.1",
+            "hash": "sha256:synthetic-review-rule-v01"
+          },
+          "checks": [
+            "check_income_consistency"
+          ]
+        },
+        {
+          "id": "claim_income_above_threshold",
+          "role": "answer",
+          "text": "Income exceeds the eligibility threshold.",
+          "evidence_links": {
+            "supporting": [
+              "ev_income_feed_high"
+            ],
+            "conflicting": [
+              "ev_income_statement_low"
+            ],
+            "missing": []
+          },
+          "evidence_availability": {
+            "status": "linked"
+          },
+          "fact_source": "SEMANTIC",
+          "origin_module": "synthetic.semantic_import",
+          "import_metadata": {
+            "import_id": "import_contradiction_fixture_b",
+            "snapshot_id": "snapshot_2026_05_31"
+          },
+          "rule": {
+            "name": "income_threshold_rule",
+            "version": "synthetic-0.1",
+            "hash": "sha256:synthetic-review-rule-v01"
+          },
+          "checks": [
+            "check_income_consistency"
+          ]
+        }
+      ],
+      "evidence": [
+        {
+          "id": "ev_income_statement_low",
+          "title": "Synthetic income statement",
+          "status": "conflicted",
+          "relevance": "high",
+          "freshness": "current_fixture",
+          "citation": "synthetic fixture row contradiction.statement",
+          "fact_source": "ASSERTED",
+          "origin_module": "synthetic.review_fixture",
+          "import_metadata": {
+            "import_id": "import_contradiction_fixture_a",
+            "snapshot_id": "snapshot_2026_05_31"
+          }
+        },
+        {
+          "id": "ev_income_feed_high",
+          "title": "Synthetic semantic income feed",
+          "status": "conflicted",
+          "relevance": "high",
+          "freshness": "current_fixture",
+          "citation": "synthetic fixture row contradiction.semantic_feed",
+          "fact_source": "SEMANTIC",
+          "origin_module": "synthetic.semantic_import",
+          "import_metadata": {
+            "import_id": "import_contradiction_fixture_b",
+            "snapshot_id": "snapshot_2026_05_31"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "check_income_consistency",
+          "label": "Income source consistency",
+          "status": "fail",
+          "mandatory": true,
+          "reason": "Two selected sources assert incompatible income facts."
+        },
+        {
+          "id": "check_unqualified_accept_allowed",
+          "label": "Unqualified accept allowed",
+          "status": "fail",
+          "mandatory": true,
+          "reason": "Unqualified acceptance is disabled while a contradiction is unresolved."
+        }
+      ],
+      "missing_evidence": [],
+      "assumptions": [
+        {
+          "id": "assumption_no_source_precedence",
+          "text": "The fixture has no approved source precedence rule."
+        }
+      ],
+      "contradictions": [
+        {
+          "id": "contradiction_income_amount",
+          "severity": "blocking",
+          "summary": "Income threshold claims conflict.",
+          "claim_a": "claim_income_below_threshold",
+          "claim_b": "claim_income_above_threshold",
+          "evidence_a": "ev_income_statement_low",
+          "evidence_b": "ev_income_feed_high",
+          "failed_check": "check_income_consistency",
+          "resolution_required": true,
+          "unqualified_accept_disabled": true
+        }
+      ],
+      "correction_affordances": [
+        {
+          "action": "resolve_contradiction",
+          "records_diff_summary": true
+        },
+        {
+          "action": "exclude_source_and_rerun",
+          "records_diff_summary": true
+        }
+      ],
+      "trace": {
+        "graph_available": true,
+        "timeline_available": true,
+        "raw_trace_available": true,
+        "unavailable_reason": null,
+        "rule_hash": "sha256:synthetic-review-rule-v01",
+        "graph_hash": "sha256:synthetic-contradiction-graph-v01",
+        "reasoning_mode": "mixed",
+        "feature_flags": [
+          "semantic_layer_enabled",
+          "live_llm_disabled",
+          "synthetic_fixture_mode"
+        ]
+      },
+      "allowed_actions": {
+        "primary": "resolve_contradiction",
+        "secondary": [
+          "exclude_source_and_rerun",
+          "add_evidence",
+          "create_evaluation_case",
+          "export_contradiction_pack"
+        ],
+        "disallowed": [
+          "accept_as_supported",
+          "accept_internal_use"
+        ]
+      },
+      "revision_lineage": {
+        "preserves_original_run": true,
+        "original_run_id": "rrr_contradiction_001",
+        "previous_run_id": null,
+        "diff_summary": "No rerun yet; resolving or excluding a source must create a new run and retain this contradiction pack."
+      },
+      "evaluation_case_export_seed": {
+        "seed_id": "eval_seed_contradiction_001",
+        "question": "Is the synthetic applicant eligible under the selected evidence scope?",
+        "evidence_refs": [
+          "ev_income_statement_low",
+          "ev_income_feed_high"
+        ],
+        "result_state": "contradiction",
+        "checks": [
+          {
+            "id": "check_income_consistency",
+            "status": "fail"
+          },
+          {
+            "id": "check_unqualified_accept_allowed",
+            "status": "fail"
+          }
+        ],
+        "trace_metadata": {
+          "graph_available": true,
+          "timeline_available": true,
+          "raw_trace_available": true,
+          "rule_hash": "sha256:synthetic-review-rule-v01",
+          "graph_hash": "sha256:synthetic-contradiction-graph-v01"
+        },
+        "user_correction_notes": []
+      }
+    },
+    {
+      "run_id": "rrr_error_001",
+      "result_state": "error",
+      "state_label": "Run failed",
+      "question": "Is the synthetic applicant eligible under the selected evidence scope?",
+      "evidence_scope": [
+        {
+          "id": "scope_synthetic_packet",
+          "title": "Synthetic intake packet",
+          "included": true
+        }
+      ],
+      "stage": {
+        "current": "verify",
+        "items": [
+          {
+            "key": "parse",
+            "label": "Parse",
+            "status": "complete",
+            "detail": "Question and scope parsed."
+          },
+          {
+            "key": "retrieve",
+            "label": "Retrieve",
+            "status": "complete",
+            "detail": "Synthetic evidence refs loaded."
+          },
+          {
+            "key": "reason",
+            "label": "Reason",
+            "status": "complete",
+            "detail": "Deduction graph produced."
+          },
+          {
+            "key": "verify",
+            "label": "Verify",
+            "status": "failed",
+            "detail": "Synthetic verifier raised a controlled fixture error."
+          },
+          {
+            "key": "summarize",
+            "label": "Summarize",
+            "status": "skipped",
+            "detail": "Skipped after verifier failure."
+          },
+          {
+            "key": "receipt",
+            "label": "Receipt",
+            "status": "skipped",
+            "detail": "Final receipt unavailable; diagnostic seed retained."
+          }
+        ]
+      },
+      "conclusion": {
+        "text": null,
+        "display_mode": "error",
+        "confidence_score": null,
+        "confidence_band": "unknown",
+        "confidence_basis": [],
+        "uncertainty_reasons": [
+          "system_failure",
+          "verification_unavailable"
+        ],
+        "human_reason": "The run failed during verification; no answer is available."
+      },
+      "error": {
+        "code": "synthetic_verifier_timeout",
+        "user_fixable": false,
+        "message": "The synthetic verifier timed out before producing a receipt.",
+        "diagnostic_details": "correlation_id=synthetic-error-001; no secrets or customer data included"
+      },
+      "claims": [],
+      "evidence": [
+        {
+          "id": "ev_error_scope_packet",
+          "title": "Synthetic scope packet",
+          "status": "preserved",
+          "relevance": "unknown",
+          "freshness": "current_fixture",
+          "citation": "synthetic fixture row error.scope",
+          "fact_source": "ASSERTED",
+          "origin_module": "synthetic.error_fixture",
+          "import_metadata": {
+            "import_id": "import_error_fixture",
+            "snapshot_id": "snapshot_2026_05_31"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "check_verifier_available",
+          "label": "Verifier available",
+          "status": "unavailable",
+          "mandatory": true,
+          "reason": "Synthetic verifier timeout prevented verification."
+        },
+        {
+          "id": "check_diagnostics_sanitized",
+          "label": "Diagnostics sanitized",
+          "status": "pass",
+          "mandatory": true,
+          "reason": "Diagnostic copy contains no secrets or customer data."
+        }
+      ],
+      "missing_evidence": [],
+      "assumptions": [],
+      "contradictions": [],
+      "correction_affordances": [
+        {
+          "action": "retry",
+          "records_diff_summary": true
+        },
+        {
+          "action": "copy_diagnostics",
+          "records_diff_summary": false
+        }
+      ],
+      "trace": {
+        "graph_available": true,
+        "timeline_available": true,
+        "raw_trace_available": false,
+        "unavailable_reason": "Final raw receipt was not produced after verifier timeout.",
+        "rule_hash": "sha256:synthetic-review-rule-v01",
+        "graph_hash": "sha256:synthetic-error-partial-graph-v01",
+        "reasoning_mode": "deduction",
+        "feature_flags": [
+          "live_llm_disabled",
+          "synthetic_fixture_mode"
+        ]
+      },
+      "allowed_actions": {
+        "primary": "retry",
+        "secondary": [
+          "revise_run",
+          "copy_diagnostics",
+          "create_bug_evaluation_case"
+        ],
+        "disallowed": [
+          "discard_user_input"
+        ]
+      },
+      "revision_lineage": {
+        "preserves_original_run": true,
+        "original_run_id": "rrr_error_001",
+        "previous_run_id": null,
+        "diff_summary": "Retry must create a new run and preserve this diagnostic failure."
+      },
+      "evaluation_case_export_seed": {
+        "seed_id": "eval_seed_error_001",
+        "question": "Is the synthetic applicant eligible under the selected evidence scope?",
+        "evidence_refs": [
+          "ev_error_scope_packet"
+        ],
+        "result_state": "error",
+        "checks": [
+          {
+            "id": "check_verifier_available",
+            "status": "unavailable"
+          },
+          {
+            "id": "check_diagnostics_sanitized",
+            "status": "pass"
+          }
+        ],
+        "trace_metadata": {
+          "graph_available": true,
+          "timeline_available": true,
+          "raw_trace_available": false,
+          "rule_hash": "sha256:synthetic-review-rule-v01",
+          "graph_hash": "sha256:synthetic-error-partial-graph-v01"
+        },
+        "user_correction_notes": []
+      }
+    }
+  ],
+  "accessibility_review": {
+    "keyboard": "State tabs and action buttons are native buttons with visible focus styles in the preview.",
+    "color_independence": "State, stage, check, and evidence statuses use text labels and symbols in addition to color.",
+    "responsive": "Preview CSS reflows from two columns to one column below 880px and keeps actions after evidence on mobile."
+  }
+}

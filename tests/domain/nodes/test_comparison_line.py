@@ -80,6 +80,20 @@ class TestComparisonLineInitialisation:
         cl._initialisation("x > 5", tokens)
         assert cl.get_rhs() is not None
 
+    def test_initialisation_preserves_multi_word_rhs_symbol(self):
+        cl = _make_cl()
+        tokens = _make_token(
+            ["date of injury or onset", ">=", "DRCA", "commencement date"],
+            ["L", "O", "U", "L"],
+        )
+        cl._initialisation(
+            "date of injury or onset >= DRCA commencement date",
+            tokens,
+        )
+        assert cl.get_lhs() == "date of injury or onset"
+        assert cl.get_rhs().get_value() == "DRCA commencement date"
+        assert cl.get_rhs().get_value_type() == FactValueType.STRING
+
     def test_initialisation_sets_node_name(self):
         cl = _make_cl()
         tokens = _make_token(["x", ">", "5"], ["L", "O", "No"])
@@ -334,6 +348,15 @@ class TestSelfEvaluate:
         result = cl.self_evaluate({"x": FactValue(5, FactValueType.INTEGER)})
         assert result.get_value() is False
 
+    def test_numeric_rhs_string_value_is_coerced(self):
+        cl = _make_cl()
+        cl._variable_name = "x"
+        cl._ComparisonLine__operator_string = ">="
+        cl._ComparisonLine__lhs = "x"
+        cl._ComparisonLine__rhs = FactValue("10", FactValueType.INTEGER)
+        result = cl.self_evaluate({"x": FactValue(12.5, FactValueType.DOUBLE)})
+        assert result.get_value() is True
+
     def test_list_comparison_returns_true_when_item_matches(self):
         cl = _make_cl()
         cl._variable_name = "x"
@@ -406,6 +429,34 @@ class TestSelfEvaluateListComparison:
             result = cl.self_evaluate({"items": list_val})
         assert result is not None
         assert result.get_value() is False
+        assert result.get_value_type() == FactValueType.BOOLEAN
+
+    def test_list_contains_matching_primitive_value(self):
+        cl = _make_cl()
+        cl._variable_name = "incapacity status"
+        cl._ComparisonLine__operator_string = "=="
+        cl._ComparisonLine__lhs = "incapacity status"
+        cl._ComparisonLine__rhs = FactValue("current employee", FactValueType.STRING)
+        list_val = FactValue(["current employee"], FactValueType.LIST)
+
+        result = cl.self_evaluate({"incapacity status": list_val})
+
+        assert result is not None
+        assert result.get_value() is True
+        assert result.get_value_type() == FactValueType.BOOLEAN
+
+    def test_list_contains_matching_quoted_defi_string_value(self):
+        cl = _make_cl()
+        cl._variable_name = "incapacity status"
+        cl._ComparisonLine__operator_string = "=="
+        cl._ComparisonLine__lhs = "incapacity status"
+        cl._ComparisonLine__rhs = FactValue('"current employee"', FactValueType.DEFI_STRING)
+        list_val = FactValue(["current employee"], FactValueType.LIST)
+
+        result = cl.self_evaluate({"incapacity status": list_val})
+
+        assert result is not None
+        assert result.get_value() is True
         assert result.get_value_type() == FactValueType.BOOLEAN
 
 

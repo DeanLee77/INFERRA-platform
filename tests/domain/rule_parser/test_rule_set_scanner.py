@@ -100,6 +100,7 @@ class TestRuleSetScannerScanRuleSet:
         scanner.scan_rule_set()
         assert len(feeder._parents) == 1
         assert feeder._parents[0][0] == "status IS active"
+        assert feeder._children == []
 
     def test_scan_parent_and_child(self):
         reader = _MockLineReader([
@@ -111,6 +112,61 @@ class TestRuleSetScannerScanRuleSet:
         scanner.scan_rule_set()
         assert len(feeder._parents) == 1
         assert len(feeder._children) == 1
+
+    def test_scan_canonicalises_in_iteration_child(self):
+        reader = _MockLineReader([
+            "status IS active\n",
+            "    AND ALL period IN service history\n",
+        ])
+        feeder = _MockScanFeeder()
+        scanner = RuleSetScanner(reader, feeder)
+        scanner.scan_rule_set()
+        assert feeder._children[0][1] == "ALL period ITERATE: LIST OF service history"
+        assert feeder._children[0][2] == "AND"
+
+    def test_scan_preserves_not_all_iteration_quantifier(self):
+        reader = _MockLineReader([
+            "status IS active\n",
+            "    AND NOT ALL period IN service history\n",
+        ])
+        feeder = _MockScanFeeder()
+        scanner = RuleSetScanner(reader, feeder)
+        scanner.scan_rule_set()
+        assert feeder._children[0][1] == "NOT ALL period ITERATE: LIST OF service history"
+        assert feeder._children[0][2] == "AND"
+
+    def test_scan_canonicalises_exact_iteration_quantifier(self):
+        reader = _MockLineReader([
+            "status IS active\n",
+            "    AND EXACTLY 3 period IN service history\n",
+        ])
+        feeder = _MockScanFeeder()
+        scanner = RuleSetScanner(reader, feeder)
+        scanner.scan_rule_set()
+        assert feeder._children[0][1] == "EXACTLY 3 period ITERATE: LIST OF service history"
+        assert feeder._children[0][2] == "AND"
+
+    def test_scan_canonicalises_at_least_iteration_quantifier(self):
+        reader = _MockLineReader([
+            "status IS active\n",
+            "    AND AT LEAST 3 period IN service history\n",
+        ])
+        feeder = _MockScanFeeder()
+        scanner = RuleSetScanner(reader, feeder)
+        scanner.scan_rule_set()
+        assert feeder._children[0][1] == "AT LEAST 3 period ITERATE: LIST OF service history"
+        assert feeder._children[0][2] == "AND"
+
+    def test_scan_canonicalises_at_most_iteration_quantifier(self):
+        reader = _MockLineReader([
+            "status IS active\n",
+            "    AND AT MOST 3 period IN service history\n",
+        ])
+        feeder = _MockScanFeeder()
+        scanner = RuleSetScanner(reader, feeder)
+        scanner.scan_rule_set()
+        assert feeder._children[0][1] == "AT MOST 3 period ITERATE: LIST OF service history"
+        assert feeder._children[0][2] == "AND"
 
     def test_scan_comment_line(self):
         reader = _MockLineReader(["# Reference: test\n"])

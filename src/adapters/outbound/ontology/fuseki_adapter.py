@@ -10,7 +10,8 @@ Connection details are read from environment variables:
 """
 
 import os
-from typing import List, Optional, Tuple
+import re
+from typing import Any, List, Optional, Tuple
 
 import structlog
 
@@ -83,6 +84,11 @@ class FusekiAdapter:
         )
 
     @staticmethod
+    def rule_projection_graph_uri(rule_name: str) -> str:
+        """Return the stable named graph URI for a rule ontology projection."""
+        return f"{INF_NS}projection/rule/{_sanitize_uri(rule_name)}"
+
+    @staticmethod
     def health_check() -> bool:
         """
         Check Fuseki connectivity.
@@ -99,7 +105,7 @@ class FusekiAdapter:
 
         try:
             base_url = FUSEKI_URL.rsplit("/", 1)[0] if "/" in FUSEKI_URL.split("://", 1)[-1] else FUSEKI_URL
-            resp = _requests.get(f"{base_url}/$/ping", auth=_auth(), timeout=5)
+            resp = _requests.get(f"{base_url}/$/ping", auth=_read_auth(), timeout=5)
             if resp.status_code == 200:
                 return True
             raise FusekiConnectionError(f"Fuseki returned status {resp.status_code}")
@@ -135,7 +141,7 @@ class FusekiAdapter:
                 f"{FUSEKI_URL}/query",
                 data={"query": sparql},
                 headers={"Accept": "application/sparql-results+json"},
-                auth=_auth(),
+                auth=_read_auth(),
                 timeout=10,
             )
             if resp.status_code != 200:
@@ -155,6 +161,121 @@ class FusekiAdapter:
         except Exception:
             log.warning("fuseki_query_error", rule_name=rule_name, exc_info=True)
             return []
+
+    @staticmethod
+    def list_named_graphs() -> List[Tuple[str, int]]:
+        """
+        Return named graphs stored in Fuseki with triple counts.
+
+        Returns:
+            List of (graph_uri, triple_count) tuples sorted by count descending.
+        """
+        sparql = (
+            "SELECT ?g (COUNT(*) AS ?count) WHERE { "
+            "GRAPH ?g { ?s ?p ?o } "
+            "} GROUP BY ?g ORDER BY DESC(?count)"
+        )
+        results = FusekiAdapter._execute_sparql_select(sparql)
+        graphs: List[Tuple[str, int]] = []
+        for binding in results:
+            graph = binding.get("g", {}).get("value")
+            count_value = binding.get("count", {}).get("value", "0")
+            if not graph:
+                continue
+            try:
+                count = int(count_value)
+            except (TypeError, ValueError):
+                count = 0
+            graphs.append((graph, count))
+        return graphs
+
+    @staticmethod
+    def get_named_graph_triples(
+        graph_uri: str,
+        offset: int = 0,
+        limit: int = 1000,
+    ) -> List[Tuple[str, str, str]]:
+        """
+        Return triples from a named graph.
+
+        Args:
+            graph_uri: Named graph URI.
+            offset: Result offset.
+            limit: Maximum triples to return.
+        """
+        safe_uri = _validate_graph_uri(graph_uri)
+        safe_offset = max(0, int(offset))
+        safe_limit = max(1, min(int(limit), 5000))
+        sparql = (
+            "SELECT ?s ?p ?o WHERE { "
+            f"GRAPH <{safe_uri}> {{ ?s ?p ?o }} "
+            f"}} OFFSET {safe_offset} LIMIT {safe_limit}"
+        )
+        results = FusekiAdapter._execute_sparql_select(sparql)
+        return [
+            (b["s"]["value"], b["p"]["value"], b["o"]["value"])
+            for b in results
+            if "s" in b and "p" in b and "o" in b
+        ]
+
+    @staticmethod
+    def get_named_graph_all_triples(graph_uri: str) -> List[Tuple[str, str, str]]:
+        """Return every triple from a named graph for projection integrity checks."""
+        safe_uri = _validate_graph_uri(graph_uri)
+        sparql = (
+            "SELECT ?s ?p ?o WHERE { "
+            f"GRAPH <{safe_uri}> {{ ?s ?p ?o }} "
+            "}"
+        )
+        results = FusekiAdapter._execute_sparql_select(sparql)
+        return [
+            (b["s"]["value"], b["p"]["value"], b["o"]["value"])
+            for b in results
+            if "s" in b and "p" in b and "o" in b
+        ]
+
+    @staticmethod
+    def get_named_graph_triple_count(graph_uri: str) -> int:
+        """Return the stored triple count for a named graph."""
+        safe_uri = _validate_graph_uri(graph_uri)
+        sparql = (
+            "SELECT (COUNT(*) AS ?count) WHERE { "
+            f"GRAPH <{safe_uri}> {{ ?s ?p ?o }} "
+            "}"
+        )
+        results = FusekiAdapter._execute_sparql_select(sparql)
+        if not results:
+            return 0
+        value = results[0].get("count", {}).get("value", "0")
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def execute_guarded_select(
+        sparql: str,
+        *,
+        timeout_seconds: int = 10,
+        max_retries: int = 0,
+    ) -> List[dict[str, Any]]:
+        """Execute a validated read-only query with bounded timeout and retries."""
+        attempts = 1 + max(0, min(int(max_retries), 1))
+        safe_timeout = max(1, min(int(timeout_seconds), 10))
+        last_error: FusekiConnectionError | None = None
+        for attempt in range(attempts):
+            try:
+                return FusekiAdapter._execute_sparql_select(
+                    sparql,
+                    timeout_seconds=safe_timeout,
+                )
+            except FusekiConnectionError as exc:
+                last_error = exc
+                if attempt + 1 >= attempts:
+                    break
+        if last_error is not None:
+            raise last_error
+        return []
 
     @staticmethod
     def query_deltas(since_timestamp: float) -> List[Tuple]:
@@ -180,7 +301,7 @@ class FusekiAdapter:
             f"{FUSEKI_URL}/update",
             data={"update": sparql},
             headers={"Content-Type": "application/x-www-form-urlencoded"},
-            auth=_auth(),
+            auth=_write_auth(),
             timeout=30,
         )
         if resp.status_code not in (200, 204):
@@ -188,14 +309,50 @@ class FusekiAdapter:
                 f"Fuseki update failed: status={resp.status_code}"
             )
 
+    @staticmethod
+    def _execute_sparql_select(
+        sparql: str,
+        *,
+        timeout_seconds: int = 30,
+    ) -> List[dict[str, Any]]:
+        """Execute a SPARQL SELECT query and return JSON result bindings."""
+        if not REQUESTS_AVAILABLE:
+            log.warning("requests_not_installed_sparql_select_skipped")
+            return []
+
+        safe_timeout = max(1, int(timeout_seconds))
+        try:
+            resp = _requests.post(
+                f"{FUSEKI_URL}/query",
+                data={"query": sparql},
+                headers={"Accept": "application/sparql-results+json"},
+                auth=_read_auth(),
+                timeout=safe_timeout,
+            )
+        except Exception as exc:
+            raise FusekiConnectionError(f"Fuseki query failed: {exc}") from exc
+        if resp.status_code != 200:
+            raise FusekiConnectionError(
+                f"Fuseki query failed: status={resp.status_code}"
+            )
+        return resp.json().get("results", {}).get("bindings", [])
+
 
 def _sanitize_uri(name: str) -> str:
-    import re
     return re.sub(r"[^a-zA-Z0-9_\-]", "_", name)
 
 
+def _validate_graph_uri(uri: str) -> str:
+    value = str(uri).strip()
+    if not value.startswith(("http://", "https://", "urn:")):
+        raise ValueError("graph_uri must be an absolute URI")
+    if any(char in value for char in "<>\"{}|^`\\"):
+        raise ValueError("graph_uri contains invalid URI characters")
+    return value
+
+
 def _format_object(value: str) -> str:
-    if value.startswith("http://") or value.startswith("https://"):
+    if value.startswith(("http://", "https://", "urn:")):
         return f"<{value}>"
     escaped = (
         value.replace("\\", "\\\\")
@@ -207,8 +364,29 @@ def _format_object(value: str) -> str:
 
 
 def _auth() -> Optional[Tuple[str, str]]:
+    """Backward-compatible write/admin Fuseki auth helper."""
+    return _write_auth()
+
+
+def _write_auth() -> Optional[Tuple[str, str]]:
     username = os.environ.get("FUSEKI_USER", "admin")
     password = read_secret("FUSEKI_PASSWORD") or read_secret("ADMIN_PASSWORD", "admin")
+    return _basic_auth(username, password)
+
+
+def _read_auth() -> Optional[Tuple[str, str]]:
+    username = os.environ.get("FUSEKI_READ_USER") or os.environ.get(
+        "FUSEKI_USER", "admin"
+    )
+    password = (
+        read_secret("FUSEKI_READ_PASSWORD")
+        or read_secret("FUSEKI_PASSWORD")
+        or read_secret("ADMIN_PASSWORD", "admin")
+    )
+    return _basic_auth(username, password)
+
+
+def _basic_auth(username: str, password: Optional[str]) -> Optional[Tuple[str, str]]:
     if not username:
         return None
-    return (username, password)
+    return (username, password or "")

@@ -9,13 +9,19 @@ Gated by ASYNC_SYNC_ENABLED feature flag — the publisher checks the flag
 before submitting tasks to the queue.
 """
 
-import hashlib
 import json
-import time
-from typing import Dict, Optional
+import uuid
+from datetime import datetime, timezone
+from hashlib import sha256
+from typing import Any, Dict, Optional
 
 import structlog
 
+from src.adapters.outbound.ontology.fuseki_adapter import FusekiAdapter
+from src.adapters.outbound.ontology.inferra_to_rdf_compiler import (
+    COMPILER_VERSION,
+    InferraToRdfCompiler,
+)
 from src.domain.state.feature_flags import FeatureFlags
 from src.infrastructure.secrets import redis_client_from_env
 from src.tasks.celery_app import CELERY_AVAILABLE, app
@@ -23,6 +29,81 @@ from src.tasks.celery_app import CELERY_AVAILABLE, app
 log = structlog.get_logger()
 
 _inflight_tasks: Dict[str, str] = {}
+DEAD_LETTER_QUEUE = "inferra:dead_letter_queue"
+PROJECTION_METADATA_KEY_PREFIX = "inferra:ontology_projection"
+
+
+def build_projection_source_hash(rule_text: str) -> str:
+    """Hash the exact import-aware source text compiled into the RDF projection."""
+    return sha256(rule_text.encode("utf-8")).hexdigest()
+
+
+def get_projection_metadata(rule_name: str) -> Optional[dict[str, Any]]:
+    """Read stored projection metadata from Redis, if available."""
+    try:
+        r = redis_client_from_env("REDIS_URL", "redis://localhost:6379/0", 0)
+        raw = r.get(_projection_metadata_key(rule_name))
+        if raw is None:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        log.warning("projection_metadata_read_failed", rule_name=rule_name, exc_info=True)
+        return None
+
+
+def record_projection_metadata(
+    rule_name: str,
+    metadata: dict[str, Any],
+) -> bool:
+    """Persist sanitized projection metadata for status APIs and AXIOM display."""
+    payload = {
+        "rule_name": rule_name,
+        "compiler_version": COMPILER_VERSION,
+        "graph_uri": FusekiAdapter.rule_projection_graph_uri(rule_name),
+        "sync_timestamp": _utc_timestamp(),
+        **metadata,
+    }
+    try:
+        r = redis_client_from_env("REDIS_URL", "redis://localhost:6379/0", 0)
+        r.set(_projection_metadata_key(rule_name), json.dumps(payload, sort_keys=True))
+        return True
+    except Exception:
+        log.warning("projection_metadata_write_failed", rule_name=rule_name, exc_info=True)
+        return False
+
+
+def list_rule_dead_letters(
+    rule_name: Optional[str] = None,
+    source_hash: Optional[str] = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Return visible Fuseki sync dead letters, filtered by rule/source when supplied."""
+    try:
+        r = redis_client_from_env("REDIS_URL", "redis://localhost:6379/0", 0)
+        raw_items = r.lrange(DEAD_LETTER_QUEUE, 0, max(0, int(limit)) - 1)
+    except Exception:
+        log.warning("dead_letter_read_failed", rule_name=rule_name, exc_info=True)
+        return []
+
+    events: list[dict[str, Any]] = []
+    for raw in raw_items:
+        try:
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8")
+            event = json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if rule_name is not None and event.get("rule_name") != rule_name:
+            continue
+        if source_hash is not None and event.get("source_hash") != source_hash:
+            continue
+        events.append(event)
+    return events
 
 
 def publish_rule_updated_event(
@@ -57,7 +138,7 @@ def publish_rule_updated_event(
         log.warning("celery_not_available", rule_name=rule_name)
         return None
 
-    source_hash = hashlib.sha256(rule_text.encode()).hexdigest()
+    source_hash = build_projection_source_hash(rule_text)
 
     if _is_task_pending(rule_name, source_hash):
         log.info(
@@ -69,6 +150,14 @@ def publish_rule_updated_event(
 
     result = compile_and_push_to_fuseki.delay(rule_name, rule_text, source_hash)
     _inflight_tasks[source_hash] = result.id
+    record_projection_metadata(
+        rule_name,
+        {
+            "source_hash": source_hash,
+            "sync_status": "syncing",
+            "job_id": result.id,
+        },
+    )
 
     log.info(
         "rule_updated_published",
@@ -104,18 +193,36 @@ def publish_dead_letter_event(
     rule_name: str, rule_text: str, source_hash: str, error: str
 ) -> None:
     """Publish to dead-letter Redis list for manual reprocessing."""
+    timestamp = _utc_timestamp()
+    dead_letter_id = uuid.uuid4().hex
+    error_summary = _sanitize_error_summary(error)
+    graph_uri = FusekiAdapter.rule_projection_graph_uri(rule_name)
+    payload = {
+        "dead_letter_id": dead_letter_id,
+        "rule_name": rule_name,
+        "source_hash": source_hash,
+        "compiler_version": COMPILER_VERSION,
+        "graph_uri": graph_uri,
+        "last_error_code": "FUSEKI_SYNC_FAILED",
+        "last_error_summary": error_summary,
+        "error": error_summary,
+        "timestamp": timestamp,
+    }
     try:
         r = redis_client_from_env("REDIS_URL", "redis://localhost:6379/0", 0)
-        r.lpush(
-            "inferra:dead_letter_queue",
-            json.dumps(
-                {
-                    "rule_name": rule_name,
-                    "source_hash": source_hash,
-                    "error": error,
-                    "timestamp": time.time(),
-                }
-            ),
+        r.lpush(DEAD_LETTER_QUEUE, json.dumps(payload, sort_keys=True))
+        record_projection_metadata(
+            rule_name,
+            {
+                "source_hash": source_hash,
+                "sync_status": "dead_lettered",
+                "dead_letter_visible": True,
+                "dead_letter_id": dead_letter_id,
+                "last_error_code": "FUSEKI_SYNC_FAILED",
+                "last_error_summary": error_summary,
+                "graph_uri": graph_uri,
+                "sync_timestamp": timestamp,
+            },
         )
         log.error("dead_letter_published", rule_name=rule_name, error=error)
     except Exception:
@@ -128,9 +235,8 @@ def publish_dead_letter_event(
 
 
 if CELERY_AVAILABLE:
-    from celery import shared_task
 
-    @shared_task(bind=True, max_retries=3, default_retry_delay=60, rate_limit="10/m")
+    @app.task(bind=True, max_retries=3, default_retry_delay=60, rate_limit="10/m")
     def compile_and_push_to_fuseki(
         self, rule_name: str, rule_text: str, source_hash: str
     ) -> dict:
@@ -163,18 +269,45 @@ if CELERY_AVAILABLE:
         try:
             task_log.info("fuseki_sync_start", rule_name=rule_name)
 
-            from src.adapters.outbound.ontology.inferra_to_rdf_compiler import (
-                InferraToRdfCompiler,
-            )
-
             rdf_triples = InferraToRdfCompiler.compile(rule_text, rule_name)
-            _fuseki_write_with_breaker(rdf_triples, version=source_hash)
+            unique_triple_count = len(set(rdf_triples))
+            graph_uri = FusekiAdapter.rule_projection_graph_uri(rule_name)
+            _fuseki_write_with_breaker(
+                rdf_triples,
+                version=source_hash,
+                graph_uri=graph_uri,
+            )
+            stored_triple_count = FusekiAdapter.get_named_graph_triple_count(graph_uri)
+            record_projection_metadata(
+                rule_name,
+                {
+                    "source_hash": source_hash,
+                    "compiled_triple_count": unique_triple_count,
+                    "stored_triple_count": stored_triple_count,
+                    "sync_status": (
+                        "current"
+                        if stored_triple_count == unique_triple_count
+                        else "stale"
+                    ),
+                    "graph_uri": graph_uri,
+                    "job_id": self.request.id,
+                    "dead_letter_visible": False,
+                },
+            )
 
             if source_hash in _inflight_tasks:
                 del _inflight_tasks[source_hash]
 
             task_log.info("fuseki_sync_success", rule_name=rule_name)
-            return {"status": "success", "rule": rule_name, "hash": source_hash}
+            return {
+                "status": "success",
+                "rule": rule_name,
+                "hash": source_hash,
+                "compiler_version": COMPILER_VERSION,
+                "compiled_triple_count": unique_triple_count,
+                "stored_triple_count": stored_triple_count,
+                "graph_uri": graph_uri,
+            }
 
         except Exception as exc:
             task_log.warning(
@@ -191,7 +324,11 @@ if CELERY_AVAILABLE:
             raise
 
 
-def _fuseki_write_with_breaker(rdf_triples, version: str) -> None:
+def _fuseki_write_with_breaker(
+    rdf_triples,
+    version: str,
+    graph_uri: Optional[str] = None,
+) -> None:
     """
     Write RDF triples to Fuseki with circuit breaker protection.
 
@@ -203,11 +340,7 @@ def _fuseki_write_with_breaker(rdf_triples, version: str) -> None:
 
         @circuit(failure_threshold=5, recovery_timeout=60)
         def _write_with_protection():
-            from src.adapters.outbound.ontology.fuseki_adapter import FusekiAdapter
-
-            FusekiAdapter.execute_sparql_idempotent_insert(
-                rdf_triples, version=version
-            )
+            _write_fuseki_projection(rdf_triples, version=version, graph_uri=graph_uri)
 
         _write_with_protection()
 
@@ -216,8 +349,34 @@ def _fuseki_write_with_breaker(rdf_triples, version: str) -> None:
 
         fallback_log = structlog.get_logger()
         fallback_log.debug("circuitbreaker_not_installed_fusing_direct_write")
-        from src.adapters.outbound.ontology.fuseki_adapter import FusekiAdapter
 
-        FusekiAdapter.execute_sparql_idempotent_insert(
-            rdf_triples, version=version
-        )
+        _write_fuseki_projection(rdf_triples, version=version, graph_uri=graph_uri)
+
+
+def _write_fuseki_projection(
+    rdf_triples,
+    version: str,
+    graph_uri: Optional[str] = None,
+) -> None:
+    if graph_uri is None:
+        FusekiAdapter.execute_sparql_idempotent_insert(rdf_triples, version=version)
+        return
+    FusekiAdapter.execute_sparql_idempotent_insert(
+        rdf_triples,
+        version=version,
+        graph_uri=graph_uri,
+    )
+
+
+def _projection_metadata_key(rule_name: str) -> str:
+    digest = sha256(rule_name.encode("utf-8")).hexdigest()[:24]
+    return f"{PROJECTION_METADATA_KEY_PREFIX}:{digest}"
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _sanitize_error_summary(error: str) -> str:
+    summary = " ".join(str(error).split())
+    return summary[:300]

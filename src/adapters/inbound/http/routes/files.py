@@ -6,13 +6,22 @@ Handles document conversion and streaming transformation.
 import os
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
-from src.adapters.outbound.llm.streamer import transform_to_inferra_rules_stream
+from src.adapters.inbound.http.dependencies import require_scope
 from src.adapters.inbound.http.schemas.files import ConversionError
+from src.adapters.outbound.llm.streamer import (
+    PromptSizeExceeded,
+    transform_to_inferra_rules_stream,
+    validate_document_prompt_size,
+)
 from src.infrastructure.logging_config import get_logger
-from src.services.file_service import FileConversionService, validate_uploaded_file
+from src.services.file_service import (
+    FileConversionLimitError,
+    FileConversionService,
+    validate_uploaded_file,
+)
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 logger = get_logger("inferra.fastapi.files")
@@ -49,6 +58,7 @@ async def _stream_conversion(
 
 @router.post(
     "/convert",
+    dependencies=[Depends(require_scope("files:convert"))],
     responses={
         200: {
             "description": "Streaming response with converted INFERRA rules",
@@ -115,6 +125,9 @@ async def convert_document(
         try:
             markdown_content = FileConversionService.convert_to_markdown(temp_file_path)
             logger.info("file_converted_to_markdown", content_length=len(markdown_content))
+            validate_document_prompt_size(markdown_content)
+        except (FileConversionLimitError, PromptSizeExceeded) as e:
+            raise HTTPException(status_code=413, detail=str(e))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         except FileNotFoundError as e:
@@ -144,9 +157,11 @@ async def convert_document(
 
 @router.post(
     "/convert-to-markdown",
+    dependencies=[Depends(require_scope("files:convert"))],
     response_model=dict,
     responses={
         400: {"model": ConversionError},
+        413: {"model": ConversionError},
         500: {"model": ConversionError},
     },
 )
@@ -189,6 +204,8 @@ async def convert_to_markdown(
         # Convert to markdown
         try:
             markdown_content = FileConversionService.convert_to_markdown(temp_file_path)
+        except FileConversionLimitError as e:
+            raise HTTPException(status_code=413, detail=str(e))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as exc:

@@ -4,13 +4,28 @@ Orchestrates inference session lifecycle and state management.
 """
 
 import uuid
-from typing import Optional, Tuple, TYPE_CHECKING
+from typing import Any, Iterable, Mapping, Optional, Tuple, TYPE_CHECKING
 
 from src.domain.inference.session import InferenceSession
 from src.domain.inference.inference_engine import InferenceEngine
 from src.domain.inference.assessment import Assessment
+from src.domain.inference.semantic_question_strategy import SemanticQuestionStrategy
 from src.domain.nodes.node_set import NodeSet
-from src.domain.state.feature_flags import FeatureFlags, get_feature_flags
+from src.domain.reasoning.semantic_fact_enricher import (
+    OntologyIndex,
+    OntologyTriple,
+    build_ontology_constraint_suggestions,
+    build_ontology_value_suggestions,
+    build_semantic_suggestions,
+)
+from src.domain.reasoning.ontology_reasoner import OntologyReasoner
+from src.domain.session.inference_context import InferenceContext
+from src.domain.state.feature_flags import (
+    FeatureFlags,
+    feature_flags_from_snapshot,
+    get_feature_flags,
+    ontology_flags_snapshot,
+)
 from src.ports.session_store_port import SessionStorePort
 from src.infrastructure.logging_config import get_logger
 
@@ -53,7 +68,10 @@ class InferenceSessionService:
         return str(uuid.uuid4())
 
     @staticmethod
-    def _snapshot_and_freeze_flags() -> FeatureFlags:
+    def _snapshot_and_freeze_flags(
+        ontology_profile: Optional[str] = None,
+        ontology_flags: Optional[Mapping[str, Any]] = None,
+    ) -> Tuple[FeatureFlags, str]:
         """
         Read the current global FeatureFlags, build a fresh per-session instance
         from that snapshot, and freeze it. Per-session instance means a later
@@ -61,33 +79,17 @@ class InferenceSessionService:
         the change — that's the start-of-session-sticky guarantee from plan §6.
 
         Returns:
-            Frozen per-session FeatureFlags
+            Tuple of frozen per-session FeatureFlags and selected ontology profile
         """
         global_flags = get_feature_flags()
         snapshot = global_flags.snapshot()
-        session_flags = FeatureFlags(
-            use_hypergraph=snapshot["use_hypergraph"],
-            legacy_iterate=snapshot["legacy_iterate"],
-            layered_memory=snapshot["layered_memory"],
-            ml_optimized_dfs=snapshot["ml_optimized_dfs"],
-            async_sync_enabled=snapshot["async_sync_enabled"],
-            modular_imports=snapshot["modular_imports"],
-            hybrid_orchestrator=snapshot["hybrid_orchestrator"],
-            async_post_reasoning=snapshot["async_post_reasoning"],
-            prov_o_trace=snapshot["prov_o_trace"],
-            enriched_api=snapshot["enriched_api"],
-            redis_session_store=snapshot["redis_session_store"],
-            llm_enhancements=snapshot["llm_enhancements"],
-            strict_port_contracts=snapshot["strict_port_contracts"],
-            observability_enabled=snapshot["observability_enabled"],
-            auth_enabled=snapshot["auth_enabled"],
-            abduction_enabled=snapshot["abduction_enabled"],
-            induction_pipeline=snapshot["induction_pipeline"],
-            reasoning_router=snapshot["reasoning_router"],
-            confidence_thresholds=snapshot["confidence_thresholds"],
+        session_flags, selected_profile = feature_flags_from_snapshot(
+            snapshot,
+            ontology_profile=ontology_profile,
+            ontology_flags=ontology_flags,
         )
         session_flags.freeze()
-        return session_flags
+        return session_flags, selected_profile
     
     def create_session(
         self,
@@ -96,6 +98,9 @@ class InferenceSessionService:
         node_set: NodeSet,
         history_dict: Optional[dict] = None,
         owner_id: Optional[str] = None,
+        ontology_profile: Optional[str] = None,
+        ontology_flags: Optional[Mapping[str, Any]] = None,
+        llm_configuration: Optional[Mapping[str, Any]] = None,
     ) -> InferenceSession:
         """
         Create a new inference session.
@@ -125,7 +130,10 @@ class InferenceSessionService:
 
         # Snapshot + freeze feature flags at session start so they can't flip
         # mid-session — see plan §6 mid-session-flip risk row.
-        session_flags = self._snapshot_and_freeze_flags()
+        session_flags, selected_ontology_profile = self._snapshot_and_freeze_flags(
+            ontology_profile,
+            ontology_flags,
+        )
 
         # Create inference engine
         inference_engine = InferenceEngine(node_set, feature_flags=session_flags)
@@ -146,6 +154,11 @@ class InferenceSessionService:
             inference_engine=inference_engine,
             assessment=assessment,
             feature_flags=session_flags,
+            ontology_profile=selected_ontology_profile,
+            ontology_profile_source=(
+                "request" if ontology_profile or ontology_flags else "environment"
+            ),
+            llm_configuration=dict(llm_configuration or {}),
             owner_id=owner_id,
         )
         
@@ -174,6 +187,15 @@ class InferenceSessionService:
             InferenceSession if found, None otherwise
         """
         return self._store.get(session_id)
+
+    def list_sessions(self) -> list[InferenceSession]:
+        """Return currently stored inference sessions."""
+        sessions: list[InferenceSession] = []
+        for session_id in self._store.list_sessions():
+            session = self._store.get(session_id)
+            if session is not None:
+                sessions.append(session)
+        return sessions
     
     def get_or_create_session(
         self,
@@ -182,6 +204,8 @@ class InferenceSessionService:
         target_node_name: str,
         node_set: NodeSet,
         history_dict: Optional[dict] = None,
+        ontology_profile: Optional[str] = None,
+        ontology_flags: Optional[Mapping[str, Any]] = None,
     ) -> Tuple[InferenceSession, bool]:
         """
         Get an existing session or create a new one.
@@ -209,6 +233,8 @@ class InferenceSessionService:
             target_node_name=target_node_name,
             node_set=node_set,
             history_dict=history_dict,
+            ontology_profile=ontology_profile,
+            ontology_flags=ontology_flags,
         )
         return session, True
     
@@ -253,15 +279,18 @@ class InferenceSessionService:
         rule_name: str,
         target_node_name: str,
         rule_service: 'RuleService',
-        use_history: bool = False,
+        use_history: bool = True,
         owner_id: Optional[str] = None,
+        ontology_profile: Optional[str] = None,
+        ontology_flags: Optional[Mapping[str, Any]] = None,
+        llm_configuration: Optional[Mapping[str, Any]] = None,
     ) -> InferenceSession:
         """
         Create a new inference session by parsing a rule.
         
         This is a convenience method that:
         1. Uses RuleService to parse the rule and build a NodeSet
-        2. Optionally uses history for ML-enhanced inference
+        2. Uses history for ML-enhanced inference by default
         3. Creates and stores the inference session
         
         Args:
@@ -287,10 +316,207 @@ class InferenceSessionService:
         node_set = parser.get_node_set()
         
         # Create the session
-        return self.create_session(
+        session = self.create_session(
             rule_name=rule_name,
             target_node_name=target_node_name,
             node_set=node_set,
             history_dict=history_dict,
             owner_id=owner_id,
+            ontology_profile=ontology_profile,
+            ontology_flags=ontology_flags,
+            llm_configuration=llm_configuration,
         )
+        if self._attach_ontology_advisory_context(session, node_set, rule_service):
+            self._store.save(session)
+        return session
+
+    def _attach_ontology_advisory_context(
+        self,
+        session: InferenceSession,
+        node_set: NodeSet,
+        rule_service: 'RuleService',
+    ) -> bool:
+        flags = session.feature_flags
+        if flags is None or not (
+            flags.ontology_advisory_enabled
+            or flags.ontology_reasoning
+            or flags.ontology_question_strategy
+        ):
+            return False
+
+        assessment_state = session.inference_engine.get_assessment_state()
+        context = InferenceContext(
+            session_id=session.session_id,
+            rule_name=session.rule_name,
+            target=session.target_node_name,
+            mandatory=list(assessment_state.get_mandatory_list()),
+            fact_store=assessment_state.get_fact_store(),
+            ontology_profile=session.ontology_profile,
+            ontology_profile_source=session.ontology_profile_source,
+            ontology_flags=ontology_flags_snapshot(flags),
+        )
+
+        try:
+            ontology = rule_service.get_rule_ontology_data(session.rule_name)
+            triples = tuple(_ontology_triples_from_payload(ontology))
+            ontology_index = OntologyIndex(triples)
+            graph_uri = str(ontology.get("graph_uri") or "compiled_rule_projection")
+            snapshot_hash = str(ontology.get("source_hash") or "")
+            snapshot_ref = (
+                f"{session.rule_name}:{snapshot_hash}"
+                if snapshot_hash
+                else f"{session.rule_name}:compiled"
+            )
+            report, suggestions = build_semantic_suggestions(
+                _candidate_fact_names(node_set),
+                triples,
+                source_graph_uri=graph_uri,
+                ontology_snapshot_ref=snapshot_ref,
+                ontology_snapshot_hash=snapshot_hash or None,
+            )
+            trace = report.to_trace()
+            context.ontology_snapshot_ref = snapshot_ref
+            context.ontology_snapshot_hash = snapshot_hash or None
+            context.ontology_graph_uris = [graph_uri]
+            context.ontology_reasoner_enabled = flags.ontology_reasoning
+            context.ontology_reasoning_confidence_threshold = (
+                flags.ontology_reasoning_confidence_threshold
+            )
+            context.ontology_reasoning_min_hierarchy_depth = (
+                flags.ontology_reasoning_min_hierarchy_depth
+            )
+            context.ontology_reasoning_max_closure_depth = (
+                flags.ontology_reasoning_max_closure_depth
+            )
+            context.ontology_binding_count = trace["bindingCount"]
+            context.ontology_binding_ambiguity_count = trace["ambiguityCount"]
+            context.ontology_missing_binding_count = trace["missingCount"]
+            context.ontology_advisory_trace = [trace]
+            context.ontology_advisory_suggestions = {
+                fact_name: [item.to_dict() for item in fact_suggestions]
+                for fact_name, fact_suggestions in suggestions.items()
+                if fact_suggestions
+            }
+            value_suggestions = build_ontology_value_suggestions(
+                report,
+                triples,
+                ontology_snapshot_ref=snapshot_ref,
+                ontology_snapshot_hash=snapshot_hash or None,
+            )
+            constraint_suggestions = build_ontology_constraint_suggestions(
+                report,
+                triples,
+                ontology_snapshot_ref=snapshot_ref,
+                ontology_snapshot_hash=snapshot_hash or None,
+            )
+            context.ontology_value_suggestions = {
+                fact_name: [item.to_dict() for item in fact_suggestions]
+                for fact_name, fact_suggestions in value_suggestions.items()
+                if fact_suggestions
+            }
+            context.ontology_constraint_suggestions = {
+                fact_name: [item.to_dict() for item in fact_suggestions]
+                for fact_name, fact_suggestions in constraint_suggestions.items()
+                if fact_suggestions
+            }
+            session.inference_engine.configure_ontology_auto_answer(
+                context.ontology_value_suggestions,
+                ontology_snapshot_hash=context.ontology_snapshot_hash,
+            )
+            ontology_reasoner = OntologyReasoner(
+                source_graph_uri=graph_uri,
+                ontology_snapshot_ref=snapshot_ref,
+                ontology_snapshot_hash=snapshot_hash or None,
+                confidence_threshold=(
+                    flags.ontology_reasoning_confidence_threshold
+                ),
+                min_hierarchy_depth=(
+                    flags.ontology_reasoning_min_hierarchy_depth
+                ),
+                max_closure_depth=(
+                    flags.ontology_reasoning_max_closure_depth
+                ),
+            )
+            if flags.ontology_reasoning:
+                session.inference_engine.configure_ontology_reasoner(
+                    ontology_reasoner,
+                    ontology_index,
+                )
+            if flags.ontology_question_strategy:
+                session.inference_engine.set_question_strategy(
+                    SemanticQuestionStrategy(
+                        reasoner=ontology_reasoner,
+                        ontology_index=ontology_index,
+                        fact_store=assessment_state.get_fact_store(),
+                        value_suggestions=context.ontology_value_suggestions,
+                        allow_pruning=flags.ontology_reasoning,
+                    )
+                )
+                context.question_strategy_name = "semantic_ontology"
+            _logger.info(
+                "ontology_advisory_snapshot_attached",
+                session_id=session.session_id,
+                rule_name=session.rule_name,
+                source_hash=context.ontology_snapshot_hash,
+                binding_count=context.ontology_binding_count,
+                ambiguity_count=context.ontology_binding_ambiguity_count,
+                missing_count=context.ontology_missing_binding_count,
+            )
+        except Exception as exc:
+            context.ontology_snapshot_ref = f"{session.rule_name}:unavailable"
+            context.ontology_reasoner_enabled = flags.ontology_reasoning
+            context.ontology_advisory_trace = [
+                {
+                    "status": "unavailable",
+                    "error": str(exc),
+                    "bindingCount": 0,
+                    "ambiguityCount": 0,
+                    "missingCount": 0,
+                }
+            ]
+            _logger.warning(
+                "ontology_advisory_snapshot_failed",
+                session_id=session.session_id,
+                rule_name=session.rule_name,
+                exc_info=True,
+            )
+
+        session.context = context
+        return True
+
+
+def _ontology_triples_from_payload(payload: dict[str, Any]) -> Iterable[OntologyTriple]:
+    for item in payload.get("triples", ()):
+        if isinstance(item, dict):
+            subject = item.get("subject")
+            predicate = item.get("predicate")
+            obj = item.get("object")
+            if subject and predicate and obj is not None:
+                yield (str(subject), str(predicate), str(obj))
+            continue
+        if isinstance(item, (tuple, list)) and len(item) == 3:
+            subject, predicate, obj = item
+            yield (str(subject), str(predicate), str(obj))
+
+
+def _candidate_fact_names(node_set: NodeSet) -> Iterable[str]:
+    names: set[str] = set()
+
+    for accessor_name in ("get_input_dictionary", "get_fact_dictionary"):
+        accessor = getattr(node_set, accessor_name, None)
+        if callable(accessor):
+            values = accessor()
+            if isinstance(values, dict):
+                names.update(str(name) for name in values)
+
+    node_dictionary = node_set.get_node_dictionary()
+    for node_name, node in node_dictionary.items():
+        names.add(str(node_name))
+        for accessor_name in ("get_node_name", "get_variable_name"):
+            accessor = getattr(node, accessor_name, None)
+            if callable(accessor):
+                value = accessor()
+                if isinstance(value, str) and value:
+                    names.add(value)
+
+    return sorted(names)

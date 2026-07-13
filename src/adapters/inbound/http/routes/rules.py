@@ -1,13 +1,20 @@
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
-from src.adapters.inbound.http.dependencies import get_db_session
+from src.adapters.inbound.http.dependencies import get_db_session, require_scope
+from src.adapters.inbound.http.schemas.ontology_artifacts import (
+    OntologyArtifactResponse,
+)
 from src.adapters.inbound.http.schemas.rules import (
     CreateRuleFileRequest,
     CreateRuleRequest,
     LatestRuleFileResponse,
     LatestRuleHistoryResponse,
     RuleCreatedResponse,
+    RuleGraphResponse,
+    RuleOntologyBatchSyncResponse,
+    RuleOntologyResponse,
+    RuleOntologySyncResponse,
     RuleSetCreateRequest,
     RuleSetDetailResponse,
     RuleSetSummaryResponse,
@@ -70,6 +77,7 @@ async def list_rule_sets(db: Session = Depends(get_db_session)) -> list[RuleSetS
 
 @modern_router.post(
     "",
+    dependencies=[Depends(require_scope("rules:write"))],
     response_model=RuleSetDetailResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -88,6 +96,17 @@ async def create_rule_set(
     return _to_modern_detail(service, payload.rule_name)
 
 
+@modern_router.post(
+    "/ontology/sync-all",
+    dependencies=[Depends(require_scope("ontology:write"))],
+    response_model=RuleOntologyBatchSyncResponse,
+)
+async def sync_all_rule_set_ontologies(
+    db: Session = Depends(get_db_session),
+) -> RuleOntologyBatchSyncResponse:
+    return RuleOntologyBatchSyncResponse.model_validate(_service(db).sync_all_rule_ontologies())
+
+
 @modern_router.get("/{rule_name}", response_model=RuleSetDetailResponse)
 async def get_rule_set(
     rule_name: str,
@@ -96,8 +115,76 @@ async def get_rule_set(
     return _to_modern_detail(_service(db), rule_name)
 
 
+@modern_router.get("/{rule_name}/graph", response_model=RuleGraphResponse)
+async def get_rule_set_graph(
+    rule_name: str,
+    db: Session = Depends(get_db_session),
+) -> RuleGraphResponse:
+    return RuleGraphResponse.model_validate(_service(db).get_rule_graph_data(rule_name))
+
+
+@modern_router.get("/{rule_name}/ontology", response_model=RuleOntologyResponse)
+async def get_rule_set_ontology(
+    rule_name: str,
+    db: Session = Depends(get_db_session),
+) -> RuleOntologyResponse:
+    return RuleOntologyResponse.model_validate(_service(db).get_rule_ontology_data(rule_name))
+
+
+@modern_router.get("/{rule_name}/ontology/artifact", response_model=OntologyArtifactResponse)
+async def get_rule_set_ontology_artifact(
+    rule_name: str,
+    db: Session = Depends(get_db_session),
+) -> OntologyArtifactResponse:
+    return OntologyArtifactResponse.model_validate(
+        _service(db).get_rule_ontology_artifact(rule_name)
+    )
+
+
+@modern_router.get("/{rule_name}/ontology/artifact/download")
+async def download_rule_set_ontology_artifact(
+    rule_name: str,
+    db: Session = Depends(get_db_session),
+) -> Response:
+    artifact = _service(db).get_rule_ontology_artifact(rule_name)
+    return Response(
+        content=artifact["turtle"],
+        media_type="text/turtle; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{artifact["artifact_name"]}"'
+        },
+    )
+
+
+@modern_router.post(
+    "/{rule_name}/ontology/sync",
+    dependencies=[Depends(require_scope("ontology:write"))],
+    response_model=RuleOntologySyncResponse,
+)
+async def sync_rule_set_ontology(
+    rule_name: str,
+    db: Session = Depends(get_db_session),
+) -> RuleOntologySyncResponse:
+    return RuleOntologySyncResponse.model_validate(_service(db).sync_rule_ontology(rule_name))
+
+
+@modern_router.post(
+    "/{rule_name}/ontology/sync-collection",
+    dependencies=[Depends(require_scope("ontology:write"))],
+    response_model=RuleOntologyBatchSyncResponse,
+)
+async def sync_rule_set_collection_ontology(
+    rule_name: str,
+    db: Session = Depends(get_db_session),
+) -> RuleOntologyBatchSyncResponse:
+    return RuleOntologyBatchSyncResponse.model_validate(
+        _service(db).sync_rule_collection_ontology(rule_name)
+    )
+
+
 @modern_router.post(
     "/{rule_name}/versions",
+    dependencies=[Depends(require_scope("rules:write"))],
     response_model=RuleSetVersionResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -189,7 +276,11 @@ async def find_all_rules(db: Session = Depends(get_db_session)) -> list[RuleSumm
     return [RuleSummaryResponse.model_validate(rule) for rule in _service(db).list_rules()]
 
 
-@legacy_router.post("/updateRule", response_model=UpdateRuleResponse)
+@legacy_router.post(
+    "/updateRule",
+    dependencies=[Depends(require_scope("rules:write"))],
+    response_model=UpdateRuleResponse,
+)
 async def update_rule(payload: UpdateRuleRequest, db: Session = Depends(get_db_session)) -> UpdateRuleResponse:
     rule = _service(db).update_rule(
         payload.oldRuleName,
@@ -199,7 +290,11 @@ async def update_rule(payload: UpdateRuleRequest, db: Session = Depends(get_db_s
     return UpdateRuleResponse(newRuleName=rule.name, newCategory=rule.category)
 
 
-@legacy_router.post("/createNewRule", response_model=RuleCreatedResponse)
+@legacy_router.post(
+    "/createNewRule",
+    dependencies=[Depends(require_scope("rules:write"))],
+    response_model=RuleCreatedResponse,
+)
 async def create_new_rule(payload: CreateRuleRequest, db: Session = Depends(get_db_session)) -> RuleCreatedResponse:
     rule = _service(db).create_rule(payload.name, payload.category, payload.description)
     return RuleCreatedResponse(
@@ -209,7 +304,11 @@ async def create_new_rule(payload: CreateRuleRequest, db: Session = Depends(get_
     )
 
 
-@legacy_router.post("/saveConvertedRule", response_model=RuleCreatedResponse)
+@legacy_router.post(
+    "/saveConvertedRule",
+    dependencies=[Depends(require_scope("rules:write"))],
+    response_model=RuleCreatedResponse,
+)
 async def save_converted_rule(
     payload: SaveConvertedRuleRequest,
     db: Session = Depends(get_db_session),
@@ -228,7 +327,11 @@ async def save_converted_rule(
     )
 
 
-@legacy_router.post("/createFile", response_model=RuleTextResponse)
+@legacy_router.post(
+    "/createFile",
+    dependencies=[Depends(require_scope("rules:write"))],
+    response_model=RuleTextResponse,
+)
 async def create_file(payload: CreateRuleFileRequest, db: Session = Depends(get_db_session)) -> RuleTextResponse:
     return RuleTextResponse(
         ruleText=_service(db).create_rule_file(

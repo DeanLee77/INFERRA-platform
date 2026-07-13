@@ -45,23 +45,25 @@ class TestSemanticCachePreload:
             cache = SemanticCache()
             with patch(f"{MODULE_PATH}.FusekiAdapter") as mock_fa:
                 cache.preload("rule1")
-                mock_fa.get_rule_triples.assert_not_called()
+                mock_fa.get_named_graph_all_triples.assert_not_called()
 
     def test_preload_hit_on_duplicate(self):
         with _rdflib_available_patch(True), _rdflib_patch():
             cache = SemanticCache()
             with patch(f"{MODULE_PATH}.FusekiAdapter") as mock_fa:
-                mock_fa.get_rule_triples.return_value = []
+                mock_fa.rule_projection_graph_uri.return_value = "urn:rule1"
+                mock_fa.get_named_graph_all_triples.return_value = []
                 cache.preload("rule1")
                 cache.preload("rule1")
-                assert mock_fa.get_rule_triples.call_count == 1
+                assert mock_fa.get_named_graph_all_triples.call_count == 1
                 assert cache._hit_count == 1
 
     def test_preload_miss_on_new_rule(self):
         with _rdflib_available_patch(True), _rdflib_patch():
             cache = SemanticCache()
             with patch(f"{MODULE_PATH}.FusekiAdapter") as mock_fa:
-                mock_fa.get_rule_triples.return_value = []
+                mock_fa.rule_projection_graph_uri.return_value = "urn:rule1"
+                mock_fa.get_named_graph_all_triples.return_value = []
                 cache.preload("rule1")
                 assert cache._miss_count == 1
 
@@ -71,17 +73,20 @@ class TestSemanticCachePreload:
             mock_graph = cache._graph
             mock_graph.__len__ = MagicMock(return_value=1)
             with patch(f"{MODULE_PATH}.FusekiAdapter") as mock_fa:
-                mock_fa.get_rule_triples.return_value = [
+                mock_fa.rule_projection_graph_uri.return_value = "urn:rule1"
+                mock_fa.get_named_graph_all_triples.return_value = [
                     ("http://s1", "http://p1", "http://o1"),
                 ]
                 cache.preload("rule1")
                 assert cache.triple_count == 1
+                mock_fa.get_rule_triples.assert_not_called()
 
     def test_preload_records_load_timestamp(self):
         with _rdflib_available_patch(True), _rdflib_patch():
             cache = SemanticCache()
             with patch(f"{MODULE_PATH}.FusekiAdapter") as mock_fa:
-                mock_fa.get_rule_triples.return_value = []
+                mock_fa.rule_projection_graph_uri.return_value = "urn:rule1"
+                mock_fa.get_named_graph_all_triples.return_value = []
                 cache.preload("rule1")
                 assert "rule1" in cache._load_timestamps
 
@@ -91,10 +96,25 @@ class TestSemanticCachePreload:
             cache.MAX_TRIPLES = 2
             cache._graph.__len__ = MagicMock(return_value=3)
             with patch(f"{MODULE_PATH}.FusekiAdapter") as mock_fa:
-                mock_fa.get_rule_triples.return_value = []
+                mock_fa.rule_projection_graph_uri.return_value = "urn:rule1"
+                mock_fa.get_named_graph_all_triples.return_value = []
                 with patch.object(cache, "_evict_oldest_entries") as mock_evict:
                     cache.preload("rule1")
                     mock_evict.assert_called_once_with(target=1)
+
+    def test_preload_falls_back_to_rule_subject_query_when_named_graph_fails(self):
+        with _rdflib_available_patch(True), _rdflib_patch():
+            cache = SemanticCache()
+            with patch(f"{MODULE_PATH}.FusekiAdapter") as mock_fa:
+                mock_fa.rule_projection_graph_uri.return_value = "urn:rule1"
+                mock_fa.get_named_graph_all_triples.side_effect = RuntimeError("down")
+                mock_fa.get_rule_triples.return_value = [
+                    ("http://s1", "http://p1", "http://o1"),
+                ]
+
+                cache.preload("rule1")
+
+                mock_fa.get_rule_triples.assert_called_once_with("rule1")
 
 
 class TestSemanticCacheEviction:
@@ -144,7 +164,8 @@ class TestSemanticCacheEviction:
             cache = SemanticCache()
             cache.OOM_MEMORY_MB = 0.001
             with patch(f"{MODULE_PATH}.FusekiAdapter") as mock_fa:
-                mock_fa.get_rule_triples.return_value = []
+                mock_fa.rule_projection_graph_uri.return_value = "urn:rule1"
+                mock_fa.get_named_graph_all_triples.return_value = []
                 with patch.object(
                     type(cache), "memory_usage_mb", new_callable=PropertyMock
                 ) as mock_mem:
@@ -176,6 +197,28 @@ class TestSemanticCacheDeltas:
         cache._last_query_timestamp = ts
         result = cache.query_new_deltas(since_timestamp=ts)
         assert result == []
+
+
+class TestSemanticCacheOntologyIndex:
+    def test_get_ontology_index_uses_preloaded_triples(self):
+        with _rdflib_available_patch(True), _rdflib_patch():
+            cache = SemanticCache()
+            with patch(f"{MODULE_PATH}.FusekiAdapter") as mock_fa:
+                mock_fa.rule_projection_graph_uri.return_value = "urn:rule1"
+                mock_fa.get_named_graph_all_triples.return_value = [
+                    (
+                        "http://inferra.ai/synthetic#forklift",
+                        "http://inferra.ai/schema#name",
+                        "forklift",
+                    ),
+                ]
+
+                cache.preload("rule1")
+                index = cache.get_ontology_index("rule1")
+
+        assert index.subjects_for_label("forklift") == (
+            "http://inferra.ai/synthetic#forklift",
+        )
 
 
 class TestSemanticCacheProperties:

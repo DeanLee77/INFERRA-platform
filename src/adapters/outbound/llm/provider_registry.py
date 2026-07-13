@@ -41,6 +41,19 @@ class ResolvedLLMConfig:
     context: int
 
 
+@dataclass(frozen=True)
+class ResolvedLLMMetadata:
+    provider_id: str
+    provider_name: str
+    base_url: str
+    api: str
+    model_id: str
+    model_name: str
+    context: int
+    secret_status: str
+    endpoint_policy: str
+
+
 BUILT_IN_PROVIDERS: dict[str, LLMProviderDefinition] = {
     "modalResearch": LLMProviderDefinition(
         id="modalResearch",
@@ -102,6 +115,11 @@ BUILT_IN_PROVIDERS: dict[str, LLMProviderDefinition] = {
                 name="z-ai/glm-5.1",
                 context=262144,
             ),
+            LLMModelDefinition(
+                id="moonshotai/kimi-k2.6",
+                name="moonshotai/kimi-k2.6",
+                context=262144,
+            ),
         ),
     ),
 }
@@ -131,6 +149,7 @@ def list_provider_catalog(
             "base_url": provider.base_url,
             "api": provider.api,
             "configured": bool(_api_key_for(provider)),
+            "endpoint_policy": endpoint_policy_for(provider),
             "selected": provider.id == selected,
             "default_model_id": provider.default_model_id,
             "models": [
@@ -151,26 +170,62 @@ def list_provider_catalog(
     ]
 
 
-def resolve_llm_config(
+def resolve_llm_metadata(
     provider_id: Optional[str] = None,
     model_id: Optional[str] = None,
-) -> Optional[ResolvedLLMConfig]:
+    *,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> Optional[ResolvedLLMMetadata]:
     provider = get_provider(select_provider_id(provider_id))
     if provider is None:
         return None
     model = get_model(provider, select_model_id(provider, model_id))
-    api_key = _api_key_for(provider)
-    if not provider.base_url or not api_key:
-        return None
-    return ResolvedLLMConfig(
+    effective_base_url = _clean(base_url) or provider.base_url
+    effective_api_key = _clean(api_key) or _api_key_for(provider)
+    return ResolvedLLMMetadata(
         provider_id=provider.id,
         provider_name=provider.name,
-        base_url=provider.base_url,
+        base_url=effective_base_url,
         api=provider.api,
-        api_key=api_key,
         model_id=model.id,
         model_name=model.name,
         context=model.context,
+        secret_status="configured" if effective_api_key else "missing",
+        endpoint_policy="stored_override" if _clean(base_url) else endpoint_policy_for(provider),
+    )
+
+
+def resolve_llm_config(
+    provider_id: Optional[str] = None,
+    model_id: Optional[str] = None,
+    *,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> Optional[ResolvedLLMConfig]:
+    metadata = resolve_llm_metadata(
+        provider_id=provider_id,
+        model_id=model_id,
+        base_url=base_url,
+        api_key=api_key,
+    )
+    if metadata is None:
+        return None
+    provider = get_provider(metadata.provider_id)
+    if provider is None:
+        return None
+    effective_api_key = _clean(api_key) or _api_key_for(provider)
+    if not metadata.base_url or not effective_api_key:
+        return None
+    return ResolvedLLMConfig(
+        provider_id=metadata.provider_id,
+        provider_name=metadata.provider_name,
+        base_url=metadata.base_url,
+        api=metadata.api,
+        api_key=effective_api_key,
+        model_id=metadata.model_id,
+        model_name=metadata.model_name,
+        context=metadata.context,
     )
 
 
@@ -215,6 +270,16 @@ def get_model(
         if model.id == model_id:
             return model
     raise ValueError(f"Unknown model '{model_id}' for provider '{provider.id}'")
+
+
+def secret_status_for(provider: LLMProviderDefinition) -> str:
+    return "configured" if _api_key_for(provider) else "missing"
+
+
+def endpoint_policy_for(provider: LLMProviderDefinition) -> str:
+    if provider.id in BUILT_IN_PROVIDERS:
+        return "read_only"
+    return "deployment_managed"
 
 
 def _api_key_for(provider: LLMProviderDefinition) -> Optional[str]:

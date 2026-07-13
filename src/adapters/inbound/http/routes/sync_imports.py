@@ -43,6 +43,7 @@ class ImportEntry(BaseModel):
     content_hash: str
     node_count: int
     depth: int
+    direct_imports: List[str] = Field(default_factory=list)
 
 
 class ImportTreeResponse(BaseModel):
@@ -81,6 +82,58 @@ def _get_rule_text(rule_name: str) -> str:
         raise HTTPException(status_code=404, detail=f"Rule '{rule_name}' does not exist")
     finally:
         db.close()
+
+
+def _count_source_nodes(rule_text: str) -> int:
+    count = 0
+    ignored_prefixes = ("#", "//", "IMPORT:", "RULE SET:")
+    for raw_line in rule_text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith(ignored_prefixes):
+            continue
+        count += 1
+    return count
+
+
+def _count_rule_text_nodes(rule_name: str, rule_text: str) -> int:
+    try:
+        from src.domain.rule_parser.rule_set_parser import RuleSetParser
+        from src.domain.rule_parser.rule_set_reader import RuleSetReader
+        from src.domain.rule_parser.rule_set_scanner import RuleSetScanner
+
+        reader = RuleSetReader()
+        reader.create()
+        parser = RuleSetParser()
+        parser.create()
+        parser.set_source_name(rule_name)
+        reader.set_file_with_text(rule_text)
+        scanner = RuleSetScanner(reader, parser)
+        scanner.scan_rule_set()
+        scanner.establish_node_set()
+        node_set = parser.get_node_set()
+
+        node_dictionary = getattr(node_set, "get_node_dictionary", lambda: {})()
+        if hasattr(node_dictionary, "__len__") and len(node_dictionary) > 0:
+            return len(node_dictionary)
+
+        sorted_nodes = getattr(node_set, "get_sorted_node_list", lambda: [])()
+        if hasattr(sorted_nodes, "__len__") and len(sorted_nodes) > 0:
+            return len(sorted_nodes)
+    except Exception as exc:
+        log.debug("import_node_count_parse_failed", rule_name=rule_name, error=str(exc))
+
+    return _count_source_nodes(rule_text)
+
+
+def _build_import_entry(module_name: str, origin) -> ImportEntry:
+    module_text = _get_rule_text(module_name)
+    return ImportEntry(
+        name=module_name,
+        content_hash=hashlib.sha256(module_text.encode()).hexdigest()[:16],
+        node_count=_count_rule_text_nodes(module_name, module_text),
+        depth=origin.depth,
+        direct_imports=extract_imports(module_text),
+    )
 
 
 @router.get("/sync/status", response_model=SyncStatusResponse)
@@ -155,7 +208,10 @@ async def get_rule_imports(
     except HTTPException:
         raise
 
-    flags = FeatureFlags()
+    # Import preview is a read-only analysis path and must match the
+    # import-aware save/execution path even when MODULAR_IMPORTS is not set
+    # in the container environment.
+    flags = FeatureFlags(modular_imports=True)
     if not flags.modular_imports:
         return ImportTreeResponse(
             rule_name=rule_name,
@@ -188,15 +244,7 @@ async def get_rule_imports(
     for mod_name, origin in resolved.items():
         if mod_name == rule_name:
             continue
-        content_hash = hashlib.sha256(mod_name.encode()).hexdigest()[:16]
-        entries.append(
-            ImportEntry(
-                name=mod_name,
-                content_hash=content_hash,
-                node_count=0,
-                depth=origin.depth,
-            )
-        )
+        entries.append(_build_import_entry(mod_name, origin))
 
     if depth is not None:
         entries = [e for e in entries if e.depth <= depth]
@@ -233,10 +281,11 @@ async def validate_rule_with_imports(rule_name: str) -> RuleValidateWithImportsR
         for w in result.warnings
     ]
 
-    if FeatureFlags().modular_imports:
+    flags = FeatureFlags(modular_imports=True)
+    if flags.modular_imports:
         resolver = RuleSetImportResolver(
             rule_loader=_get_rule_text,
-            feature_flags=FeatureFlags(),
+            feature_flags=flags,
         )
         try:
             resolver.resolve(rule_name)

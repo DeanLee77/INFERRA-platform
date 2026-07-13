@@ -235,6 +235,14 @@ class TestFlagDefaults:
         assert flags.async_post_reasoning is False
         assert flags.prov_o_trace is False
         assert flags.enriched_api is False
+        assert flags.ontology_advisory_enabled is False
+        assert flags.ontology_auto_answer is False
+        assert flags.ontology_auto_answer_confidence_threshold == 0.85
+        assert flags.ontology_reasoning is False
+        assert flags.ontology_reasoning_confidence_threshold == 0.85
+        assert flags.ontology_reasoning_min_hierarchy_depth == 1
+        assert flags.ontology_reasoning_max_closure_depth == 10
+        assert flags.ontology_question_strategy is False
         assert flags.redis_session_store is False
         assert flags.llm_enhancements is False
         assert flags.strict_port_contracts is True
@@ -274,6 +282,14 @@ class TestFlagDefaults:
             "async_post_reasoning",
             "prov_o_trace",
             "enriched_api",
+            "ontology_advisory_enabled",
+            "ontology_auto_answer",
+            "ontology_auto_answer_confidence_threshold",
+            "ontology_reasoning",
+            "ontology_reasoning_confidence_threshold",
+            "ontology_reasoning_min_hierarchy_depth",
+            "ontology_reasoning_max_closure_depth",
+            "ontology_question_strategy",
             "redis_session_store",
             "llm_enhancements",
             "strict_port_contracts",

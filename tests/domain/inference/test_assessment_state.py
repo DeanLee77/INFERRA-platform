@@ -344,6 +344,14 @@ class TestTransferFactMapToWorkingMemory:
         assert state.get_fact("k1").get_value() == "v1"
         assert state.get_fact("k2").get_value() == "v2"
 
+    def test_transfer_wraps_raw_fact_values(self):
+        node_set = MagicMock()
+        node_set.get_fact_dictionary.return_value = {"k1": "v1"}
+        state = AssessmentState()
+        state.transfer_fact_map_to_working_memory(node_set)
+        assert isinstance(state.get_fact("k1"), FactValue)
+        assert state.get_fact("k1").get_value() == "v1"
+
     def test_transfer_none_node_set(self):
         state = AssessmentState()
         state.transfer_fact_map_to_working_memory(None)

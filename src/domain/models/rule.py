@@ -13,6 +13,7 @@ class RuleEntity:
     name: Optional[str] = None
     category: Optional[str] = None
     description: Optional[str] = None
+    target_node_name: Optional[str] = None
 
 
 @dataclass

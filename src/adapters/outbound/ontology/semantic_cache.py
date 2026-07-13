@@ -12,7 +12,7 @@ direct Fuseki queries.
 
 import sys
 import time
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import structlog
 
@@ -25,6 +25,7 @@ except ImportError:
     RDFLIB_AVAILABLE = False
 
 from src.adapters.outbound.ontology.fuseki_adapter import FusekiAdapter
+from src.domain.reasoning.semantic_fact_enricher import OntologyIndex
 
 log = structlog.get_logger()
 
@@ -51,6 +52,7 @@ class SemanticCache:
         self._hit_count: int = 0
         self._miss_count: int = 0
         self._load_timestamps: dict = {}
+        self._rule_triples: Dict[str, Tuple[Tuple[str, str, str], ...]] = {}
 
     def preload(self, rule_name: str) -> None:
         """
@@ -84,16 +86,29 @@ class SemanticCache:
             self._evict_oldest_entries(target=self.MAX_TRIPLES // 2)
 
         self._miss_count += 1
-        triples = FusekiAdapter.get_rule_triples(rule_name)
-        for s, p, o in triples:
+        graph_uri = FusekiAdapter.rule_projection_graph_uri(rule_name)
+        try:
+            triples = FusekiAdapter.get_named_graph_all_triples(graph_uri)
+        except Exception:
+            log.warning(
+                "semantic_cache_named_graph_preload_failed",
+                rule_name=rule_name,
+                graph_uri=graph_uri,
+                exc_info=True,
+            )
+            triples = FusekiAdapter.get_rule_triples(rule_name)
+        normalized_triples = tuple((str(s), str(p), str(o)) for s, p, o in triples)
+        for s, p, o in normalized_triples:
             self._graph.add(
                 (rdflib.URIRef(s), rdflib.URIRef(p), rdflib.URIRef(o))
             )
         self._loaded_rules.add(rule_name)
+        self._rule_triples[rule_name] = normalized_triples
         self._load_timestamps[rule_name] = time.time()
         log.info(
             "semantic_cache_preload",
             rule_name=rule_name,
+            graph_uri=graph_uri,
             triple_count=len(self._graph),
             memory_mb=self.memory_usage_mb,
         )
@@ -119,6 +134,25 @@ class SemanticCache:
         )
         return deltas
 
+    def get_ontology_index(self, rule_name: str) -> OntologyIndex:
+        """
+        Return an OntologyIndex for a preloaded rule snapshot.
+
+        If the rule has not been preloaded, this method preloads it once through
+        the existing cache path and then builds the index from in-memory triples.
+        """
+        if rule_name not in self._loaded_rules:
+            self.preload(rule_name)
+        triples = self._rule_triples.get(rule_name)
+        if triples is None:
+            triples = tuple(self._rule_subgraph(rule_name))
+        log.info(
+            "semantic_cache_ontology_index",
+            rule_name=rule_name,
+            triple_count=len(triples),
+        )
+        return OntologyIndex(triples)
+
     def _evict_oldest_entries(self, target: int) -> None:
         """
         Evict oldest preloaded rules until triple count is below target.
@@ -133,6 +167,7 @@ class SemanticCache:
             oldest = next(iter(self._loaded_rules))
             self._loaded_rules.discard(oldest)
             self._load_timestamps.pop(oldest, None)
+            self._rule_triples.pop(oldest, None)
             subgraph = self._rule_subgraph(oldest)
             for triple in subgraph:
                 try:
@@ -172,6 +207,7 @@ class SemanticCache:
             self._graph = None
         self._loaded_rules.clear()
         self._load_timestamps.clear()
+        self._rule_triples.clear()
         self._last_query_timestamp = 0.0
         self._hit_count = 0
         self._miss_count = 0

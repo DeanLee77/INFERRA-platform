@@ -77,6 +77,20 @@ async def test_legacy_orchestrator_goal_reached_when_goal_in_working_memory_and_
 
 
 @pytest.mark.asyncio
+async def test_legacy_orchestrator_pending_when_boolean_goal_false():
+    goal = _Node("eligible")
+    engine = _Engine(
+        node_set=_NodeSet(goal),
+        state=_State({"eligible": False}, mandatory_done=True),
+    )
+
+    result = await LegacyOrchestrator(engine).run_convergence_loop("s1")
+
+    assert result.converged is False
+    assert result.reason == "PENDING"
+
+
+@pytest.mark.asyncio
 async def test_legacy_orchestrator_pending_when_goal_missing_or_mandatory_open():
     goal = _Node("eligible")
     engine = _Engine(

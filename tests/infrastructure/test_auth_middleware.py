@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request
+import pytest
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 import base64
 import hashlib
@@ -7,8 +8,10 @@ import json
 import time
 from unittest.mock import patch
 
+from src.adapters.inbound.http.dependencies import require_scope
 from src.domain.state.feature_flags import FeatureFlags
 from src.infrastructure.auth_middleware import ApiKeyAuthMiddleware, RateLimitMiddleware
+from src.main import create_app
 
 
 def _app_with_auth():
@@ -25,6 +28,10 @@ def _app_with_auth():
 
     @app.post("/mutating")
     async def mutating():
+        return {"ok": True}
+
+    @app.post("/rule-write", dependencies=[Depends(require_scope("rules:write"))])
+    async def rule_write():
         return {"ok": True}
 
     @app.get("/health")
@@ -57,6 +64,32 @@ def test_auth_middleware_accepts_api_key():
     with patch("src.infrastructure.auth_middleware.get_feature_flags", return_value=FeatureFlags(auth_enabled=True)):
         with patch.dict("os.environ", {"INFERRA_API_KEY": "secret"}):
             response = TestClient(_app_with_auth()).get("/protected", headers={"x-api-key": "secret"})
+
+    assert response.status_code == 200
+
+
+def test_scope_dependency_rejects_authenticated_api_key_without_write_scope():
+    flags = FeatureFlags(auth_enabled=True)
+    with patch("src.infrastructure.auth_middleware.get_feature_flags", return_value=flags), patch(
+        "src.adapters.inbound.http.dependencies.get_feature_flags", return_value=flags
+    ):
+        with patch.dict("os.environ", {"INFERRA_API_KEY": "secret"}, clear=True):
+            response = TestClient(_app_with_auth()).post("/rule-write", headers={"x-api-key": "secret"})
+
+    assert response.status_code == 403
+
+
+def test_scope_dependency_accepts_api_key_with_write_scope():
+    flags = FeatureFlags(auth_enabled=True)
+    with patch("src.infrastructure.auth_middleware.get_feature_flags", return_value=flags), patch(
+        "src.adapters.inbound.http.dependencies.get_feature_flags", return_value=flags
+    ):
+        with patch.dict(
+            "os.environ",
+            {"INFERRA_API_KEY": "secret", "INFERRA_API_KEY_SCOPES": "read,rules:write"},
+            clear=True,
+        ):
+            response = TestClient(_app_with_auth()).post("/rule-write", headers={"x-api-key": "secret"})
 
     assert response.status_code == 200
 
@@ -95,6 +128,25 @@ def test_auth_middleware_accepts_hs256_jwt_and_sets_subject_scope():
     assert response.json()["user_id"] == "user-123"
 
 
+def test_scope_dependency_accepts_jwt_scope_claim():
+    token = _jwt(
+        {"sub": "user-123", "scope": "read rules:write", "exp": int(time.time()) + 60},
+        "jwt-secret",
+    )
+    flags = FeatureFlags(auth_enabled=True)
+
+    with patch("src.infrastructure.auth_middleware.get_feature_flags", return_value=flags), patch(
+        "src.adapters.inbound.http.dependencies.get_feature_flags", return_value=flags
+    ):
+        with patch.dict("os.environ", {"INFERRA_JWT_SECRET": "jwt-secret"}, clear=True):
+            response = TestClient(_app_with_auth()).post(
+                "/rule-write",
+                headers={"authorization": f"Bearer {token}"},
+            )
+
+    assert response.status_code == 200
+
+
 def test_auth_middleware_rejects_bad_jwt_signature():
     token = _jwt({"sub": "user-123", "exp": int(time.time()) + 60}, "other-secret")
 
@@ -103,6 +155,123 @@ def test_auth_middleware_rejects_bad_jwt_signature():
             response = TestClient(_app_with_auth()).get("/whoami", headers={"authorization": f"Bearer {token}"})
 
     assert response.status_code == 401
+
+
+def test_create_app_rejects_production_auth_disabled():
+    with patch.dict("os.environ", {"INFERRA_ENV": "production", "INFERRA_AUTH_ENABLED": "false"}, clear=True):
+        with pytest.raises(RuntimeError, match="INFERRA_AUTH_ENABLED=true"):
+            create_app()
+
+
+def test_create_app_rejects_production_auth_without_secret():
+    with patch.dict("os.environ", {"INFERRA_ENV": "production", "INFERRA_AUTH_ENABLED": "true"}, clear=True):
+        with pytest.raises(RuntimeError, match="requires INFERRA_API_KEY or INFERRA_JWT_SECRET"):
+            create_app()
+
+
+def test_production_rules_endpoint_rejects_unauthenticated_request():
+    flags = FeatureFlags(auth_enabled=True)
+    with patch.dict(
+        "os.environ",
+        {"INFERRA_ENV": "production", "INFERRA_AUTH_ENABLED": "true", "INFERRA_API_KEY": "secret"},
+        clear=True,
+    ), patch("src.infrastructure.auth_middleware.get_feature_flags", return_value=flags):
+        response = TestClient(create_app()).get("/api/v1/rules")
+
+    assert response.status_code == 401
+
+
+def test_production_rule_write_requires_explicit_scope():
+    flags = FeatureFlags(auth_enabled=True)
+    with patch.dict(
+        "os.environ",
+        {
+            "INFERRA_ENV": "production",
+            "INFERRA_AUTH_ENABLED": "true",
+            "INFERRA_API_KEY": "secret",
+            "INFERRA_API_KEY_SCOPES": "read,llm:read",
+        },
+        clear=True,
+    ), patch("src.infrastructure.auth_middleware.get_feature_flags", return_value=flags), patch(
+        "src.adapters.inbound.http.dependencies.get_feature_flags", return_value=flags
+    ):
+        response = TestClient(create_app()).post(
+            "/service/rule/createNewRule",
+            headers={"x-api-key": "secret"},
+            json={},
+        )
+
+    assert response.status_code == 403
+
+
+def test_production_llm_endpoint_requires_llm_scope():
+    flags = FeatureFlags(auth_enabled=True)
+    with patch.dict(
+        "os.environ",
+        {
+            "INFERRA_ENV": "production",
+            "INFERRA_AUTH_ENABLED": "true",
+            "INFERRA_API_KEY": "secret",
+            "INFERRA_API_KEY_SCOPES": "read",
+        },
+        clear=True,
+    ), patch("src.infrastructure.auth_middleware.get_feature_flags", return_value=flags), patch(
+        "src.adapters.inbound.http.dependencies.get_feature_flags", return_value=flags
+    ):
+        response = TestClient(create_app()).get(
+            "/api/v1/llm/providers",
+            headers={"x-api-key": "secret"},
+        )
+
+    assert response.status_code == 403
+
+
+def test_cors_rejects_wildcard_credentials():
+    with patch.dict(
+        "os.environ",
+        {
+            "INFERRA_CORS_ALLOWED_ORIGINS": "*",
+            "INFERRA_CORS_ALLOW_CREDENTIALS": "true",
+        },
+        clear=True,
+    ):
+        client = TestClient(create_app())
+        response = client.options(
+            "/api/v1/rules",
+            headers={
+                "Origin": "https://example.invalid",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+    assert response.headers.get("access-control-allow-origin") == "*"
+    assert "access-control-allow-credentials" not in response.headers
+
+
+def test_cors_allows_only_explicit_configured_origin():
+    with patch.dict(
+        "os.environ",
+        {"INFERRA_CORS_ALLOWED_ORIGINS": "https://app.example.com"},
+        clear=True,
+    ):
+        client = TestClient(create_app())
+        allowed = client.options(
+            "/api/v1/rules",
+            headers={
+                "Origin": "https://app.example.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        blocked = client.options(
+            "/api/v1/rules",
+            headers={
+                "Origin": "https://other.example.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+    assert allowed.headers.get("access-control-allow-origin") == "https://app.example.com"
+    assert "access-control-allow-origin" not in blocked.headers
 
 
 def test_auth_middleware_enforces_csrf_when_enabled():

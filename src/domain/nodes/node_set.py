@@ -36,6 +36,8 @@ class NodeSet:
         self.__node_set_name: str = ''
         self.__input_dictionary: Dict[str, Any] = dict()
         self.__fact_dictionary: Dict[str, Any] = dict()
+        self.__type_dictionary: Dict[str, Dict[str, Any]] = dict()
+        self.__collection_dictionary: Dict[str, Dict[str, Any]] = dict()
         self.__node_dictionary: Dict[str, Node] = dict()
         self.__node_id_dictionary: Dict[int, str] = dict()
         self.__stable_node_id_dictionary: Dict[str, str] = dict()
@@ -153,6 +155,38 @@ class NodeSet:
             Dictionary of fixed facts
         """
         return self.__fact_dictionary
+
+    def get_type_dictionary(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Public API: Returns declared record types.
+
+        Shape:
+            {
+                "service period": {
+                    "fields": {
+                        "period of service in days": FactValueType.DOUBLE
+                    },
+                    "field_options": {
+                        "service type": "DVA service type options"
+                    }
+                }
+            }
+        """
+        return self.__type_dictionary
+
+    def get_collection_dictionary(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Public API: Returns declared collection metadata.
+
+        Shape:
+            {
+                "service history": {
+                    "item_type": "service period",
+                    "size_from": "number of service periods"
+                }
+            }
+        """
+        return self.__collection_dictionary
 
     def get_default_goal_node(self) -> Optional[Node]:
         return self.__default_goal_node
@@ -280,6 +314,88 @@ class NodeSet:
         if len(input_dictionary) == 0:
             _logger.debug("input_dictionary has no items")
         self.__input_dictionary = input_dictionary
+
+    def set_type_dictionary(self, type_dictionary: Dict[str, Dict[str, Any]]) -> None:
+        """
+        Public API: Sets declared record types.
+
+        Args:
+            type_dictionary: Dictionary to set
+        """
+        if len(type_dictionary) == 0:
+            _logger.debug("type_dictionary has no items")
+        self.__type_dictionary = type_dictionary
+
+    def set_collection_dictionary(self, collection_dictionary: Dict[str, Dict[str, Any]]) -> None:
+        """
+        Public API: Sets declared collection metadata.
+
+        Args:
+            collection_dictionary: Dictionary to set
+        """
+        if len(collection_dictionary) == 0:
+            _logger.debug("collection_dictionary has no items")
+        self.__collection_dictionary = collection_dictionary
+
+    def register_type(self, type_name: str) -> None:
+        if not type_name:
+            return
+        self.__type_dictionary.setdefault(type_name, {"fields": {}})
+
+    def register_type_field(self, type_name: str, field_name: str, field_type: Any) -> None:
+        if not type_name or not field_name:
+            return
+        self.register_type(type_name)
+        self.__type_dictionary[type_name].setdefault("fields", {})[field_name] = field_type
+
+    def register_type_field_options(
+        self,
+        type_name: str,
+        field_name: str,
+        option_list_name: str,
+    ) -> None:
+        if not type_name or not field_name or not option_list_name:
+            return
+        self.register_type(type_name)
+        self.__type_dictionary[type_name].setdefault("field_options", {})[
+            field_name
+        ] = option_list_name
+
+    def register_collection(
+        self,
+        collection_name: str,
+        item_type: Optional[str] = None,
+        size_from: Optional[str] = None,
+    ) -> None:
+        if not collection_name:
+            return
+        metadata = self.__collection_dictionary.setdefault(collection_name, {})
+        if item_type:
+            metadata["item_type"] = item_type
+        if size_from:
+            metadata["size_from"] = size_from
+
+    def register_collection_field(
+        self,
+        collection_name: str,
+        field_name: str,
+        field_type: Any,
+    ) -> None:
+        if not collection_name or not field_name:
+            return
+        metadata = self.__collection_dictionary.setdefault(collection_name, {})
+        metadata.setdefault("fields", {})[field_name] = field_type
+
+    def register_collection_field_options(
+        self,
+        collection_name: str,
+        field_name: str,
+        option_list_name: str,
+    ) -> None:
+        if not collection_name or not field_name or not option_list_name:
+            return
+        metadata = self.__collection_dictionary.setdefault(collection_name, {})
+        metadata.setdefault("field_options", {})[field_name] = option_list_name
 
     def set_default_goal_node(self, name: str) -> None:
         """

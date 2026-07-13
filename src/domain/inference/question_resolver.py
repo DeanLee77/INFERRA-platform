@@ -28,7 +28,11 @@ class QuestionResolver:
     # -------------------------------------------------------------------------
     # Private Access Level: Instance Variables (Name Mangling)
     # -------------------------------------------------------------------------
-    def __init__(self, ask_callback: Callable[[Node], Optional[FactValue]]):
+    def __init__(
+        self,
+        ask_callback: Callable[[Node], Optional[FactValue]],
+        ontology_default_lookup: Optional[Callable[[Node], Optional[FactValue]]] = None,
+    ):
         """
         Public Constructor: Initializes QuestionResolver with callback.
         
@@ -36,6 +40,7 @@ class QuestionResolver:
             ask_callback: Function to call when asking user for input
         """
         self.__ask_callback: Callable[[Node], Optional[FactValue]] = ask_callback
+        self.__ontology_default_lookup = ontology_default_lookup
 
     # -------------------------------------------------------------------------
     # Public Access Level: API Methods
@@ -111,6 +116,11 @@ class QuestionResolver:
             return False
 
         line_type = node.get_line_type()
+        if self._line_type_can_prompt(node, line_type, has_children):
+            if self.__ontology_default_lookup is not None:
+                default_value = self.__ontology_default_lookup(node)
+                if default_value is not None:
+                    return False
 
         if line_type == LineType.META:
             if isinstance(node, MetadataLine):
@@ -120,7 +130,24 @@ class QuestionResolver:
         if line_type == LineType.ITERATE:
             return True
 
+        if line_type == LineType.COMPARISON:
+            return not has_children
+
         if line_type == LineType.VALUE_CONCLUSION:
             return not has_children
 
+        return False
+
+    def _line_type_can_prompt(
+        self,
+        node: Node,
+        line_type: LineType,
+        has_children: bool,
+    ) -> bool:
+        if line_type == LineType.META:
+            return isinstance(node, MetadataLine) and node.get_meta_type() == MetaType.INPUT
+        if line_type == LineType.ITERATE:
+            return True
+        if line_type in (LineType.COMPARISON, LineType.VALUE_CONCLUSION):
+            return not has_children
         return False

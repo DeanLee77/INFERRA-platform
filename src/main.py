@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -8,11 +9,12 @@ from fastapi.responses import JSONResponse
 from src.adapters.inbound.http import api_router
 from src.config import settings
 from src.domain.exceptions import RuleValidationError
-from src.infrastructure.auth_middleware import ApiKeyAuthMiddleware
+from src.infrastructure.auth_middleware import ApiKeyAuthMiddleware, assert_production_auth_config
 from src.infrastructure.correlation_middleware import CorrelationIdMiddleware
 from src.infrastructure.logging_config import configure_logging
 from src.infrastructure.observability import configure_observability
 from src.infrastructure.rate_limiter import RateLimitMiddleware
+from src.infrastructure.secrets import redact_url
 
 import structlog
 
@@ -23,7 +25,7 @@ logger = structlog.get_logger("inferra.fastapi")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    logger.info("starting_inferra_app", database_uri=settings.SQLALCHEMY_DATABASE_URI)
+    logger.info("starting_inferra_app", database_uri=redact_url(settings.SQLALCHEMY_DATABASE_URI))
     yield
     logger.info("stopping_inferra_app")
 
@@ -71,7 +73,37 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _parse_csv_env(name: str) -> list[str]:
+    value = os.environ.get(name, "")
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _cors_config() -> tuple[list[str], bool]:
+    origins = _parse_csv_env("INFERRA_CORS_ALLOWED_ORIGINS")
+    allow_credentials = _env_bool("INFERRA_CORS_ALLOW_CREDENTIALS", False)
+    if "*" in origins and allow_credentials:
+        allow_credentials = False
+    if os.environ.get("INFERRA_ENV", "").strip().lower() in {"prod", "production"} and "*" in origins:
+        raise RuntimeError("Production CORS requires explicit INFERRA_CORS_ALLOWED_ORIGINS; wildcard is not allowed")
+    return origins, allow_credentials
+
+
 def create_app() -> FastAPI:
+    assert_production_auth_config()
+    cors_origins, cors_allow_credentials = _cors_config()
+
     app = FastAPI(
         title="INFERRA Platform API",
         version="2.0.0",
@@ -85,16 +117,15 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials=cors_allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
-    configure_observability(app)
-
     register_exception_handlers(app)
     app.include_router(api_router)
+    configure_observability(app)
     return app
 
 

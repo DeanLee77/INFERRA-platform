@@ -106,6 +106,21 @@ class TestFindNextQuestionNode:
         result = qr.find_next_question_node(node, {}, has_children=False)
         assert result is node
 
+    def test_comparison_no_children_returns_node(self):
+        qr = QuestionResolver(lambda _: None)
+        node = _make_node(line_type=LineType.COMPARISON, var_name="age")
+        result = qr.find_next_question_node(node, {}, has_children=False)
+        assert result is node
+
+    def test_ontology_default_lookup_suppresses_prompt(self):
+        qr = QuestionResolver(
+            lambda _: None,
+            ontology_default_lookup=lambda _: FactValue("default"),
+        )
+        node = _make_node(line_type=LineType.COMPARISON, var_name="age")
+        result = qr.find_next_question_node(node, {}, has_children=False)
+        assert result is None
+
     def test_unknown_line_type_returns_none(self):
         qr = QuestionResolver(lambda _: None)
         node = _make_node(line_type=LineType.WARNING)
@@ -147,6 +162,16 @@ class TestRequiresUserInput:
     def test_value_conclusion_with_children_false(self):
         qr = QuestionResolver(lambda _: None)
         node = _make_node(line_type=LineType.VALUE_CONCLUSION)
+        assert qr._requires_user_input(node, {}, has_children=True) is False
+
+    def test_comparison_no_children_true(self):
+        qr = QuestionResolver(lambda _: None)
+        node = _make_node(line_type=LineType.COMPARISON)
+        assert qr._requires_user_input(node, {}, has_children=False) is True
+
+    def test_comparison_with_children_false(self):
+        qr = QuestionResolver(lambda _: None)
+        node = _make_node(line_type=LineType.COMPARISON)
         assert qr._requires_user_input(node, {}, has_children=True) is False
 
 
