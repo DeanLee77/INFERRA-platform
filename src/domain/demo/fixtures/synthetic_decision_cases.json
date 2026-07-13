@@ -1,0 +1,39 @@
+{
+  "certify-ready": {
+    "label": "Certify-ready synthetic request",
+    "expectedOutcome": "CERTIFY",
+    "facts": {
+      "face-to-face evaluation documented": true,
+      "home mobility need documented": true,
+      "lower-acuity mobility aids ruled out": true,
+      "safe operation documented": true,
+      "supplier order complete": true,
+      "unresolved safety contraindication": false
+    }
+  },
+  "review-missing-order": {
+    "label": "Review synthetic request with missing order evidence",
+    "expectedOutcome": "REVIEW",
+    "facts": {
+      "face-to-face evaluation documented": true,
+      "home mobility need documented": true,
+      "lower-acuity mobility aids ruled out": true,
+      "safe operation documented": true,
+      "supplier order complete": false,
+      "unresolved safety contraindication": false
+    }
+  },
+  "deny-contraindication": {
+    "label": "Deny synthetic request with unresolved safety contraindication",
+    "expectedOutcome": "DENY",
+    "facts": {
+      "face-to-face evaluation documented": true,
+      "home mobility need documented": true,
+      "lower-acuity mobility aids ruled out": true,
+      "safe operation documented": true,
+      "supplier order complete": true,
+      "unresolved safety contraindication": true
+    }
+  }
+}
+

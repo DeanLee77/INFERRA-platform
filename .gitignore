@@ -38,6 +38,11 @@ htmlcov/
 # Logs
 Nadia-logging/
 *.log
+demo_artifacts/
+
+# Paperclip release/IP-gate work products must not be committed to product repos.
+INFA-*.md
+.infa*-audit/
 
 # Legacy directories (can be removed manually)
 app/
@@ -53,17 +58,7 @@ app/
 Pipfile*
 
 # docs
-docs/ 
-!docs/
-docs/*
-!docs/reference/
-docs/reference/*
-!docs/reference/examples/
-docs/reference/examples/*
-!docs/reference/examples/README.md
-!docs/reference/examples/authoring_catalog.json
-!docs/reference/examples/triggers/
-!docs/reference/examples/triggers/**
+docs/
 AGENTS.md
 
 # legacy frontend
