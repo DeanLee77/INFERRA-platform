@@ -5,8 +5,11 @@ Handles file validation, conversion, and transformation.
 
 import os
 import re
+import shutil
+import subprocess
 import tempfile
-from typing import Tuple, AsyncGenerator
+import time
+from typing import Tuple
 
 from src.config import settings
 from src.infrastructure.logging_config import get_logger
@@ -15,6 +18,79 @@ _logger = get_logger(__name__)
 
 # Lazy imports for optional dependencies
 fitz = None
+
+
+class FileConversionLimitError(ValueError):
+    """Raised when a document conversion crosses a configured safety limit."""
+
+
+def _int_setting(name: str, default: int) -> int:
+    value = getattr(settings, name, default)
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float, str)):
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        return parsed if parsed > 0 else default
+    return default
+
+
+def _float_setting(name: str, default: float) -> float:
+    value = getattr(settings, name, default)
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float, str)):
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return default
+        return parsed if parsed > 0 else default
+    return default
+
+
+def _conversion_timeout_seconds() -> float:
+    return _float_setting("DOCUMENT_CONVERSION_TIMEOUT_SECONDS", 20.0)
+
+
+def _output_char_limit(file_path: str) -> int:
+    configured_limit = _int_setting("DOCUMENT_CONVERSION_MAX_OUTPUT_CHARS", 200000)
+    expansion_ratio = _float_setting("DOCUMENT_CONVERSION_MAX_EXPANSION_RATIO", 100.0)
+    try:
+        input_size = os.path.getsize(file_path)
+    except OSError:
+        return configured_limit
+    if input_size <= 0:
+        return configured_limit
+    expansion_limit = max(1, int(input_size * expansion_ratio))
+    return min(configured_limit, expansion_limit)
+
+
+def _raise_if_timed_out(start_time: float, source: str) -> None:
+    timeout = _conversion_timeout_seconds()
+    elapsed = time.monotonic() - start_time
+    if elapsed > timeout:
+        raise FileConversionLimitError(
+            f"{source} conversion exceeded {timeout:.1f} seconds"
+        )
+
+
+def _read_text_with_limit(file_path: str, max_chars: int, source: str) -> str:
+    chunks = []
+    total_chars = 0
+    with open(file_path, 'r', encoding='utf-8') as f:
+        while True:
+            chunk = f.read(8192)
+            if not chunk:
+                break
+            total_chars += len(chunk)
+            if total_chars > max_chars:
+                raise FileConversionLimitError(
+                    f"{source} conversion output exceeds {max_chars} characters"
+                )
+            chunks.append(chunk)
+    return "".join(chunks)
 
 
 def _get_fitz():
@@ -128,11 +204,40 @@ def handle_pdf_file(file_path: str) -> str:
     
     doc = None
     try:
+        start_time = time.monotonic()
+        max_pages = _int_setting("DOCUMENT_CONVERSION_MAX_PDF_PAGES", 100)
+        max_chars = _output_char_limit(file_path)
         doc = fitz.open(file_path)
-        markdown_content = ""
-        for page in doc:
-            markdown_content += page.get_text() + "\n"
-        return markdown_content
+        page_count = getattr(doc, "page_count", None)
+        if not isinstance(page_count, int):
+            try:
+                page_count = len(doc)
+            except TypeError:
+                page_count = None
+        if page_count is not None and page_count > max_pages:
+            raise FileConversionLimitError(
+                f"PDF page count {page_count} exceeds limit {max_pages}"
+            )
+
+        parts = []
+        total_chars = 0
+        for page_index, page in enumerate(doc, start=1):
+            if page_index > max_pages:
+                raise FileConversionLimitError(
+                    f"PDF page count exceeds limit {max_pages}"
+                )
+            _raise_if_timed_out(start_time, "PDF")
+            page_text = page.get_text()
+            total_chars += len(page_text) + 1
+            if total_chars > max_chars:
+                raise FileConversionLimitError(
+                    f"PDF conversion output exceeds {max_chars} characters"
+                )
+            parts.append(page_text)
+        _raise_if_timed_out(start_time, "PDF")
+        return "\n".join(parts) + ("\n" if parts else "")
+    except FileConversionLimitError:
+        raise
     except Exception as exc:
         _logger.exception("pdf_extraction_failed", file_path=file_path, error=str(exc))
         return '[PDF extraction error: Unable to open PDF file.]'
@@ -143,7 +248,7 @@ def handle_pdf_file(file_path: str) -> str:
 
 def handle_docx_file(file_path: str) -> str:
     """
-    Convert a DOCX/DOC file to markdown using pypandoc.
+    Convert a DOCX/DOC file to markdown using the installed pandoc executable.
     
     Args:
         file_path: Path to the DOCX/DOC file
@@ -154,45 +259,48 @@ def handle_docx_file(file_path: str) -> str:
     Raises:
         RuntimeError: If conversion fails
     """
-    import pypandoc
-    import ssl
-    
     ext = os.path.splitext(file_path)[1].lower()
     pandoc_format = ext.lstrip('.')
+    pandoc_path = shutil.which("pandoc")
+    if pandoc_path is None:
+        raise RuntimeError("Pandoc executable is not installed; DOC/DOCX conversion is unavailable")
     
     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.md') as temp_md:
         temp_md_path = temp_md.name
     
     try:
+        start_time = time.monotonic()
         try:
-            pypandoc.convert_file(
-                file_path,
-                'markdown',
-                outputfile=temp_md_path,
-                format=pandoc_format,
-                extra_args=['--wrap=none']
+            subprocess.run(
+                [
+                    pandoc_path,
+                    file_path,
+                    f"--from={pandoc_format}",
+                    "--to=markdown",
+                    "--wrap=none",
+                    "--sandbox",
+                    f"--output={temp_md_path}",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=_conversion_timeout_seconds(),
             )
-        except OSError:
-            # Try downloading pandoc if not available
-            try:
-                _create_unverified_https_context = ssl._create_unverified_context
-            except AttributeError:
-                pass
-            else:
-                ssl._create_default_https_context = _create_unverified_https_context
-            pypandoc.download_pandoc()
-            pypandoc.convert_file(
-                file_path,
-                'markdown',
-                outputfile=temp_md_path,
-                format=pandoc_format,
-                extra_args=['--wrap=none']
-            )
-        
-        with open(temp_md_path, 'r', encoding='utf-8') as f:
-            markdown_content = f.read()
-        
-        return markdown_content
+        except subprocess.TimeoutExpired as exc:
+            raise FileConversionLimitError(
+                f"Pandoc conversion exceeded {_conversion_timeout_seconds():.1f} seconds"
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or exc.stdout or "").strip()
+            detail = f": {stderr}" if stderr else ""
+            raise RuntimeError(f"Pandoc conversion failed{detail}") from exc
+        _raise_if_timed_out(start_time, "Pandoc")
+        return _read_text_with_limit(
+            temp_md_path,
+            _output_char_limit(file_path),
+            "Pandoc",
+        )
     finally:
         if temp_md_path and os.path.exists(temp_md_path):
             os.unlink(temp_md_path)

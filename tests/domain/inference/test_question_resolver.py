@@ -112,6 +112,15 @@ class TestFindNextQuestionNode:
         result = qr.find_next_question_node(node, {}, has_children=False)
         assert result is node
 
+    def test_ontology_default_lookup_suppresses_prompt(self):
+        qr = QuestionResolver(
+            lambda _: None,
+            ontology_default_lookup=lambda _: FactValue("default"),
+        )
+        node = _make_node(line_type=LineType.COMPARISON, var_name="age")
+        result = qr.find_next_question_node(node, {}, has_children=False)
+        assert result is None
+
     def test_unknown_line_type_returns_none(self):
         qr = QuestionResolver(lambda _: None)
         node = _make_node(line_type=LineType.WARNING)

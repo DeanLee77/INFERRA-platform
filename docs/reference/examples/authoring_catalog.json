@@ -1,0 +1,122 @@
+{
+  "catalogVersion": "authoring-examples-v1",
+  "normalExampleLoadingPath": "docs/reference/examples",
+  "purpose": "Feature-tagged examples that authoring surfaces can discover and present to rule authors.",
+  "examples": [
+    {
+      "id": "aegis_trigger_outcome_to_rule_set",
+      "title": "Outcome-triggered downstream rule set",
+      "description": "A governed trigger policy that starts a downstream rule set after a source rule-set outcome passes confidence, evidence, depth, and fact-source guardrails.",
+      "audience": ["authoring_page", "rule_author", "workflow_reviewer"],
+      "featureTags": ["trigger", "outcome-trigger", "rule-set-target", "receipt", "idempotency"],
+      "authoringSurface": {
+        "section": "Trigger policies",
+        "searchTerms": ["trigger", "outcome", "rule set", "receipt", "idempotency"],
+        "recommendedPrimaryPath": "docs/reference/examples/triggers/outcome_to_rule_set_policy.json"
+      },
+      "entrypoints": [
+        {
+          "label": "Source rule set",
+          "path": "docs/reference/examples/triggers/aegis_trigger_source_assessment.txt",
+          "mediaType": "text/plain"
+        },
+        {
+          "label": "Target rule set",
+          "path": "docs/reference/examples/triggers/aegis_trigger_target_eligibility.txt",
+          "mediaType": "text/plain"
+        },
+        {
+          "label": "Trigger policy",
+          "path": "docs/reference/examples/triggers/outcome_to_rule_set_policy.json",
+          "mediaType": "application/json"
+        },
+        {
+          "label": "Outcome trigger request",
+          "path": "docs/reference/examples/triggers/outcome_trigger_request.json",
+          "mediaType": "application/json"
+        }
+      ],
+      "runtime": {
+        "policyEndpoint": "POST /api/v1/aegis/trigger-policies",
+        "triggerEndpoint": "POST /api/v1/aegis/triggers/outcome",
+        "expectedDecision": "executed",
+        "expectedExecutionType": "rule_set"
+      }
+    },
+    {
+      "id": "aegis_trigger_direct_action",
+      "title": "Direct event to governed action proposal",
+      "description": "A direct trigger policy that turns an operator release event into a governed AEGIS action proposal with evidence and idempotency controls.",
+      "audience": ["authoring_page", "workflow_author", "operations_reviewer"],
+      "featureTags": ["trigger", "direct-trigger", "action-target", "receipt", "idempotency"],
+      "authoringSurface": {
+        "section": "Trigger policies",
+        "searchTerms": ["trigger", "direct", "action", "approval", "operator release"],
+        "recommendedPrimaryPath": "docs/reference/examples/triggers/direct_to_action_policy.json"
+      },
+      "entrypoints": [
+        {
+          "label": "Trigger policy",
+          "path": "docs/reference/examples/triggers/direct_to_action_policy.json",
+          "mediaType": "application/json"
+        },
+        {
+          "label": "Direct trigger request",
+          "path": "docs/reference/examples/triggers/direct_trigger_request.json",
+          "mediaType": "application/json"
+        }
+      ],
+      "runtime": {
+        "policyEndpoint": "POST /api/v1/aegis/trigger-policies",
+        "triggerEndpoint": "POST /api/v1/aegis/triggers/direct",
+        "expectedDecision": "executed",
+        "expectedExecutionType": "action"
+      }
+    },
+    {
+      "id": "fraud_provider_payment_hold",
+      "title": "AU provider payment hold with clinical review continuation",
+      "description": "A provider fraud trigger policy that holds payment when legitimacy, trust, or billing-hold rules raise an investigation flag while clinical review continues.",
+      "audience": ["authoring_page", "fraud_reviewer", "workflow_reviewer"],
+      "featureTags": ["fraud", "provider-verification", "payment-hold", "clinical-review", "trigger"],
+      "authoringSurface": {
+        "section": "Fraud examples",
+        "searchTerms": ["provider", "Ahpra", "ABN", "HPOS", "payment hold", "clinical review"],
+        "recommendedPrimaryPath": "docs/reference/examples/fraud/provider_payment_hold_action_policy.json"
+      },
+      "entrypoints": [
+        {
+          "label": "Payment hold controller",
+          "path": "docs/reference/examples/fraud/provider_payment_hold_controller.txt",
+          "mediaType": "text/plain"
+        },
+        {
+          "label": "Provider legitimacy validator",
+          "path": "docs/reference/examples/fraud/provider_legitimacy_validator.txt",
+          "mediaType": "text/plain"
+        },
+        {
+          "label": "Provider trust risk detector",
+          "path": "docs/reference/examples/fraud/provider_trust_risk_detector.txt",
+          "mediaType": "text/plain"
+        },
+        {
+          "label": "Payment hold action policy",
+          "path": "docs/reference/examples/fraud/provider_payment_hold_action_policy.json",
+          "mediaType": "application/json"
+        },
+        {
+          "label": "Provider evidence collection policy",
+          "path": "docs/reference/examples/fraud/provider_evidence_collection_policy.json",
+          "mediaType": "application/json"
+        }
+      ],
+      "runtime": {
+        "policyEndpoint": "POST /api/v1/aegis/trigger-policies",
+        "triggerEndpoint": "POST /api/v1/aegis/triggers/outcome",
+        "expectedDecision": "executed",
+        "expectedExecutionType": "action"
+      }
+    }
+  ]
+}

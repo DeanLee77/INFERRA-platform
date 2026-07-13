@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch, mock_open
 from fastapi.testclient import TestClient
 from io import BytesIO
 
+from src.adapters.outbound.llm.streamer import PromptSizeExceeded
 from src.main import app
 
 
@@ -84,6 +85,24 @@ class TestConvertDocument:
 
         response = client.post("/api/v1/files/convert", files=upload_file, data={"type": "text"})
         assert response.status_code == 500
+
+    @patch("src.adapters.inbound.http.routes.files.validate_document_prompt_size")
+    @patch("src.adapters.inbound.http.routes.files.FileConversionService.convert_to_markdown")
+    @patch("src.adapters.inbound.http.routes.files.FileConversionService.save_upload_to_temp")
+    @patch("src.adapters.inbound.http.routes.files.validate_uploaded_file")
+    def test_oversized_generated_prompt_returns_413(self, mock_validate, mock_save, mock_convert, mock_prompt, client):
+        """Test 413 before streaming when the generated LLM prompt is too large."""
+        mock_validate.return_value = (True, None)
+        mock_save.return_value = "/tmp/test_file.md"
+        mock_convert.return_value = "# Converted markdown"
+        mock_prompt.side_effect = PromptSizeExceeded("Generated LLM prompt exceeds 100 characters")
+
+        file_content = b"Test content"
+        upload_file = {"file": ("test.md", BytesIO(file_content), "text/markdown")}
+
+        response = client.post("/api/v1/files/convert", files=upload_file, data={"type": "markdown"})
+        assert response.status_code == 413
+        assert "Generated LLM prompt exceeds" in response.json()["detail"]
 
 
 # =============================================================================

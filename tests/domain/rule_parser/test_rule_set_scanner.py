@@ -100,6 +100,7 @@ class TestRuleSetScannerScanRuleSet:
         scanner.scan_rule_set()
         assert len(feeder._parents) == 1
         assert feeder._parents[0][0] == "status IS active"
+        assert feeder._children == []
 
     def test_scan_parent_and_child(self):
         reader = _MockLineReader([

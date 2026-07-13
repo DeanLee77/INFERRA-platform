@@ -24,7 +24,6 @@ from src.domain.nodes.node import Node
 from src.domain.nodes.comparison_line import ComparisonLine
 from src.domain.nodes.meta_data import MetaData
 from src.domain.nodes.value_conclusion_line import ValueConclusionLine
-from src.domain.rule_parser.dependency_type_string_matcher import DependencyTypeStringMatcher
 from src.domain.rule_parser.i_scan_feeder import IScanFeeder
 from src.domain.rule_parser.iterate_syntax import canonicalise_iterate_syntax
 from src.domain.rule_parser.line_matcher_constant import LineMatcherConstant
@@ -683,34 +682,6 @@ class RuleSetParser(IScanFeeder, ABC):
         Args:
             node_data: ComparisonLine node
         """
-        rhs_type = node_data.get_rhs().get_value_type()
-        rhs_string = node_data.get_rhs().get_value()
-        lhs_string = node_data.get_lhs()
-        temp_node = node_data
-        
-        if rhs_type == FactValueType.STRING:
-            possible_child_node_key_list = list(filter(
-                lambda key: re.match(r"^\b" + lhs_string + r"\b(\s+(IS(?!(\s+IN\s+LIST))).*)*$", key)
-                or re.match(r"^\b" + rhs_string + r"\b(\s+(IS(?!(\s+IN\s+LIST))).*)*$", key)
-                or re.match(r"^\b" + lhs_string + r"\b(\s+(IS(?!(\s+CALC))).*)*$", key)
-                or re.match(r"^\b" + rhs_string + r"\b(\s+(IS(?!(\s+CALC))).*)*$", key),
-                self.__node_set.get_node_dictionary().keys()
-            ))
-        else:
-            possible_child_node_key_list = list(filter(
-                lambda key: re.match(r"^\b" + lhs_string + r"\b(\s+(IS(?!(\s+IN\s+LIST))).*)*$", key)
-                or re.match(r"^\b" + lhs_string + r"\b(\s+(IS(?!(\s+CALC))).*)*$", key),
-                self.__node_set.get_node_dictionary().keys()
-            ))
-        
-        if len(possible_child_node_key_list) > 0:
-            for item in possible_child_node_key_list:
-                self._add_dependency(
-                    temp_node,
-                    self.__node_set.get_node_dictionary()[item],
-                    DependencyType.get_or()
-                )
-        
         if node_data.get_fact_value().get_value_type() == FactValueType.WARNING:
             self.handle_warning(node_data.get_node_name())
 
@@ -834,11 +805,27 @@ class RuleSetParser(IScanFeeder, ABC):
         DependencyType.populating_dependency()
         
         if dependency_type != -1:
-            dependency_type_matcher = DependencyTypeStringMatcher.get_all_line_matchers()
-            for index in range(len(dependency_type_matcher)):
-                regex = re.compile(dependency_type_matcher[index])
-                match = regex.match(first_token_string)
-                if match:
-                    dependency_type = dependency_type | DependencyType.get_dependency_array()[index]
-        
+            dependency_tokens = {
+                token.upper()
+                for token in re.findall(
+                    r"\b(AND|OR|NOT|KNOWN|MANDATORY|OPTIONALLY|POSSIBLY)\b",
+                    first_token_string or "",
+                    flags=re.IGNORECASE,
+                )
+            }
+            if "AND" in dependency_tokens:
+                dependency_type = dependency_type | DependencyType.get_and()
+            if "OR" in dependency_tokens:
+                dependency_type = dependency_type | DependencyType.get_or()
+            if "NOT" in dependency_tokens:
+                dependency_type = dependency_type | DependencyType.get_not()
+            if "KNOWN" in dependency_tokens:
+                dependency_type = dependency_type | DependencyType.get_known()
+            if "MANDATORY" in dependency_tokens:
+                dependency_type = dependency_type | DependencyType.get_mandatory()
+            if "OPTIONALLY" in dependency_tokens:
+                dependency_type = dependency_type | DependencyType.get_optional()
+            if "POSSIBLY" in dependency_tokens:
+                dependency_type = dependency_type | DependencyType.get_possible()
+
         return dependency_type

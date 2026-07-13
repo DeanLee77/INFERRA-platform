@@ -121,7 +121,7 @@ def test_run_post_reasoning_publishes_celery_payload(monkeypatch):
         "s1",
         "rule",
         [{"name": "approved", "value": FactValue(True)}],
-        FeatureFlags(async_post_reasoning=True),
+        FeatureFlags(async_post_reasoning=True, generate_post_reasoning_ttl=True),
     )
 
     assert result == {"task_id": "task-1", "session_id": "s1"}

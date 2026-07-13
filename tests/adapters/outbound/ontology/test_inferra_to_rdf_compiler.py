@@ -9,6 +9,7 @@ import pytest
 
 from src.adapters.outbound.ontology.inferra_to_rdf_compiler import (
     INF_NS,
+    RDF_TYPE,
     InferraToRdfCompiler,
     _extract_children,
     _extract_quantifier,
@@ -120,6 +121,46 @@ class TestInferraToRdfCompiler:
         assert any(t[1].endswith("orDependsOn") and t[2].endswith("special_pathway_met") for t in triples)
         assert any(t[1].endswith("name") and t[2] == "eligible for benefit" for t in triples)
 
+    def test_compile_preserves_nested_virtual_branch_parentage(self):
+        triples = InferraToRdfCompiler.compile(
+            "benefit payable\n"
+            "    AND pathway gateway virtual ONE\n"
+            "        OR service pathway\n"
+            "            AND qualifying service\n"
+            "        OR special pathway\n"
+            "            AND special circumstance\n",
+            "test_rule",
+        )
+
+        root_uri = f"{INF_NS}rule/test_rule/node/benefit_payable"
+        gateway_uri = f"{INF_NS}rule/test_rule/node/pathway_gateway_virtual_ONE"
+        service_uri = f"{INF_NS}rule/test_rule/node/service_pathway"
+        qualifying_uri = f"{INF_NS}rule/test_rule/node/qualifying_service"
+        special_uri = f"{INF_NS}rule/test_rule/node/special_pathway"
+        circumstance_uri = f"{INF_NS}rule/test_rule/node/special_circumstance"
+
+        assert (root_uri, f"{INF_NS}andDependsOn", gateway_uri) in triples
+        assert (gateway_uri, f"{INF_NS}orDependsOn", service_uri) in triples
+        assert (service_uri, f"{INF_NS}andDependsOn", qualifying_uri) in triples
+        assert (gateway_uri, f"{INF_NS}orDependsOn", special_uri) in triples
+        assert (special_uri, f"{INF_NS}andDependsOn", circumstance_uri) in triples
+        assert not any(
+            subject == root_uri and obj in {service_uri, qualifying_uri, special_uri, circumstance_uri}
+            for subject, _, obj in triples
+        )
+
+    def test_compile_preserves_not_all_iterate_quantifier_after_dependency_prefix(self):
+        triples = InferraToRdfCompiler.compile(
+            "eligibility\n"
+            "    AND NOT ALL service period IN service history\n",
+            "test_rule",
+        )
+
+        iterate_uri = f"{INF_NS}rule/test_rule/node/NOT_ALL_service_period_IN_service_history"
+
+        assert (iterate_uri, f"{INF_NS}quantifier", "NOT ALL") in triples
+        assert any(subject == iterate_uri and obj.endswith("IterateRule") for subject, _, obj in triples)
+
     def test_compile_declarations_and_imports(self):
         triples = InferraToRdfCompiler.compile(
             "IMPORT: common_rules\n"
@@ -150,3 +191,142 @@ class TestInferraToRdfCompiler:
         triples = InferraToRdfCompiler.compile("goal AND\n  dep1", "test_rule")
         node_names = [t[2] for t in triples if t[1].endswith("#name")]
         assert "dep1" in node_names
+
+    def test_compile_comparison_leaf_emits_operands_and_operator(self):
+        triples = InferraToRdfCompiler.compile(
+            "INPUT weeks of incapacity AS NUMBER\n"
+            "FIXED initial incapacity period weeks IS NUMBER\n"
+            "\n"
+            "initial incapacity payable\n"
+            "    AND weeks of incapacity <= initial incapacity period weeks\n",
+            "test_rule",
+        )
+
+        comparison_uri = (
+            f"{INF_NS}rule/test_rule/node/"
+            "weeks_of_incapacity____initial_incapacity_period_weeks"
+        )
+        weeks_uri = f"{INF_NS}rule/test_rule/declaration/weeks_of_incapacity"
+        threshold_uri = f"{INF_NS}rule/test_rule/declaration/initial_incapacity_period_weeks"
+
+        assert (comparison_uri, f"{INF_NS}dependencyProperty", weeks_uri) in triples
+        assert (comparison_uri, f"{INF_NS}operator", "<=") in triples
+        assert (comparison_uri, f"{INF_NS}comparesTo", threshold_uri) in triples
+        assert (comparison_uri, RDF_TYPE, f"{INF_NS}ComparisonNode") in triples
+
+    def test_compile_list_items_stay_scoped_to_list_declaration(self):
+        triples = InferraToRdfCompiler.compile(
+            "FIXED DVA payment choice AS LIST\n"
+            "    ITEM lump sum\n"
+            "    ITEM periodic payments\n"
+            "INPUT interim impairment points AS NUMBER\n"
+            "\n"
+            "ITEM orphaned payment option\n"
+            "\n"
+            "payment can be selected\n"
+            "    AND interim impairment points >= 10\n",
+            "test_rule",
+        )
+
+        list_uri = f"{INF_NS}rule/test_rule/declaration/DVA_payment_choice"
+        interim_uri = f"{INF_NS}rule/test_rule/declaration/interim_impairment_points"
+        comparison_uri = f"{INF_NS}rule/test_rule/node/interim_impairment_points____10"
+
+        assert (list_uri, RDF_TYPE, f"{INF_NS}EnumList") in triples
+        assert (list_uri, f"{INF_NS}hasItem", "lump sum") in triples
+        assert (list_uri, f"{INF_NS}hasItem", "periodic payments") in triples
+        assert (comparison_uri, f"{INF_NS}dependencyProperty", interim_uri) in triples
+        assert not any(
+            "ITEM_lump_sum" in subject
+            or "ITEM_periodic_payments" in subject
+            or "ITEM_orphaned_payment_option" in subject
+            for subject, _, _ in triples
+        )
+
+    def test_compile_is_in_list_colon_and_plain_resolve_declared_enum_list(self):
+        triples = InferraToRdfCompiler.compile(
+            "INPUT service type AS LIST\n"
+            "    ITEM warlike\n"
+            "FIXED DVA operational service type AS LIST\n"
+            "    ITEM warlike\n"
+            "    ITEM non-warlike\n"
+            "\n"
+            "eligible\n"
+            "    AND service type IS IN LIST: DVA operational service type\n"
+            "    AND service type IS IN LIST DVA operational service type\n",
+            "test_rule",
+        )
+
+        service_type_uri = f"{INF_NS}rule/test_rule/declaration/service_type"
+        enum_uri = f"{INF_NS}rule/test_rule/declaration/DVA_operational_service_type"
+        colon_comparison_uri = (
+            f"{INF_NS}rule/test_rule/node/"
+            "service_type_IS_IN_LIST__DVA_operational_service_type"
+        )
+        plain_comparison_uri = (
+            f"{INF_NS}rule/test_rule/node/"
+            "service_type_IS_IN_LIST_DVA_operational_service_type"
+        )
+
+        for comparison_uri in (colon_comparison_uri, plain_comparison_uri):
+            assert (comparison_uri, f"{INF_NS}operator", "IS IN LIST") in triples
+            assert (comparison_uri, f"{INF_NS}dependencyProperty", service_type_uri) in triples
+            assert (comparison_uri, f"{INF_NS}comparesTo", enum_uri) in triples
+
+        assert (enum_uri, RDF_TYPE, f"{INF_NS}EnumList") in triples
+
+    def test_compile_and_not_uses_not_depends_on_without_child_not_modifier(self):
+        triples = InferraToRdfCompiler.compile(
+            "SRDP choice validated\n"
+            "    AND SRDP election made\n"
+            "    AND NOT VEA TPI election made\n",
+            "test_rule",
+        )
+
+        root_uri = f"{INF_NS}rule/test_rule/node/SRDP_choice_validated"
+        negated_uri = f"{INF_NS}rule/test_rule/node/VEA_TPI_election_made"
+
+        assert (root_uri, f"{INF_NS}notDependsOn", negated_uri) in triples
+        assert (root_uri, f"{INF_NS}andDependsOn", negated_uri) not in triples
+        assert (negated_uri, f"{INF_NS}dependencyModifier", "NOT") not in triples
+
+    def test_compile_attaches_comment_metadata_to_next_rule_node(self):
+        triples = InferraToRdfCompiler.compile(
+            "# Reference: MRCA s 199\n"
+            "# Section: special rate disability pension\n"
+            "# Original: A person is eligible only if the choice is valid.\n"
+            "SRDP choice validated\n"
+            "    AND SRDP election made\n",
+            "test_rule",
+        )
+
+        node_uri = f"{INF_NS}rule/test_rule/node/SRDP_choice_validated"
+
+        assert (node_uri, f"{INF_NS}statutoryReference", "MRCA s 199") in triples
+        assert (node_uri, f"{INF_NS}statutorySection", "special rate disability pension") in triples
+        assert (
+            node_uri,
+            f"{INF_NS}originalText",
+            "A person is eligible only if the choice is valid.",
+        ) in triples
+
+    def test_compile_calc_node_and_needs_variables(self):
+        triples = InferraToRdfCompiler.compile(
+            "INPUT DRCA entitlement AS BOOLEAN\n"
+            "INPUT VEA entitlement AS BOOLEAN\n"
+            "\n"
+            "primary governing act IS CALC choose_act(drca, vea)\n"
+            "    NEEDS DRCA entitlement\n"
+            "    NEEDS VEA entitlement\n",
+            "test_rule",
+        )
+
+        calc_uri = f"{INF_NS}rule/test_rule/node/primary_governing_act"
+        drca_uri = f"{INF_NS}rule/test_rule/declaration/DRCA_entitlement"
+        vea_uri = f"{INF_NS}rule/test_rule/declaration/VEA_entitlement"
+
+        assert (calc_uri, RDF_TYPE, f"{INF_NS}CalculationNode") in triples
+        assert (calc_uri, f"{INF_NS}name", "primary governing act") in triples
+        assert (calc_uri, f"{INF_NS}hasFormula", "choose_act(drca, vea)") in triples
+        assert (calc_uri, f"{INF_NS}requiresVariable", drca_uri) in triples
+        assert (calc_uri, f"{INF_NS}requiresVariable", vea_uri) in triples

@@ -79,7 +79,7 @@ class SessionManager(SessionManagerPort):
         target = goal if goal is not None else ctx.target
         mandatory_nodes = mandatory if mandatory is not None else ctx.mandatory
 
-        goal_reached = self._fact_is_known(wm.get(target))
+        goal_reached = self._goal_fact_is_satisfied(wm.get(target))
         mandatory_met = all(self._fact_is_known(wm.get(name)) for name in mandatory_nodes)
         current_hash = self._compute_wm_hash(wm)
         state_stable = self._prev_wm_hashes.get(session_id) == current_hash
@@ -159,3 +159,14 @@ class SessionManager(SessionManagerPort):
     @staticmethod
     def _fact_is_known(value: Optional[FactValue]) -> bool:
         return value is not None and value.get_value() is not None
+
+    @staticmethod
+    def _goal_fact_is_satisfied(value: Optional[FactValue]) -> bool:
+        if value is None:
+            return False
+        raw_value = value.get_value()
+        if raw_value is None:
+            return False
+        if isinstance(raw_value, bool):
+            return raw_value is True
+        return True

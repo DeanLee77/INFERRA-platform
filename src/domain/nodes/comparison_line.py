@@ -193,9 +193,16 @@ class ComparisonLine(Node):
         # Handle list comparison
         elif working_memory_lhs_value is not None and \
              working_memory_lhs_value.get_value_type() == FactValueType.LIST:
-            
+            rhs_value = self._normalise_quoted_literal(
+                working_memory_rhs_value.get_value()
+            )
             for fact_value_in_list in working_memory_lhs_value.get_value():
-                if fact_value_in_list.get_value() == working_memory_rhs_value.get_value():
+                lhs_item_value = (
+                    fact_value_in_list.get_value()
+                    if hasattr(fact_value_in_list, "get_value")
+                    else fact_value_in_list
+                )
+                if lhs_item_value == rhs_value:
                     return FactValue(True, FactValueType.BOOLEAN)
             return FactValue(False, FactValueType.BOOLEAN)
         
@@ -204,7 +211,11 @@ class ComparisonLine(Node):
             working_memory_rhs_value_str = " "
             if working_memory_rhs_value.get_value_type() == FactValueType.DEFI_STRING:
                 # SECURITY FIX: Safe string handling without eval()
-                working_memory_rhs_value_str = str(working_memory_rhs_value.get_value())
+                working_memory_rhs_value_str = str(
+                    self._normalise_quoted_literal(
+                        working_memory_rhs_value.get_value()
+                    )
+                )
             else:
                 working_memory_rhs_value_str = str(working_memory_rhs_value.get_value())
             
@@ -239,6 +250,15 @@ class ComparisonLine(Node):
         elif self.__operator_string == "==":
             return lhs_date == rhs_date
         return False
+
+    @staticmethod
+    def _normalise_quoted_literal(value: Any) -> Any:
+        if not isinstance(value, str) or len(value) < 2:
+            return value
+        quote = value[0]
+        if quote in {"'", '"'} and value[-1] == quote:
+            return value[1:-1]
+        return value
 
     def _compare_numeric(self, lhs: Any, rhs: Any) -> bool:
         """
@@ -330,18 +350,26 @@ class ComparisonLine(Node):
         # In 'eval' engine '=' operator means assigning a value,
         # hence if the operator is '=' then it needs to be replaced with '=='.
         operator_index = tokens.get_tokens_string_list().index("O")
-        if tokens.get_tokens_list()[operator_index] == "=":
+        operator_token = tokens.get_tokens_list()[operator_index]
+        if operator_token == "=":
             self.__operator_string = "=="
-            self._variable_name = child_text.split("=")[0].strip()
         else:
-            self.__operator_string = tokens.get_tokens_list()[operator_index]
-            self._variable_name = child_text.split(self.__operator_string)[0].strip()
+            self.__operator_string = operator_token
+
+        lhs_text, rhs_text = child_text.split(operator_token, 1)
+        self._variable_name = lhs_text.strip()
 
         self.__lhs = self._variable_name
         tokens_string_list_size = len(tokens.get_tokens_string_list())
         last_token = tokens.get_tokens_list()[tokens_string_list_size - 1]
         last_token_string = tokens.get_tokens_string_list()[tokens_string_list_size - 1]
         self.set_value(last_token_string, last_token)
+        rhs_text = rhs_text.strip()
+        if rhs_text != str(last_token):
+            if self.get_detected_date(rhs_text):
+                self._value = FactValue(rhs_text, FactValueType.DATE)
+            else:
+                self._value = FactValue(rhs_text, FactValueType.STRING)
         self.__rhs = self._value
 
     # -------------------------------------------------------------------------

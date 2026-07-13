@@ -13,6 +13,7 @@ from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
 from src.domain.models import RuleEntity, RuleFileEntity
 from src.domain.models.rule_file_payload import PAYLOAD_TYPE, encode_rule_file_payload
 from src.domain.nodes.node_set import NodeSet
+from src.domain.nodes.record import HistoryRecord
 from src.services.rule_validation_service import RuleValidationService
 
 
@@ -201,12 +202,14 @@ class TestRuleService:
         """Test getting history for ML inference."""
         mock_rule_repository.find_rule_by_rule_name_with_latest_history.return_value = {
             'rule': RuleEntity(rule_id=1, name="Test Rule"),
-            'history': {'data': 'history'}
+            'history': {'eligible': {'true': '3', 'false': '1'}}
         }
         
         result = rule_service.get_history_for_ml_inference("Test Rule")
         
-        assert result == {'data': 'history'}
+        assert result == {
+            'eligible': HistoryRecord(name='eligible', true_count=3, false_count=1)
+        }
         mock_rule_repository.find_rule_by_rule_name_with_latest_history.assert_called_once_with("Test Rule")
     
     def test_get_history_for_ml_inference_no_history(self, rule_service, mock_rule_repository):
@@ -779,6 +782,38 @@ class TestRuleOntologyData:
         assert any(node["name"] == "eligible for benefit" for node in result["nodes"])
         assert any(edge["predicate"].endswith("andDependsOn") for edge in result["edges"])
 
+    def test_ontology_graph_from_triples_adds_layout_semantics(self):
+        root_uri = "http://inferra.ai/schema#rule/eligibility"
+        gateway_uri = "http://inferra.ai/schema#rule/eligibility/node/gateway"
+        service_uri = "http://inferra.ai/schema#rule/eligibility/node/service"
+        special_uri = "http://inferra.ai/schema#rule/eligibility/node/special"
+        triples = [
+            (root_uri, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", "http://inferra.ai/schema#RuleSet"),
+            (root_uri, "http://inferra.ai/schema#containsNode", gateway_uri),
+            (gateway_uri, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", "http://inferra.ai/schema#OrRule"),
+            (gateway_uri, "http://inferra.ai/schema#orDependsOn", service_uri),
+            (gateway_uri, "http://inferra.ai/schema#orDependsOn", special_uri),
+            (service_uri, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", "http://inferra.ai/schema#Conclusion"),
+            (special_uri, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", "http://inferra.ai/schema#Conclusion"),
+        ]
+
+        graph = RuleService._ontology_graph_from_triples(triples)
+        nodes = {node["uri"]: node for node in graph["nodes"]}
+
+        assert nodes[gateway_uri]["type_key"] == "or_rule"
+        assert nodes[gateway_uri]["in_degree"] == 1
+        assert nodes[gateway_uri]["out_degree"] == 2
+        assert nodes[gateway_uri]["degree"] == 3
+        assert nodes[gateway_uri]["layout_weight"] == 1.0
+        assert nodes[service_uri]["layout_weight"] < nodes[gateway_uri]["layout_weight"]
+        assert {
+            (edge["predicate_key"], edge["dependency_type"])
+            for edge in graph["edges"]
+        } == {
+            ("contains_node", "MANDATORY"),
+            ("or_depends_on", "OR"),
+        }
+
     def test_sync_rule_ontology_publishes_expanded_rule_text(self, rule_service, mock_rule_repository):
         rule_text = "eligible for benefit\n    AND claimant has service\n"
         mock_rule_repository.find_rule_text_by_rule_name.return_value = RuleFileEntity(
@@ -948,7 +983,7 @@ class TestGetHistoryForMlInferenceEdgeCases:
 
     def test_result_none_rule(self, rule_service, mock_rule_repository):
         mock_rule_repository.find_rule_by_rule_name_with_latest_history.return_value = {
-            'rule': None, 'history': {'k': 'v'}
+            'rule': None, 'history': {'k': {'true': '1', 'false': '0'}}
         }
         result = rule_service.get_history_for_ml_inference("Test")
-        assert result == {'k': 'v'}
+        assert result == {'k': HistoryRecord(name='k', true_count=1, false_count=0)}

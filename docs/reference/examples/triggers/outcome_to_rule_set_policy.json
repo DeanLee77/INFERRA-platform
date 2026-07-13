@@ -1,0 +1,26 @@
+{
+  "policyId": "aegis-trigger-source-to-target",
+  "version": "v1",
+  "status": "active",
+  "mode": "automatic",
+  "description": "Start the downstream eligibility rule set only when the source assessment completes successfully with enough confidence and evidence.",
+  "source": {
+    "type": "rule_set",
+    "ruleName": "aegis_trigger_source_assessment"
+  },
+  "target": {
+    "type": "rule_set",
+    "ruleName": "aegis_trigger_target_eligibility",
+    "targetNodeName": "triggered eligibility accepted"
+  },
+  "when": {
+    "outcome": true
+  },
+  "constraints": {
+    "maxDepth": 3,
+    "confidenceThreshold": 0.75,
+    "factSourceFilter": ["ASSERTED", "INFERRED"],
+    "requiredEvidenceRefs": ["ev-source-assessment"],
+    "approvalRole": "override authority"
+  }
+}

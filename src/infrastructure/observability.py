@@ -46,6 +46,7 @@ def configure_observability(app: FastAPI, enabled: bool | None = None) -> bool:
 
     try:
         provider = _ensure_tracer_provider()
+        _patch_fastapi_route_details()
         FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
         app.state.otel_instrumented = True
         logger.info("otel_fastapi_instrumented", service_name=_service_name())
@@ -54,6 +55,34 @@ def configure_observability(app: FastAPI, enabled: bool | None = None) -> bool:
         logger.warning("otel_fastapi_instrumentation_failed", exc_info=True)
         app.state.otel_instrumented = False
         return False
+
+
+def _patch_fastapi_route_details() -> None:
+    """Make OTel's FastAPI route lookup tolerant of internal router entries."""
+    from opentelemetry.instrumentation import fastapi as otel_fastapi
+    from starlette.routing import Match, Route
+
+    if getattr(otel_fastapi, "_inferra_route_details_patched", False):
+        return
+
+    def _safe_get_route_details(scope):
+        app = scope["app"]
+        route = None
+        for starlette_route in app.routes:
+            match, _ = (
+                Route.matches(starlette_route, scope)
+                if isinstance(starlette_route, Route)
+                else starlette_route.matches(scope)
+            )
+            if match == Match.FULL:
+                route = getattr(starlette_route, "path", scope.get("path"))
+                break
+            if match == Match.PARTIAL:
+                route = getattr(starlette_route, "path", scope.get("path"))
+        return route
+
+    otel_fastapi._get_route_details = _safe_get_route_details
+    otel_fastapi._inferra_route_details_patched = True
 
 
 def _ensure_tracer_provider() -> Any:

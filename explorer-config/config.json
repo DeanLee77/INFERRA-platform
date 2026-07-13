@@ -1,0 +1,12 @@
+{
+  "PUBLIC_OR_PROXY_ENDPOINT": "http://localhost:8080",
+  "GRAPH_TYPE": "sparql",
+  "SERVICE_TYPE": "fuseki",
+  "USING_PROXY_SERVER": "true",
+  "IAM": "false",
+  "GRAPH_CONNECTION_URL": "http://fuseki:3030/inferra",
+  "AWS_REGION": "",
+  "PROXY_SERVER_HTTPS_CONNECTION": "false",
+  "GRAPH_EXP_HTTPS_CONNECTION": "false",
+  "NEPTUNE_NOTEBOOK": "false"
+}

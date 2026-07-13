@@ -1,0 +1,147 @@
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.adapters.outbound.ontology.fuseki_adapter import FusekiConnectionError
+from src.adapters.outbound.ontology.fuseki_bulk_loader import (
+    FusekiNTriplesBulkLoader,
+    FusekiNTriplesLoadTarget,
+    _count_ntriples,
+)
+
+
+def test_load_file_posts_ntriples_to_graph_store(tmp_path):
+    nt_file = tmp_path / "concepts.nt"
+    nt_file.write_text(
+        "<http://s/1> <http://p> <http://o> .\n"
+        "<http://s/2> <http://p> \"literal\" .\n",
+        encoding="utf-8",
+    )
+    response = MagicMock(status_code=204)
+
+    with patch(
+        "src.adapters.outbound.ontology.fuseki_adapter.REQUESTS_AVAILABLE",
+        True,
+    ), patch(
+        "src.adapters.outbound.ontology.fuseki_adapter._requests"
+    ) as requests:
+        requests.post.return_value = response
+        result = FusekiNTriplesBulkLoader(
+            fuseki_url="http://localhost:3030/inferra",
+            timeout_seconds=9,
+        ).load_file(
+            FusekiNTriplesLoadTarget(
+                role="concepts",
+                path=nt_file,
+                graph_uri="http://inferra.ai/ontology/snomed-ct-au/20260630/snapshot",
+            )
+        )
+
+    assert result.status == "loaded"
+    assert result.triple_count == 2
+    call = requests.post.call_args
+    assert call.args[0] == "http://localhost:3030/inferra/data"
+    assert call.kwargs["params"] == {
+        "graph": "http://inferra.ai/ontology/snomed-ct-au/20260630/snapshot"
+    }
+    assert call.kwargs["headers"] == {"Content-Type": "application/n-triples"}
+    assert call.kwargs["timeout"] == 9
+
+
+def test_load_targets_replace_clears_each_graph_once(tmp_path):
+    file_one = tmp_path / "one.nt"
+    file_two = tmp_path / "two.nt"
+    file_one.write_text("<http://s/1> <http://p> <http://o> .\n", encoding="utf-8")
+    file_two.write_text("<http://s/2> <http://p> <http://o> .\n", encoding="utf-8")
+    response = MagicMock(status_code=204)
+
+    graph = "http://inferra.ai/ontology/snomed-ct-au/20260630/snapshot"
+    with patch(
+        "src.adapters.outbound.ontology.fuseki_adapter.REQUESTS_AVAILABLE",
+        True,
+    ), patch(
+        "src.adapters.outbound.ontology.fuseki_adapter._requests"
+    ) as requests:
+        requests.post.return_value = response
+        summary = FusekiNTriplesBulkLoader(
+            fuseki_url="http://localhost:3030/inferra",
+        ).load_targets(
+            (
+                FusekiNTriplesLoadTarget("concepts", file_one, graph, 1),
+                FusekiNTriplesLoadTarget("descriptions", file_two, graph, 1),
+            ),
+            replace_existing_graphs=True,
+        )
+
+    assert summary.total_triples == 2
+    assert summary.cleared_graph_uris == (graph,)
+    assert requests.post.call_count == 3
+    clear_call = requests.post.call_args_list[0]
+    assert clear_call.args[0] == "http://localhost:3030/inferra/update"
+    assert clear_call.kwargs["data"] == {"update": f"CLEAR SILENT GRAPH <{graph}>"}
+
+
+def test_empty_ntriples_file_is_skipped(tmp_path):
+    nt_file = tmp_path / "empty.nt"
+    nt_file.write_text("\n# comment only\n", encoding="utf-8")
+
+    with patch(
+        "src.adapters.outbound.ontology.fuseki_adapter._requests"
+    ) as requests:
+        result = FusekiNTriplesBulkLoader().load_file(
+            FusekiNTriplesLoadTarget(
+                role="concepts",
+                path=nt_file,
+                graph_uri="http://inferra.ai/ontology/snomed",
+            )
+        )
+
+    assert result.status == "skipped_empty"
+    assert result.triple_count == 0
+    requests.post.assert_not_called()
+
+
+def test_bad_graph_uri_is_rejected(tmp_path):
+    nt_file = tmp_path / "concepts.nt"
+    nt_file.write_text("<http://s> <http://p> <http://o> .\n", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        FusekiNTriplesBulkLoader().load_file(
+            FusekiNTriplesLoadTarget(
+                role="concepts",
+                path=nt_file,
+                graph_uri="not a graph uri",
+            )
+        )
+
+
+def test_fuseki_bad_status_raises_connection_error(tmp_path):
+    nt_file = tmp_path / "concepts.nt"
+    nt_file.write_text("<http://s> <http://p> <http://o> .\n", encoding="utf-8")
+    response = MagicMock(status_code=500, text="server error")
+
+    with patch(
+        "src.adapters.outbound.ontology.fuseki_adapter.REQUESTS_AVAILABLE",
+        True,
+    ), patch(
+        "src.adapters.outbound.ontology.fuseki_adapter._requests"
+    ) as requests:
+        requests.post.return_value = response
+        with pytest.raises(FusekiConnectionError):
+            FusekiNTriplesBulkLoader().load_file(
+                FusekiNTriplesLoadTarget(
+                    role="concepts",
+                    path=nt_file,
+                    graph_uri="http://inferra.ai/ontology/snomed",
+                )
+            )
+
+
+def test_count_ntriples_ignores_blank_and_comment_lines(tmp_path):
+    nt_file = tmp_path / "concepts.nt"
+    nt_file.write_text(
+        "\n# generated by test\n<http://s> <http://p> <http://o> .\n",
+        encoding="utf-8",
+    )
+
+    assert _count_ntriples(nt_file) == 1

@@ -1,9 +1,15 @@
 from src.domain.fact_values import FactValue
 from src.domain.reasoning.semantic_fact_enricher import (
     BoundFact,
+    INF_DEFAULT_VALUE,
+    INF_HAS_ITEM,
+    INF_NAME,
     OntologyDiscoveredCandidate,
+    OntologyBindingResolver,
+    OntologyIndex,
     RDF_TYPE,
     RDFS_RANGE,
+    RDFS_LABEL,
     RDFS_SUBCLASS_OF,
     RDFS_SUBPROPERTY_OF,
     SemanticFactEnricher,
@@ -135,3 +141,96 @@ def test_semantic_fact_enricher_receipt_keeps_ontology_advisory():
         "hypothesis",
         "ontology_discovered_candidate",
     }.issubset(event_kinds)
+
+
+def test_public_ontology_index_derives_allowed_value_suggestions():
+    triples = [
+        (f"{SYN}status", INF_NAME, "incapacity status"),
+        (f"{SYN}status", INF_HAS_ITEM, "current employee"),
+        (f"{SYN}status", INF_HAS_ITEM, "former employee"),
+    ]
+    report = OntologyBindingResolver().resolve(
+        ["incapacity status"],
+        triples,
+        source_graph_uri="urn:test:graph",
+    )
+    index = OntologyIndex(triples)
+
+    suggestions = index.semantic_suggestions_for(
+        report.bindings[0],
+        ontology_snapshot_ref="test_rule:source-hash",
+        ontology_snapshot_hash="source-hash",
+    )
+
+    assert report.ambiguous == ()
+    assert report.missing == ()
+    assert {item.suggested_value for item in suggestions} == {
+        "current employee",
+        "former employee",
+    }
+    assert all(item.advisory_only for item in suggestions)
+    assert all(item.alters_deterministic_outcome is False for item in suggestions)
+
+
+def test_public_ontology_index_derives_explicit_default_value_suggestion():
+    triples = [
+        (f"{SYN}status", INF_NAME, "incapacity status"),
+        (f"{SYN}status", INF_DEFAULT_VALUE, "current employee"),
+    ]
+    report = OntologyBindingResolver().resolve(
+        ["incapacity status"],
+        triples,
+        source_graph_uri="urn:test:graph",
+    )
+    index = OntologyIndex(triples)
+
+    suggestions = index.value_suggestions_for(
+        report.bindings[0],
+        ontology_snapshot_ref="test_rule:source-hash",
+        ontology_snapshot_hash="source-hash",
+    )
+
+    assert len(suggestions) == 1
+    suggestion = suggestions[0]
+    assert suggestion.suggested_value == "current employee"
+    assert suggestion.relationship == "inf:defaultValue"
+    assert suggestion.auto_answer_eligible is True
+    assert suggestion.advisory_only is True
+    assert suggestion.alters_deterministic_outcome is False
+
+
+def test_public_ontology_index_abstains_on_contradictory_defaults():
+    triples = [
+        (f"{SYN}status", INF_NAME, "incapacity status"),
+        (f"{SYN}status", INF_DEFAULT_VALUE, "current employee"),
+        (f"{SYN}status", INF_DEFAULT_VALUE, "former employee"),
+    ]
+    report = OntologyBindingResolver().resolve(["incapacity status"], triples)
+    index = OntologyIndex(triples)
+
+    suggestions = index.value_suggestions_for(
+        report.bindings[0],
+        ontology_snapshot_ref="test_rule:source-hash",
+        ontology_snapshot_hash="source-hash",
+    )
+
+    assert suggestions[0].status == "abstained"
+    assert suggestions[0].abstain_reason == "contradictory_default_values"
+    assert suggestions[0].auto_answer_eligible is False
+
+
+def test_binding_resolver_rejects_ambiguous_exact_label_matches():
+    triples = [
+        (f"{SYN}status-a", INF_NAME, "incapacity status"),
+        (f"{SYN}status-b", RDFS_LABEL, "incapacity status"),
+    ]
+
+    report = OntologyBindingResolver().resolve(["incapacity status"], triples)
+
+    assert report.bindings == ()
+    assert report.missing == ()
+    assert report.ambiguous[0].fact_name == "incapacity status"
+    assert set(report.ambiguous[0].candidates) == {
+        f"{SYN}status-a",
+        f"{SYN}status-b",
+    }

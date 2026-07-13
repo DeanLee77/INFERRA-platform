@@ -1,0 +1,23 @@
+{
+  "policyId": "aegis-trigger-direct-release",
+  "idempotencyKey": "example-direct-release-001:trigger:v1",
+  "correlationId": "corr-example-direct-release-001",
+  "targetRunId": "example-trigger-action-run-001",
+  "actor": {
+    "kind": "human",
+    "id": "operator-1",
+    "role": "operator"
+  },
+  "confidence": 0.88,
+  "evidenceRefs": ["ev-operator-release", "ev-battery-reserve"],
+  "facts": {
+    "batteryReservePercent": {
+      "value": 61,
+      "source": "ASSERTED"
+    },
+    "routeClearance": {
+      "value": "supervised",
+      "source": "INFERRED"
+    }
+  }
+}

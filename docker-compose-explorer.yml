@@ -1,0 +1,44 @@
+name: inferra-explorer
+
+services:
+  fuseki:
+    image: stain/jena-fuseki:latest@sha256:b1d0c96f19adddef417520184471ac816cf36c6e72936a88ea02b29f4305929a
+    container_name: inferra-fuseki
+    ports:
+      - "127.0.0.1:3030:3030"
+    environment:
+      ADMIN_PASSWORD: admin
+      FUSEKI_DATASET_1: inferra
+      TDB: "2"
+    volumes:
+      - fuseki-data:/fuseki
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3030/$/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - inferra-network
+
+  explorer:
+    build:
+      context: ../graph-explorer
+      dockerfile: Dockerfile
+    container_name: inferra-explorer
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./explorer-config/config.json:/graph-explorer/config.json:ro
+    depends_on:
+      fuseki:
+        condition: service_healthy
+    networks:
+      - inferra-network
+
+networks:
+  inferra-network:
+    driver: bridge
+
+volumes:
+  fuseki-data:

@@ -1,0 +1,9 @@
+# Example: source rule set for governed outcome-triggered execution
+INPUT source assessment complete AS BOOLEAN
+INPUT source risk score AS NUMBER
+INPUT source evidence verified AS BOOLEAN
+
+source trigger approved
+    AND source assessment complete
+    AND source risk score >= 0.75
+    AND source evidence verified

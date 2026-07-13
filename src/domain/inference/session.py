@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Optional
 from src.domain.inference.inference_engine import InferenceEngine
 from src.domain.inference.assessment import Assessment
+from src.domain.session.inference_context import InferenceContext
 from src.domain.state.feature_flags import FeatureFlags
 
 
@@ -37,10 +38,14 @@ class InferenceSession:
     inference_engine: InferenceEngine
     assessment: Assessment
     feature_flags: Optional[FeatureFlags] = None
+    ontology_profile: str = "custom"
+    ontology_profile_source: str = "environment"
+    llm_configuration: Optional[dict] = None
     version: int = 0
     owner_id: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     last_accessed: datetime = field(default_factory=datetime.utcnow)
+    context: Optional[InferenceContext] = None
 
     def touch(self) -> None:
         """Update the last_accessed timestamp."""

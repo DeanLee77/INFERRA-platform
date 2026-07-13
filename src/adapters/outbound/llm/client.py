@@ -1,7 +1,7 @@
 from typing import Optional
 
 from openai import OpenAI
-from src.adapters.outbound.llm.provider_registry import resolve_llm_config
+from src.adapters.outbound.llm.provider_registry import ResolvedLLMConfig, resolve_llm_config
 from src.config import settings
 from src.infrastructure.logging_config import get_logger
 
@@ -23,10 +23,19 @@ class LLMClient:
         cls,
         provider_id: Optional[str] = None,
         model_id: Optional[str] = None,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        resolved_config: Optional[ResolvedLLMConfig] = None,
     ):
-        if provider_id or model_id:
+        if provider_id or model_id or base_url or api_key or resolved_config:
             instance = super().__new__(cls)
-            instance._initialize(provider_id=provider_id, model_id=model_id)
+            instance._initialize(
+                provider_id=provider_id,
+                model_id=model_id,
+                base_url=base_url,
+                api_key=api_key,
+                resolved_config=resolved_config,
+            )
             return instance
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -37,6 +46,9 @@ class LLMClient:
         self,
         provider_id: Optional[str] = None,
         model_id: Optional[str] = None,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        resolved_config: Optional[ResolvedLLMConfig] = None,
     ) -> None:
         self._client = None
         self._model = None
@@ -47,16 +59,24 @@ class LLMClient:
         self._base_url = None
         self._timeout = settings.LLM_TIMEOUT
 
-        try:
-            resolved = resolve_llm_config(provider_id=provider_id, model_id=model_id)
-        except ValueError as exc:
-            _logger.warning(
-                "llm_selection_invalid",
-                provider_id=provider_id,
-                model_id=model_id,
-                error=str(exc),
-            )
-            return
+        if resolved_config is None:
+            try:
+                resolved = resolve_llm_config(
+                    provider_id=provider_id,
+                    model_id=model_id,
+                    base_url=base_url,
+                    api_key=api_key,
+                )
+            except ValueError as exc:
+                _logger.warning(
+                    "llm_selection_invalid",
+                    provider_id=provider_id,
+                    model_id=model_id,
+                    error=str(exc),
+                )
+                return
+        else:
+            resolved = resolved_config
 
         if resolved is None:
             _logger.warning(

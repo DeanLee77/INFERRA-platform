@@ -1,0 +1,26 @@
+{
+  "policyId": "aegis-trigger-direct-release",
+  "version": "v1",
+  "status": "active",
+  "mode": "automatic",
+  "description": "Convert an operator release event into a governed robot action proposal.",
+  "source": {
+    "type": "direct",
+    "eventType": "operator.release"
+  },
+  "target": {
+    "type": "action",
+    "workflowId": "robot-action-firewall",
+    "action": {
+      "kind": "robot.reroute",
+      "target": "AMR-17"
+    }
+  },
+  "constraints": {
+    "maxDepth": 2,
+    "confidenceThreshold": 0.8,
+    "factSourceFilter": ["ASSERTED", "INFERRED"],
+    "requiredEvidenceRefs": ["ev-operator-release", "ev-battery-reserve"],
+    "approvalRole": "override authority"
+  }
+}

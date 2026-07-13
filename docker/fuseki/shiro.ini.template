@@ -1,0 +1,20 @@
+[main]
+plainMatcher=org.apache.shiro.authc.credential.SimpleCredentialsMatcher
+iniRealm.credentialsMatcher = $plainMatcher
+
+[users]
+admin = ${ADMIN_PASSWORD}
+${FUSEKI_READ_USER} = ${FUSEKI_READ_PASSWORD}
+
+[urls]
+/ = anon
+/$/status = anon
+/$/ping = anon
+/$/** = authcBasic,user[admin]
+/*/query = authcBasic
+/*/sparql = authcBasic
+/*/update = authcBasic,user[admin]
+/*/upload = authcBasic,user[admin]
+/*/data = authcBasic,user[admin]
+/* = authcBasic,user[admin]
+/** = authcBasic,user[admin]

@@ -5,8 +5,11 @@ Tests for the FileConversionService.
 import pytest
 from unittest.mock import MagicMock, patch, mock_open
 import os
+import ssl
+import subprocess
 
 from src.services.file_service import (
+    FileConversionLimitError,
     FileConversionService,
     validate_uploaded_file,
     preprocess_text,
@@ -250,27 +253,70 @@ class TestHandlePdfFile:
             assert "Page 1" in result
             assert "Page 2" in result
 
+    def test_handle_pdf_file_rejects_excessive_page_count(self):
+        mock_doc = MagicMock()
+        mock_doc.page_count = 2
+        mock_doc.close = MagicMock()
+
+        mock_fitz = MagicMock()
+        mock_fitz.open.return_value = mock_doc
+
+        with patch("src.services.file_service._get_fitz", return_value=mock_fitz), \
+             patch("src.services.file_service.settings") as mock_settings:
+            mock_settings.DOCUMENT_CONVERSION_MAX_PDF_PAGES = 1
+            with pytest.raises(FileConversionLimitError, match="page count"):
+                handle_pdf_file("/tmp/multi.pdf")
+            mock_doc.close.assert_called_once()
+
+    def test_handle_pdf_file_rejects_expansion_heavy_output(self):
+        mock_doc = MagicMock()
+        mock_doc.page_count = 1
+        mock_page = MagicMock()
+        mock_page.get_text.return_value = "x" * 10
+        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
+        mock_doc.close = MagicMock()
+
+        mock_fitz = MagicMock()
+        mock_fitz.open.return_value = mock_doc
+
+        with patch("src.services.file_service._get_fitz", return_value=mock_fitz), \
+             patch("src.services.file_service.os.path.getsize", return_value=1), \
+             patch("src.services.file_service.settings") as mock_settings:
+            mock_settings.DOCUMENT_CONVERSION_MAX_PDF_PAGES = 10
+            mock_settings.DOCUMENT_CONVERSION_MAX_OUTPUT_CHARS = 1000
+            mock_settings.DOCUMENT_CONVERSION_MAX_EXPANSION_RATIO = 5.0
+            with pytest.raises(FileConversionLimitError, match="output exceeds"):
+                handle_pdf_file("/tmp/expanded.pdf")
+            mock_doc.close.assert_called_once()
+
 
 class TestHandleDocxFile:
     """Tests for handle_docx_file function."""
 
     def test_handle_docx_file_success(self):
-        with patch("pypandoc.convert_file") as mock_convert, \
+        completed = subprocess.CompletedProcess(["pandoc"], 0, "", "")
+        with patch("src.services.file_service.shutil.which", return_value="/usr/bin/pandoc"), \
+             patch("src.services.file_service.subprocess.run", return_value=completed) as mock_run, \
              patch("builtins.open", mock_open(read_data="# Converted markdown")), \
              patch("os.path.exists", return_value=True), \
              patch("os.unlink"):
-            mock_convert.return_value = None
             result = handle_docx_file("/tmp/test.docx")
             assert result == "# Converted markdown"
+            cmd = mock_run.call_args.args[0]
+            assert "--sandbox" in cmd
+            assert "--from=docx" in cmd
+            assert mock_run.call_args.kwargs["stdin"] is subprocess.DEVNULL
 
     def test_handle_docx_file_doc_format(self):
-        with patch("pypandoc.convert_file") as mock_convert, \
+        completed = subprocess.CompletedProcess(["pandoc"], 0, "", "")
+        with patch("src.services.file_service.shutil.which", return_value="/usr/bin/pandoc"), \
+             patch("src.services.file_service.subprocess.run", return_value=completed) as mock_run, \
              patch("builtins.open", mock_open(read_data="# Doc content")), \
              patch("os.path.exists", return_value=True), \
              patch("os.unlink"):
-            mock_convert.return_value = None
             result = handle_docx_file("/tmp/test.doc")
             assert result == "# Doc content"
+            assert "--from=doc" in mock_run.call_args.args[0]
 
 
 class TestConvertFileToMarkdown:
@@ -370,44 +416,29 @@ class TestGetFitzLazyLoad:
         fs.fitz = original
 
 
-class TestHandleDocxFileOSErrorPath:
-    def test_handle_docx_file_oserror_downloads_pandoc(self):
+class TestHandleDocxFileFailSecurePath:
+    def test_handle_docx_file_missing_pandoc_fails_without_download_or_tls_change(self):
+        original_context = ssl._create_default_https_context
+        with patch("src.services.file_service.shutil.which", return_value=None), \
+             patch("src.services.file_service.subprocess.run") as mock_run:
+            with pytest.raises(RuntimeError, match="Pandoc executable is not installed"):
+                handle_docx_file("/tmp/test.docx")
+            mock_run.assert_not_called()
+            assert ssl._create_default_https_context is original_context
+
+    def test_handle_docx_file_timeout_raises_limit_error(self):
         mock_f = MagicMock()
-        mock_f.write = MagicMock()
         mock_f.name = "/tmp/test_out.md"
         mock_f.__enter__ = MagicMock(return_value=mock_f)
         mock_f.__exit__ = MagicMock(return_value=False)
 
-        with patch("pypandoc.convert_file", side_effect=[OSError("pandoc not found"), None]), \
-             patch("pypandoc.download_pandoc"), \
-             patch("tempfile.NamedTemporaryFile", return_value=mock_f), \
-             patch("builtins.open", mock_open(read_data="# Converted")), \
+        with patch("src.services.file_service.shutil.which", return_value="/usr/bin/pandoc"), \
+             patch("src.services.file_service.subprocess.run", side_effect=subprocess.TimeoutExpired(["pandoc"], 1)), \
+             patch("src.services.file_service.tempfile.NamedTemporaryFile", return_value=mock_f), \
              patch("os.path.exists", return_value=True), \
              patch("os.unlink"):
-            result = handle_docx_file("/tmp/test.docx")
-            assert result == "# Converted"
-
-    def test_handle_docx_file_oserror_no_ssl_attr(self):
-        import ssl
-        mock_f = MagicMock()
-        mock_f.write = MagicMock()
-        mock_f.name = "/tmp/test_out.md"
-        mock_f.__enter__ = MagicMock(return_value=mock_f)
-        mock_f.__exit__ = MagicMock(return_value=False)
-
-        original_ctx = ssl._create_unverified_context
-        del ssl._create_unverified_context
-        try:
-            with patch("pypandoc.convert_file", side_effect=[OSError("pandoc not found"), None]), \
-                 patch("pypandoc.download_pandoc"), \
-                 patch("tempfile.NamedTemporaryFile", return_value=mock_f), \
-                 patch("builtins.open", mock_open(read_data="# Converted")), \
-                 patch("os.path.exists", return_value=True), \
-                 patch("os.unlink"):
-                result = handle_docx_file("/tmp/test.docx")
-                assert result == "# Converted"
-        finally:
-            ssl._create_unverified_context = original_ctx
+            with pytest.raises(FileConversionLimitError, match="exceeded"):
+                handle_docx_file("/tmp/test.docx")
 
 
 class TestConvertFileToMarkdownDoc:

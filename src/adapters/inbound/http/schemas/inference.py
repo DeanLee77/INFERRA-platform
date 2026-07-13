@@ -14,6 +14,21 @@ class SessionCreateRequest(BaseModel):
     """Request to create a new inference session."""
     rule_name: str = Field(..., description="Name of the rule to evaluate")
     target_node_name: str = Field(..., description="Name of the target/goal node")
+    ontology_profile: Optional[str] = Field(
+        None,
+        description=(
+            "Optional per-session ontology assistance profile: off, advisory, "
+            "auto_answer, reasoning, or full_semantic_pilot"
+        ),
+    )
+    ontology_flags: Optional[Dict[str, bool]] = Field(
+        None,
+        description=(
+            "Optional per-session ontology boolean overrides. Supported keys include "
+            "advisory_enabled, auto_answer_enabled, reasoning_enabled, and "
+            "question_strategy_enabled."
+        ),
+    )
 
 
 class SessionCreateResponse(BaseModel):
@@ -21,12 +36,53 @@ class SessionCreateResponse(BaseModel):
     session_id: str = Field(..., description="Unique session identifier")
     rule_name: str = Field(..., description="Name of the rule being evaluated")
     target_node_name: str = Field(..., description="Name of the target node")
+    ontology_profile: Optional[str] = Field(None, description="Resolved ontology assistance profile")
+    llm_configuration: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Redacted start-of-session AXIOM/AEGIS LLM configuration snapshot",
+    )
+
+
+class SessionListItem(BaseModel):
+    """Summary of an active inference session."""
+    session_id: str = Field(..., description="Unique session identifier")
+    rule_name: str = Field(..., description="Name of the rule being evaluated")
+    target_node_name: str = Field(..., description="Name of the target node")
+    created_at: Optional[str] = Field(None, description="Session creation timestamp")
+    last_accessed: Optional[str] = Field(None, description="Most recent access timestamp")
+
+
+class SessionListResponse(BaseModel):
+    """Response containing active inference sessions."""
+    sessions: List[SessionListItem] = Field(default_factory=list, description="Active sessions")
+    total_count: int = Field(0, description="Number of active sessions")
+
+
+class SessionDeleteResponse(BaseModel):
+    """Response after deleting an inference session."""
+    deleted: bool = Field(..., description="Whether the session was deleted")
+    session_id: str = Field(..., description="Session identifier")
 
 
 class MLSessionCreateRequest(BaseModel):
     """Request to create an ML-enhanced inference session."""
     rule_name: str = Field(..., description="Name of the rule to evaluate")
     target_node_name: str = Field(..., description="Name of the target/goal node")
+    ontology_profile: Optional[str] = Field(
+        None,
+        description=(
+            "Optional per-session ontology assistance profile: off, advisory, "
+            "auto_answer, reasoning, or full_semantic_pilot"
+        ),
+    )
+    ontology_flags: Optional[Dict[str, bool]] = Field(
+        None,
+        description=(
+            "Optional per-session ontology boolean overrides. Supported keys include "
+            "advisory_enabled, auto_answer_enabled, reasoning_enabled, and "
+            "question_strategy_enabled."
+        ),
+    )
 
 
 # =============================================================================
@@ -41,10 +97,21 @@ class IterateProgress(BaseModel):
     list_name: str = Field("", description="Name of the iterate list")
 
 
+class QuestionOption(BaseModel):
+    """A selectable option for a LIST question."""
+    label: str = Field(..., description="Display label for the option")
+    value: Union[bool, int, float, str] = Field(..., description="Value to feed as the answer")
+    value_type: str = Field(..., description="Fact value type for the option")
+
+
 class QuestionItem(BaseModel):
     """A single question to be answered."""
     question_text: str = Field(..., description="The question text")
     question_value_type: str = Field(..., description="Expected answer type (boolean, string, number, etc.)")
+    control: Optional[str] = Field(None, description="Preferred UI control for the question")
+    options: List[QuestionOption] = Field(default_factory=list, description="Selectable options for LIST questions")
+    selection_mode: Optional[str] = Field(None, description="Selection mode for option controls")
+    semantic_suggestions: List[Dict[str, Any]] = Field(default_factory=list, description="Ontology-derived advisory suggestions")
 
 
 class NextQuestionResponse(BaseModel):
@@ -54,6 +121,9 @@ class NextQuestionResponse(BaseModel):
     has_more_questions: bool = Field(..., description="Whether more questions remain")
     iterate_progress: Optional[IterateProgress] = Field(None, description="Progress of current iterate node (if applicable)")
     convergence_state: str = Field("PENDING", description="Current convergence state for the session")
+    question_flow_state: str = Field("AWAITING_INPUT", description="Question flow state for UI recovery handling")
+    blocked_reason: Optional[str] = Field(None, description="Machine-readable reason when no askable question remains")
+    blocked_detail: Optional[str] = Field(None, description="Human-readable recovery detail for blocked question flow")
 
 
 class AnswerEntry(BaseModel):
@@ -74,6 +144,30 @@ class FeedAnswerRequest(BaseModel):
     """Request to submit an answer to a question."""
     question: str = Field(..., description="The question being answered")
     answer: AnswerEntry = Field(..., description="The answer")
+    answer_context: Optional[str] = Field(
+        None,
+        description="Optional context for audit metadata, e.g. FULL_SEMANTIC_COMPLETION",
+    )
+
+
+class DeferQuestionRequest(BaseModel):
+    """Request to defer a semantic-completion question without asserting a fact."""
+    question: str = Field(..., description="Question to defer")
+    node_name: Optional[str] = Field(None, description="Related node name, if known")
+    reason: Optional[str] = Field(None, description="Reason for deferring the question")
+    defer_all_remaining: bool = Field(
+        False,
+        description="Whether generation should stop after recording this deferred question",
+    )
+
+
+class DeferQuestionResponse(BaseModel):
+    """Response after deferring a semantic-completion question."""
+    deferred: bool = Field(..., description="Whether the question was recorded as deferred")
+    session_id: str = Field(..., description="Session identifier")
+    question: str = Field(..., description="Deferred question")
+    deferred_count: int = Field(..., description="Total deferred semantic question count")
+    defer_all_remaining: bool = Field(False, description="Whether remaining questions were deferred")
 
 
 class FeedAnswerResponse(BaseModel):

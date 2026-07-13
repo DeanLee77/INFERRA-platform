@@ -30,4 +30,4 @@ datasources:
       sslmode: disable
       postgresVersion: 1600
     secureJsonData:
-      password: inferra
+      password: ${POSTGRES_PASSWORD}

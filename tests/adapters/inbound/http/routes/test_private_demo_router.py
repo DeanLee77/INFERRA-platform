@@ -52,3 +52,56 @@ def test_synthetic_receipt_route_rejects_unknown_case():
 
     assert response.status_code == 400
     assert "Unknown synthetic caseId" in response.json()["error"]
+
+
+def test_reasoning_run_review_fixture_route_returns_ui_contract():
+    client = TestClient(app)
+
+    response = client.get("/service/inference/reasoningRunReviewFixture")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["fixture_type"] == "reasoning_run_review_contract"
+    assert set(data["required_result_states"]) == {
+        "running",
+        "success",
+        "needs_review",
+        "abstain",
+        "contradiction",
+        "error",
+    }
+    assert [stage for stage in data["required_stages"]] == [
+        "parse",
+        "retrieve",
+        "reason",
+        "verify",
+        "summarize",
+        "receipt",
+    ]
+    assert {source["path"] for source in data["source_rule_examples"]} == {
+        "docs/reference/examples/mrca_ultimate_master_convergence_met.txt",
+        "docs/reference/examples/drca_ultimate_master_convergence_met.txt",
+        "docs/reference/examples/vea_part_ii_sections_5_to_6.txt",
+    }
+
+
+def test_reasoning_run_review_run_route_filters_by_result_state():
+    client = TestClient(app)
+
+    response = client.get("/service/inference/reasoningRunReviewRun?resultState=contradiction")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["result_state"] == "contradiction"
+    assert data["allowed_actions"]["primary"] == "resolve_contradiction"
+    assert "accept_internal_use" in data["allowed_actions"]["disallowed"]
+    assert data["contradictions"][0]["unqualified_accept_disabled"] is True
+
+
+def test_reasoning_run_review_run_route_rejects_unknown_state():
+    client = TestClient(app)
+
+    response = client.get("/service/inference/reasoningRunReviewRun?resultState=unsupported")
+
+    assert response.status_code == 400
+    assert "Unknown result_state" in response.json()["error"]

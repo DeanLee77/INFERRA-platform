@@ -10,7 +10,13 @@ from src.adapters.inbound.http.dependencies import get_rule_repository, reset_si
 from src.domain.state import __getattr__ as state_getattr
 from src.domain.state.feature_flags import FeatureFlags
 from src.infrastructure.reasoning_tracing import reasoning_span
-from src.infrastructure.secrets import redis_client_from_env, redis_url_from_env, read_secret
+from src.infrastructure.secrets import (
+    postgres_database_uri_from_env,
+    redact_url,
+    redis_client_from_env,
+    redis_url_from_env,
+    read_secret,
+)
 
 
 def test_reasoning_span_sets_non_null_attributes():
@@ -86,6 +92,35 @@ def test_read_secret_falls_back_to_env_or_default():
         assert read_secret("INFERRA_TEST_SECRET") == "from-env"
     with patch.dict("os.environ", {}, clear=True):
         assert read_secret("INFERRA_TEST_SECRET", "fallback") == "fallback"
+
+
+def test_postgres_database_uri_builds_from_password_file(tmp_path):
+    secret_file = tmp_path / "postgres-password.txt"
+    secret_file.write_text("p@ss word\n", encoding="utf-8")
+
+    with patch.dict(
+        "os.environ",
+        {
+            "POSTGRES_PASSWORD_FILE": str(secret_file),
+            "POSTGRES_HOST": "postgres",
+            "POSTGRES_USER": "inferra",
+            "POSTGRES_DB": "inferra",
+        },
+        clear=True,
+    ):
+        assert postgres_database_uri_from_env(
+            "SQLALCHEMY_DATABASE_URI",
+            "postgresql://localhost:5432/inferra",
+            database_env_name="POSTGRES_DB",
+            default_database="inferra",
+        ) == "postgresql://inferra:p%40ss%20word@postgres:5432/inferra"
+
+
+def test_redact_url_removes_password_from_connection_string():
+    assert (
+        redact_url("postgresql://inferra:secret@postgres:5432/inferra")
+        == "postgresql://inferra:***@postgres:5432/inferra"
+    )
 
 
 def test_redis_url_prefers_explicit_url():

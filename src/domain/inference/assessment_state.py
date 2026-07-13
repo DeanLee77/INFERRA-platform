@@ -89,7 +89,11 @@ class AssessmentState:
         self.__fact_store.invalidate_layer(FactSource.HYPOTHETICAL)
         self.__fact_store.invalidate_layer(FactSource.SEMANTIC)
         for name, value in working_memory.items():
-            self.__fact_store.set_fact(name, value, FactSource.ASSERTED)
+            self.__fact_store.set_fact(
+                name,
+                self._coerce_fact_value(value),
+                FactSource.ASSERTED,
+            )
 
     def lookup_working_memory(self, key_name: str) -> Optional[FactValue]:
         """
@@ -141,6 +145,7 @@ class AssessmentState:
             _logger.debug("node_variable_name is None")
             return
 
+        value = self._coerce_fact_value(value)
         existing = self.__fact_store.peek_in_layer(node_variable_name, source)
         if existing is not None:
             merged = self._merge_existing_fact(existing, value, node)
@@ -382,7 +387,16 @@ class AssessmentState:
         if len(fact_dictionary) == 0:
             return
         for key, value in fact_dictionary.items():
-            self.__fact_store.set_fact(key, value, FactSource.ASSERTED)
+            self.__fact_store.set_fact(
+                key,
+                self._coerce_fact_value(value),
+                FactSource.ASSERTED,
+            )
+
+    def _coerce_fact_value(self, value: object) -> FactValue:
+        if isinstance(value, FactValue):
+            return value
+        return FactValue(value)
 
     # -------------------------------------------------------------------------
     # Special Methods

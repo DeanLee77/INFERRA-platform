@@ -1,5 +1,6 @@
 import json
 from collections import deque
+from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
 
 from src.domain.fact_values import FactValue, FactValueType
@@ -9,6 +10,7 @@ from src.domain.inference.question_strategy import (
     OntologyReachabilityQuestionStrategy,
     ReachabilityEvidence,
 )
+from src.domain.inference.semantic_question_strategy import SemanticQuestionStrategy
 from src.domain.inference.assessment import Assessment
 from src.domain.inference.assessments import Assessments
 from src.domain.inference.assessment_state import AssessmentState
@@ -18,9 +20,21 @@ from src.domain.nodes.line_type import LineType
 from src.domain.graph.dependency_type import DependencyType
 from src.domain.nodes.comparison_line import ComparisonLine
 from src.domain.nodes.value_conclusion_line import ValueConclusionLine
+from src.domain.reasoning.ontology_reasoner import OntologyReasoner
+from src.domain.reasoning.semantic_fact_enricher import (
+    INF_CONFIDENCE,
+    INF_NAME,
+    RDF_TYPE,
+    RDFS_SUBCLASS_OF,
+    OntologyIndex,
+)
 from src.domain.state.fact_source import FactSource
 from src.domain.state.feature_flags import FeatureFlags
 from src.domain.tokens.token import Token
+
+
+INF = "http://inferra.ai/schema#"
+SYN = "http://inferra.ai/synthetic#"
 
 
 def _make_node(node_id=0, line_type=LineType.VALUE_CONCLUSION,
@@ -64,6 +78,9 @@ def _make_node_set(nodes=None, fact_dict=None, dep_matrix=None,
 
     ns.get_node_dictionary.return_value = nodes
     ns.get_fact_dictionary.return_value = fact_dict
+    ns.get_input_dictionary.return_value = {}
+    ns.get_type_dictionary.return_value = {}
+    ns.get_collection_dictionary.return_value = {}
     ns.get_dependency_matrix.return_value = dep_matrix
     ns.get_node_id_dictionary.return_value = id_dict
     ns.get_sorted_node_list.return_value = list(nodes.values())
@@ -105,6 +122,55 @@ def _make_node_set(nodes=None, fact_dict=None, dep_matrix=None,
         ns.get_default_goal_node.return_value = None
 
     return ns
+
+
+def _parse_node_set(rule_text, source_name="synthetic_rule"):
+    from src.domain.rule_parser.rule_set_parser import RuleSetParser
+    from src.domain.rule_parser.rule_set_reader import RuleSetReader
+    from src.domain.rule_parser.rule_set_scanner import RuleSetScanner
+
+    reader = RuleSetReader()
+    reader.create()
+    reader.set_file_with_text(rule_text)
+    parser = RuleSetParser()
+    parser.create()
+    parser.set_source_name(source_name)
+    scanner = RuleSetScanner(reader, parser)
+    scanner.scan_rule_set()
+    return scanner.establish_node_set()
+
+
+def _test_ontology_reasoner():
+    return OntologyReasoner(
+        source_graph_uri="urn:test:graph",
+        ontology_snapshot_ref="test_rule:hash",
+        ontology_snapshot_hash="hash",
+        confidence_threshold=0.85,
+    )
+
+
+def _test_vehicle_ontology_index():
+    return OntologyIndex(
+        [
+            (f"{SYN}forklift", INF_NAME, "forklift"),
+            (f"{SYN}forklift", RDF_TYPE, f"{INF}IndustrialVehicle"),
+            (f"{INF}IndustrialVehicle", RDFS_SUBCLASS_OF, f"{INF}TypeApprovedEquipment"),
+            (f"{INF}TypeApprovedEquipment", INF_NAME, "vehicle is type approved"),
+            (f"{INF}TypeApprovedEquipment", INF_CONFIDENCE, "0.95"),
+        ]
+    )
+
+
+def _test_question_strategy_ontology_index():
+    return OntologyIndex(
+        [
+            (f"{SYN}order", INF_NAME, "medical order signed"),
+            (f"{SYN}order", RDF_TYPE, f"{INF}DmeEvidence"),
+            (f"{INF}DmeEvidence", RDFS_SUBCLASS_OF, f"{INF}EligibleEvidence"),
+            (f"{INF}EligibleEvidence", INF_NAME, "benefit evidence available"),
+            (f"{INF}EligibleEvidence", INF_CONFIDENCE, "0.95"),
+        ]
+    )
 
 
 class TestInferenceEngineInit:
@@ -173,6 +239,7 @@ class TestAssessmentsAccess:
         engine.add_assessment_into_assessment_list(assessment)
         result = engine.get_assessment_of_rule("test_rule")
         assert result is assessment
+        assert engine.get_assessment() is assessment
 
     def test_get_assessment_of_rule_missing(self):
         engine = InferenceEngine()
@@ -264,6 +331,12 @@ class TestCreateFactValue:
         engine = InferenceEngine()
         fv = engine._create_fact_value(["a", "b"], FactValueType.LIST)
         assert fv.get_value() == ["a", "b"]
+        assert fv.get_value_type() == FactValueType.LIST
+
+    def test_list_type_wraps_scalar_answer(self):
+        engine = InferenceEngine()
+        fv = engine._create_fact_value("current employee", FactValueType.LIST)
+        assert fv.get_value() == ["current employee"]
         assert fv.get_value_type() == FactValueType.LIST
 
     def test_unknown_type_returns_none(self):
@@ -527,6 +600,7 @@ class TestAddNodeFact:
         engine.set_node_set(ns)
         engine.add_node_fact("target_var", FactValue(42))
         assert node in engine._InferenceEngine__node_fact_list
+        assert engine.get_assessment_state().get_working_memory()["target_var"].get_value() == 42
 
     def test_adds_matching_fact_value_node(self):
         engine = InferenceEngine()
@@ -556,7 +630,7 @@ class TestResetWorkingMemoryAndInclusiveList:
     def test_clears_working_memory_via_set_working_memory(self):
         engine = InferenceEngine()
         engine.get_assessment_state().set_fact("x", FactValue(1))
-        engine.get_assessment_state().set_working_memory({})
+        engine.reset_working_memory_and_inclusive_list()
         assert engine.get_assessment_state().get_working_memory() == {}
 
     def test_empty_already(self):
@@ -564,6 +638,48 @@ class TestResetWorkingMemoryAndInclusiveList:
         engine.reset_working_memory_and_inclusive_list()
         assert engine.get_assessment_state().get_inclusive_list() == []
         assert engine.get_assessment_state().get_inclusive_list() == []
+
+
+class TestEditAnswer:
+    def test_removes_answer_and_downstream_facts_from_layered_memory(self):
+        engine = InferenceEngine()
+        goal = _make_node(node_name="goal", variable_name="goal")
+        assessment = Assessment()
+        assessment._Assessment__assessment_name = "goal"
+        assessment._Assessment__goal_node = goal
+        assessment.set_node_to_be_asked(_make_node(node_name="stale"))
+        assessment.set_aux_node_to_be_asked(_make_node(node_name="stale_aux"))
+        engine.add_assessment_into_assessment_list(assessment)
+        state = engine.get_assessment_state()
+        state.set_fact("first question", FactValue(True))
+        state.set_fact("edited question", FactValue(False))
+        state.set_fact("goal", FactValue(False), source=FactSource.INFERRED)
+        state.set_summary_list(["first question", "edited question", "goal"])
+        state.set_inclusive_list(["goal", "edited question"])
+        state.set_exclusive_list(["unused branch"])
+        state.set_mandatory_list(["edited question"])
+
+        engine.edit_answer("edited question")
+
+        working_memory = state.get_working_memory()
+        assert "first question" in working_memory
+        assert "edited question" not in working_memory
+        assert "goal" not in working_memory
+        assert state.get_summary_list() == ["first question"]
+        assert state.get_inclusive_list() == []
+        assert state.get_exclusive_list() == []
+        assert state.get_mandatory_list() == []
+        assert assessment.get_node_to_be_asked() is None
+        assert assessment.get_aux_node_to_be_asked() is None
+
+    def test_unknown_question_raises_value_error(self):
+        engine = InferenceEngine()
+        try:
+            engine.edit_answer("missing")
+        except ValueError as exc:
+            assert "has not been answered" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError")
 
 
 class TestGetDefaultGoalRuleQuestion:
@@ -655,6 +771,1188 @@ class TestGetNextQuestion:
         engine.get_assessment_state().set_fact("goal", FactValue(True))
         result = engine.get_next_question(ass)
         assert result is None or isinstance(result, Node)
+
+    def test_goal_fact_clears_stale_node_to_be_asked(self):
+        goal = _make_node(node_id=0, node_name="goal", variable_name="goal")
+        stale_question = _make_node(
+            node_id=1,
+            node_name="service type",
+            variable_name="service type",
+        )
+        ns = _make_node_set(
+            nodes={"goal": goal, "service type": stale_question},
+            id_dict={0: "goal", 1: "service type"},
+        )
+        ns.get_sorted_node_list.return_value = [goal, stale_question]
+        engine = InferenceEngine(ns)
+        ass = Assessment()
+        ass._Assessment__goal_node = goal
+        ass._Assessment__goal_node_index = 0
+        ass.set_node_to_be_asked(stale_question)
+        ass.set_aux_node_to_be_asked(stale_question)
+        engine.get_assessment_state().set_fact("goal", FactValue(True))
+
+        result = engine.get_next_question(ass)
+
+        assert result is None
+        assert ass.get_node_to_be_asked() is None
+        assert ass.get_aux_node_to_be_asked() is None
+
+    def test_false_goal_fact_converges_when_mandatory_nodes_are_done(self):
+        goal = _make_node(node_id=0, node_name="goal", variable_name="goal")
+        ns = _make_node_set(nodes={"goal": goal}, id_dict={0: "goal"})
+        engine = InferenceEngine(ns)
+        ass = Assessment()
+        ass._Assessment__goal_node = goal
+        ass._Assessment__goal_node_index = 0
+        engine.get_assessment_state().set_fact("goal", FactValue(False))
+
+        assert engine._assessment_has_converged(ass) is True
+
+    def test_answered_stale_question_is_not_returned_again(self):
+        goal = _make_node(node_id=0, node_name="eligible", variable_name="eligible")
+        stale_question = _make_node(
+            node_id=1,
+            node_name="service type IS IN LIST: allowed service types",
+            variable_name="service type",
+        )
+        ns = _make_node_set(
+            nodes={
+                "eligible": goal,
+                "service type IS IN LIST: allowed service types": stale_question,
+            },
+            id_dict={
+                0: "eligible",
+                1: "service type IS IN LIST: allowed service types",
+            },
+            edges=[
+                (
+                    "eligible",
+                    "service type IS IN LIST: allowed service types",
+                    DependencyType.get_and(),
+                ),
+            ],
+        )
+        ns.get_sorted_node_list.return_value = [goal, stale_question]
+        engine = InferenceEngine(ns)
+        ass = Assessment()
+        ass._Assessment__goal_node = goal
+        ass._Assessment__goal_node_index = 0
+        ass.set_node_to_be_asked(stale_question)
+        engine.get_assessment_state().set_fact("service type", FactValue("operational service"))
+
+        result = engine.get_next_question(ass)
+
+        assert result is None
+        assert ass.get_node_to_be_asked() is None
+        assert ass.get_aux_node_to_be_asked() is None
+
+    def test_false_and_child_converges_goal_before_unrelated_questions(self):
+        node_set = _parse_node_set(
+            """
+INPUT someone booked the celebrant AS BOOLEAN
+INPUT the celebrant randomly turned up AS BOOLEAN
+INPUT unrelated catering confirmed AS BOOLEAN
+
+wedding can proceed
+    AND celebrant available
+    AND unrelated catering confirmed
+
+celebrant available
+    OR someone booked the celebrant
+    OR the celebrant randomly turned up
+""",
+            "synthetic_wedding_false_convergence",
+        )
+        node_dict = node_set.get_node_dictionary()
+        preferred_order = [
+            "wedding can proceed",
+            "celebrant available",
+            "someone booked the celebrant",
+            "the celebrant randomly turned up",
+            "unrelated catering confirmed",
+        ]
+        node_set.set_sorted_node_list([node_dict[name] for name in preferred_order])
+
+        engine = InferenceEngine(node_set)
+        assessment = Assessment(node_set, "wedding can proceed")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        first_question = engine.get_next_question(assessment)
+        assert engine.get_questions_from_node_to_be_asked(first_question) == [
+            "someone booked the celebrant"
+        ]
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "someone booked the celebrant",
+            False,
+            FactValueType.BOOLEAN,
+            assessment,
+        )
+
+        second_question = engine.get_next_question(assessment)
+        assert engine.get_questions_from_node_to_be_asked(second_question) == [
+            "the celebrant randomly turned up"
+        ]
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "the celebrant randomly turned up",
+            False,
+            FactValueType.BOOLEAN,
+            assessment,
+        )
+
+        final_question = engine.get_next_question(assessment)
+        working_memory = engine.get_assessment_state().get_working_memory()
+
+        assert final_question is None
+        assert working_memory["celebrant available"].get_value() is False
+        assert working_memory["wedding can proceed"].get_value() is False
+        assert "unrelated catering confirmed" not in working_memory
+        assert assessment.get_node_to_be_asked() is None
+        assert assessment.get_aux_node_to_be_asked() is None
+
+    def test_deferred_question_is_skipped_without_asserting_fact(self):
+        node_set = _parse_node_set(
+            """
+INPUT initial evidence AS BOOLEAN
+INPUT fallback evidence AS BOOLEAN
+
+goal met
+    OR initial evidence
+    OR fallback evidence
+""",
+            "synthetic_deferred_question_flow",
+        )
+        node_dict = node_set.get_node_dictionary()
+        node_set.set_sorted_node_list(
+            [
+                node_dict["goal met"],
+                node_dict["initial evidence"],
+                node_dict["fallback evidence"],
+            ]
+        )
+
+        engine = InferenceEngine(node_set)
+        assessment = Assessment(node_set, "goal met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        first_question = engine.get_next_question(assessment)
+        assert engine.get_questions_from_node_to_be_asked(first_question) == ["initial evidence"]
+
+        engine.defer_question("initial evidence")
+        second_question = engine.get_next_question(assessment)
+
+        assert engine.get_deferred_questions() == ["initial evidence"]
+        assert engine.get_questions_from_node_to_be_asked(second_question) == ["fallback evidence"]
+        assert "initial evidence" not in engine.get_assessment_state().get_working_memory()
+
+    def test_true_or_child_prunes_sibling_questions_after_parent_is_determined(self):
+        node_set = _parse_node_set(
+            """
+INPUT someone booked the celebrant AS BOOLEAN
+INPUT the celebrant randomly turned up AS BOOLEAN
+INPUT unrelated catering confirmed AS BOOLEAN
+
+wedding can proceed
+    AND celebrant available
+    AND unrelated catering confirmed
+
+celebrant available
+    OR someone booked the celebrant
+    OR the celebrant randomly turned up
+""",
+            "synthetic_wedding_true_or_pruning",
+        )
+        node_dict = node_set.get_node_dictionary()
+        preferred_order = [
+            "wedding can proceed",
+            "celebrant available",
+            "someone booked the celebrant",
+            "the celebrant randomly turned up",
+            "unrelated catering confirmed",
+        ]
+        node_set.set_sorted_node_list([node_dict[name] for name in preferred_order])
+
+        engine = InferenceEngine(node_set)
+        assessment = Assessment(node_set, "wedding can proceed")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        first_question = engine.get_next_question(assessment)
+        assert engine.get_questions_from_node_to_be_asked(first_question) == [
+            "someone booked the celebrant"
+        ]
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "someone booked the celebrant",
+            True,
+            FactValueType.BOOLEAN,
+            assessment,
+        )
+
+        next_question = engine.get_next_question(assessment)
+        working_memory = engine.get_assessment_state().get_working_memory()
+
+        assert working_memory["celebrant available"].get_value() is True
+        assert engine.get_questions_from_node_to_be_asked(next_question) == [
+            "unrelated catering confirmed"
+        ]
+        assert "the celebrant randomly turned up" not in engine.get_assessment_state().get_inclusive_list()
+        assert any(
+            event["nodeName"] == "the celebrant randomly turned up"
+            and event["reason"] == "or_branch_satisfied"
+            for event in engine.get_branch_prune_trace()
+        )
+
+    def test_false_and_parent_prunes_non_mandatory_subtrees_but_rescues_mandatory_nodes(self):
+        node_set = _parse_node_set(
+            """
+INPUT A AS BOOLEAN
+INPUT D AS BOOLEAN
+INPUT E AS BOOLEAN
+INPUT F AS BOOLEAN
+INPUT G AS BOOLEAN
+INPUT I AS BOOLEAN
+INPUT J AS BOOLEAN
+
+P
+    AND A
+    AND B
+        AND D
+        AND E
+    AND C
+        OR MANDATORY F
+        OR G
+    AND MANDATORY H
+        AND I
+        AND J
+""",
+            "synthetic_and_pruning_mandatory_rescue",
+        )
+        node_dict = node_set.get_node_dictionary()
+        preferred_order = [
+            "P",
+            "A",
+            "B",
+            "D",
+            "E",
+            "C",
+            "F",
+            "G",
+            "H",
+            "I",
+            "J",
+        ]
+        node_set.set_sorted_node_list([node_dict[name] for name in preferred_order])
+
+        engine = InferenceEngine(node_set)
+        assessment = Assessment(node_set, "P")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        first_question = engine.get_next_question(assessment)
+        assert engine.get_questions_from_node_to_be_asked(first_question) == ["A"]
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "A",
+            False,
+            FactValueType.BOOLEAN,
+            assessment,
+        )
+
+        second_question = engine.get_next_question(assessment)
+        assert engine.get_questions_from_node_to_be_asked(second_question) == ["F"]
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "F",
+            True,
+            FactValueType.BOOLEAN,
+            assessment,
+        )
+
+        third_question = engine.get_next_question(assessment)
+        assert engine.get_questions_from_node_to_be_asked(third_question) == ["I"]
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "I",
+            False,
+            FactValueType.BOOLEAN,
+            assessment,
+        )
+
+        working_memory = engine.get_assessment_state().get_working_memory()
+        final_question = engine.get_next_question(assessment)
+        inclusive_list = engine.get_assessment_state().get_inclusive_list()
+        mandatory_list = engine.get_assessment_state().get_mandatory_list()
+        trace = engine.get_branch_prune_trace()
+
+        assert final_question is None
+        assert working_memory["P"].get_value() is False
+        assert working_memory["F"].get_value() is True
+        assert working_memory["H"].get_value() is False
+        assert set(mandatory_list) == {"F", "H"}
+        assert engine.get_assessment_state().all_mandatory_node_determined() is True
+        assert "B" not in inclusive_list
+        assert "C" not in inclusive_list
+        assert "D" not in inclusive_list
+        assert "E" not in inclusive_list
+        assert "G" not in inclusive_list
+        assert "J" not in inclusive_list
+        assert any(
+            event["nodeName"] == "C"
+            and event["reason"] == "and_parent_failed"
+            for event in trace
+        )
+        assert any(
+            event["nodeName"] == "F"
+            and event["reason"] == "mandatory_dependency_survived_pruning"
+            for event in trace
+        )
+        assert any(
+            event["nodeName"] == "H"
+            and event["reason"] == "mandatory_dependency_survived_pruning"
+            for event in trace
+        )
+        assert any(
+            event["nodeName"] == "J"
+            and event["reason"] == "and_parent_failed"
+            for event in trace
+        )
+
+    def test_mandatory_or_child_survives_after_sibling_satisfies_parent(self):
+        node_set = _parse_node_set(
+            """
+INPUT A AS BOOLEAN
+INPUT B AS BOOLEAN
+
+P
+    OR MANDATORY A
+    OR B
+""",
+            "synthetic_or_mandatory_survives_satisfied_parent",
+        )
+        node_dict = node_set.get_node_dictionary()
+        node_set.set_sorted_node_list([node_dict[name] for name in ["P", "B", "A"]])
+
+        engine = InferenceEngine(node_set)
+        assessment = Assessment(node_set, "P")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        first_question = engine.get_next_question(assessment)
+        assert engine.get_questions_from_node_to_be_asked(first_question) == ["B"]
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "B",
+            True,
+            FactValueType.BOOLEAN,
+            assessment,
+        )
+
+        second_question = engine.get_next_question(assessment)
+        assert engine.get_questions_from_node_to_be_asked(second_question) == ["A"]
+        assert engine.get_assessment_state().get_working_memory()["P"].get_value() is True
+        assert any(
+            event["nodeName"] == "A"
+            and event["reason"] == "mandatory_dependency_survived_pruning"
+            for event in engine.get_branch_prune_trace()
+        )
+
+    def test_virtual_one_prunes_unselected_branch_after_discriminator(self):
+        from src.domain.rule_parser.rule_set_parser import RuleSetParser
+        from src.domain.rule_parser.rule_set_reader import RuleSetReader
+        from src.domain.rule_parser.rule_set_scanner import RuleSetScanner
+
+        rule_text = """
+INPUT incapacity status AS LIST
+    ITEM current employee
+    ITEM former employee
+INPUT current employee evidence AS BOOLEAN
+INPUT former employee evidence AS BOOLEAN
+
+benefit met
+    AND employment gateway virtual ONE
+        OR current employee path
+            AND incapacity status = "current employee"
+            AND current employee evidence
+        OR former employee path
+            AND incapacity status = "former employee"
+            AND former employee evidence
+"""
+        reader = RuleSetReader()
+        reader.create()
+        reader.set_file_with_text(rule_text)
+        parser = RuleSetParser()
+        parser.create()
+        parser.set_source_name("synthetic_drca_branch")
+        scanner = RuleSetScanner(reader, parser)
+        scanner.scan_rule_set()
+        node_set = scanner.establish_node_set()
+        node_dict = node_set.get_node_dictionary()
+        preferred_order = [
+            "benefit met",
+            "employment gateway virtual ONE",
+            "current employee path",
+            "former employee path",
+            'incapacity status = "current employee"',
+            'incapacity status = "former employee"',
+            "current employee evidence",
+            "former employee evidence",
+        ]
+        node_set.set_sorted_node_list(
+            [node_dict[name] for name in preferred_order]
+            + [
+                node
+                for node in node_set.get_sorted_node_list()
+                if node.get_node_name() not in preferred_order
+            ]
+        )
+
+        engine = InferenceEngine(node_set)
+        assessment = Assessment(node_set, "benefit met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        first_question = engine.get_next_question(assessment)
+        assert engine.get_questions_from_node_to_be_asked(first_question) == [
+            "incapacity status"
+        ]
+
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "incapacity status",
+            "current employee",
+            FactValueType.LIST,
+            assessment,
+        )
+        second_question = engine.get_next_question(assessment)
+
+        assert engine.get_questions_from_node_to_be_asked(second_question) == [
+            "current employee evidence"
+        ]
+        assert "former employee evidence" not in engine.get_assessment_state().get_inclusive_list()
+        assert any(
+            event["nodeName"] == "former employee evidence"
+            and event["reason"] == "parent_branch_false"
+            for event in engine.get_branch_prune_trace()
+        )
+
+    def test_virtual_one_prunes_later_branch_before_nested_questions(self):
+        from src.domain.rule_parser.rule_set_parser import RuleSetParser
+        from src.domain.rule_parser.rule_set_reader import RuleSetReader
+        from src.domain.rule_parser.rule_set_scanner import RuleSetScanner
+
+        rule_text = """
+INPUT incapacity status AS LIST
+    ITEM current employee
+    ITEM other
+INPUT current employee evidence AS BOOLEAN
+INPUT normal weekly earnings AS NUMBER
+INPUT actual earnings AS NUMBER
+INPUT superannuation lump sum received AS BOOLEAN
+
+benefit met
+    AND incapacity gateway virtual ONE
+        OR current employee path
+            AND incapacity preliminary met
+            AND incapacity status = "current employee"
+            AND current employee evidence
+        OR other cases path
+            AND incapacity preliminary met
+            AND incapacity status = "other"
+            AND superannuation pathway virtual ONE
+                OR superannuation lump sum path
+                    AND superannuation lump sum received
+                OR no superannuation path
+                    AND NOT superannuation lump sum received
+
+incapacity preliminary met
+    AND KNOWN normal weekly earnings
+    AND KNOWN actual earnings
+"""
+        reader = RuleSetReader()
+        reader.create()
+        reader.set_file_with_text(rule_text)
+        parser = RuleSetParser()
+        parser.create()
+        parser.set_source_name("synthetic_drca_later_branch")
+        scanner = RuleSetScanner(reader, parser)
+        scanner.scan_rule_set()
+        node_set = scanner.establish_node_set()
+        node_dict = node_set.get_node_dictionary()
+        preferred_order = [
+            "benefit met",
+            "incapacity gateway virtual ONE",
+            "current employee path",
+            "other cases path",
+            "incapacity preliminary met",
+            "superannuation pathway virtual ONE",
+            "superannuation lump sum path",
+            "no superannuation path",
+            "superannuation lump sum received",
+            'incapacity status = "current employee"',
+            'incapacity status = "other"',
+            "current employee evidence",
+            "normal weekly earnings",
+            "actual earnings",
+        ]
+        node_set.set_sorted_node_list(
+            [node_dict[name] for name in preferred_order]
+            + [
+                node
+                for node in node_set.get_sorted_node_list()
+                if node.get_node_name() not in preferred_order
+            ]
+        )
+
+        engine = InferenceEngine(node_set)
+        assessment = Assessment(node_set, "benefit met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        question = engine.get_next_question(assessment)
+        assert engine.get_questions_from_node_to_be_asked(question) == [
+            "incapacity status"
+        ]
+
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "incapacity status",
+            "current employee",
+            FactValueType.LIST,
+            assessment,
+        )
+        question = engine.get_next_question(assessment)
+        assert engine.get_questions_from_node_to_be_asked(question) == [
+            "current employee evidence"
+        ]
+
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "current employee evidence",
+            True,
+            FactValueType.BOOLEAN,
+            assessment,
+        )
+        for question_name, answer in (
+            ("normal weekly earnings", 1000),
+            ("actual earnings", 500),
+        ):
+            question = engine.get_next_question(assessment)
+            assert engine.get_questions_from_node_to_be_asked(question) == [
+                question_name
+            ]
+            engine.feed_answer_to_node(
+                assessment.get_node_to_be_asked(),
+                question_name,
+                answer,
+                FactValueType.INTEGER,
+                assessment,
+            )
+
+        next_question = engine.get_next_question(assessment)
+
+        assert next_question is None
+        assert "superannuation lump sum received" not in engine.get_assessment_state().get_inclusive_list()
+        assert any(
+            event["nodeName"] == "superannuation lump sum received"
+            for event in engine.get_branch_prune_trace()
+        )
+
+    def test_mrca_target_scoped_virtual_one_questions_do_not_leak_chapter_flow(self):
+        rule_path = Path("docs/reference/examples/mrca_chapter_1.txt")
+        node_set = _parse_node_set(
+            rule_path.read_text(),
+            "mrca_chapter_1_target_scope",
+        )
+        engine = InferenceEngine(node_set)
+        assessment = Assessment(node_set, "reservist and cadet determinations met")
+        engine.add_assessment_into_assessment_list(assessment)
+        target_flow_nodes = {
+            "reservist and cadet determinations met",
+            "reservist pathway virtual ONE",
+            "part time reservist path",
+            "cadet path",
+            "the person is a part time Reservist",
+            "the person is a cadet",
+            "unlikely to return to defence service",
+            "commission determination required",
+        }
+        allowed_questions = {
+            "the person is a part time Reservist",
+            "the person is a cadet",
+            "unlikely to return to defence service",
+            "commission determination required",
+        }
+        rejected_questions = {
+            "death resulted from service",
+            "dependency status",
+            "the person is a partner",
+            "the person is an eligible young person",
+        }
+        answers = {
+            "the person is a cadet": False,
+            "the person is a part time Reservist": True,
+            "unlikely to return to defence service": True,
+            "commission determination required": True,
+        }
+
+        asked_questions = []
+        for _ in range(len(answers) + 2):
+            question = engine.get_next_question(assessment)
+            if question is None:
+                break
+            question_name = engine.get_questions_from_node_to_be_asked(question)[0]
+            asked_questions.append(question_name)
+            assert question_name in allowed_questions
+            assert question_name not in rejected_questions
+            engine.feed_answer_to_node(
+                question,
+                question_name,
+                answers[question_name],
+                FactValueType.BOOLEAN,
+                assessment,
+            )
+
+        state = engine.get_assessment_state()
+        assert asked_questions == [
+            "the person is a cadet",
+            "the person is a part time Reservist",
+            "unlikely to return to defence service",
+            "commission determination required",
+        ]
+        assert rejected_questions.isdisjoint(asked_questions)
+        assert set(state.get_inclusive_list()) <= target_flow_nodes
+        assert state.get_mandatory_list() == ["commission determination required"]
+        assert state.get_working_memory()["reservist and cadet determinations met"].get_value() is True
+        assert engine.get_next_question(assessment) is None
+
+    def test_global_non_leaf_mandatory_collects_only_unresolved_support(self):
+        node_set = _parse_node_set(
+            """
+INPUT target evidence AS BOOLEAN
+INPUT cheap mandatory evidence AS BOOLEAN
+INPUT expensive mandatory evidence AS BOOLEAN
+INPUT unrelated ordinary evidence AS BOOLEAN
+
+target met
+    AND target evidence
+
+ordinary chapter prompt
+    AND unrelated ordinary evidence
+
+global mandatory root
+    AND MANDATORY mandatory review met
+
+mandatory review met
+    AND mandatory support virtual ONE
+        OR cheap support path
+            AND cheap mandatory evidence
+        OR expensive support path
+            AND expensive mandatory evidence
+""",
+            "synthetic_global_non_leaf_mandatory",
+        )
+        engine = InferenceEngine(node_set)
+        assessment = Assessment(node_set, "target met")
+        engine.add_assessment_into_assessment_list(assessment)
+        answers = {
+            "target evidence": True,
+            "cheap mandatory evidence": True,
+        }
+
+        asked_questions = []
+        for _ in range(len(answers) + 3):
+            question = engine.get_next_question(assessment)
+            if question is None:
+                break
+            question_name = engine.get_questions_from_node_to_be_asked(question)[0]
+            asked_questions.append(question_name)
+            engine.feed_answer_to_node(
+                question,
+                question_name,
+                answers[question_name],
+                FactValueType.BOOLEAN,
+                assessment,
+            )
+
+        state = engine.get_assessment_state()
+        assert asked_questions == [
+            "target evidence",
+            "cheap mandatory evidence",
+        ]
+        assert "mandatory review met" in state.get_mandatory_list()
+        assert state.get_working_memory()["mandatory review met"].get_value() is True
+        assert state.get_working_memory()["target met"].get_value() is True
+        assert "expensive mandatory evidence" not in asked_questions
+        assert "unrelated ordinary evidence" not in asked_questions
+        assert engine.get_next_question(assessment) is None
+
+    def test_ontology_auto_answer_disabled_preserves_question_flow(self):
+        node_set = _parse_node_set(
+            """
+INPUT incapacity status AS LIST
+    ITEM current employee
+
+benefit met
+    AND incapacity status = "current employee"
+""",
+            "synthetic_ontology_auto_answer_disabled",
+        )
+        engine = InferenceEngine(
+            node_set,
+            feature_flags=FeatureFlags(
+                ontology_advisory_enabled=True,
+                ontology_auto_answer=False,
+            ),
+        )
+        engine.configure_ontology_auto_answer(
+            {
+                "incapacity status": [
+                    {
+                        "factName": "incapacity status",
+                        "relationship": "inf:defaultValue",
+                        "suggestedValue": "current employee",
+                        "confidence": 1.0,
+                        "ontologySnapshotHash": "hash-1",
+                    }
+                ]
+            },
+            ontology_snapshot_hash="hash-1",
+        )
+        assessment = Assessment(node_set, "benefit met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        question = engine.get_next_question(assessment)
+
+        assert engine.get_questions_from_node_to_be_asked(question) == [
+            "incapacity status"
+        ]
+        assert "incapacity status" not in engine.get_assessment_state().get_working_memory()
+
+    def test_ontology_auto_answer_applies_confident_default_without_question(self):
+        node_set = _parse_node_set(
+            """
+INPUT incapacity status AS LIST
+    ITEM current employee
+
+benefit met
+    AND incapacity status = "current employee"
+""",
+            "synthetic_ontology_auto_answer_enabled",
+        )
+        engine = InferenceEngine(
+            node_set,
+            feature_flags=FeatureFlags(
+                ontology_advisory_enabled=True,
+                ontology_auto_answer=True,
+                ontology_auto_answer_confidence_threshold=0.85,
+            ),
+        )
+        engine.configure_ontology_auto_answer(
+            {
+                "incapacity status": [
+                    {
+                        "factName": "incapacity status",
+                        "relationship": "inf:defaultValue",
+                        "suggestedValue": "current employee",
+                        "confidence": 0.95,
+                        "ontologySnapshotRef": "rule:hash-1",
+                        "ontologySnapshotHash": "hash-1",
+                        "basis": "explicit_default_value",
+                    }
+                ]
+            },
+            ontology_snapshot_hash="hash-1",
+        )
+        assessment = Assessment(node_set, "benefit met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        question = engine.get_next_question(assessment)
+        working_memory = engine.get_assessment_state().get_working_memory()
+
+        assert question is None
+        assert working_memory["incapacity status"].get_value() == ["current employee"]
+        assert FactSource.ASSERTED in engine.get_assessment_state().get_fact_sources(
+            "incapacity status"
+        )
+        assert working_memory["benefit met"].get_value() is True
+        trace = engine.get_ontology_auto_answer_trace()
+        assert trace[0]["status"] == "auto_answered"
+        assert trace[0]["factSource"] == "ASSERTED"
+
+    def test_ontology_auto_answer_low_confidence_falls_back_to_question(self):
+        node_set = _parse_node_set(
+            """
+INPUT incapacity status AS LIST
+    ITEM current employee
+
+benefit met
+    AND incapacity status = "current employee"
+""",
+            "synthetic_ontology_auto_answer_low_confidence",
+        )
+        engine = InferenceEngine(
+            node_set,
+            feature_flags=FeatureFlags(
+                ontology_advisory_enabled=True,
+                ontology_auto_answer=True,
+                ontology_auto_answer_confidence_threshold=0.85,
+            ),
+        )
+        engine.configure_ontology_auto_answer(
+            {
+                "incapacity status": [
+                    {
+                        "factName": "incapacity status",
+                        "relationship": "inf:defaultValue",
+                        "suggestedValue": "current employee",
+                        "confidence": 0.5,
+                        "ontologySnapshotHash": "hash-1",
+                    }
+                ]
+            },
+            ontology_snapshot_hash="hash-1",
+        )
+        assessment = Assessment(node_set, "benefit met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        question = engine.get_next_question(assessment)
+
+        assert engine.get_questions_from_node_to_be_asked(question) == [
+            "incapacity status"
+        ]
+        assert "incapacity status" not in engine.get_assessment_state().get_working_memory()
+        assert engine.get_ontology_auto_answer_trace()[0]["reason"] == (
+            "below_confidence_threshold"
+        )
+
+    def test_ontology_auto_answer_stale_snapshot_falls_back_to_question(self):
+        node_set = _parse_node_set(
+            """
+INPUT incapacity status AS LIST
+    ITEM current employee
+
+benefit met
+    AND incapacity status = "current employee"
+""",
+            "synthetic_ontology_auto_answer_stale_snapshot",
+        )
+        engine = InferenceEngine(
+            node_set,
+            feature_flags=FeatureFlags(
+                ontology_advisory_enabled=True,
+                ontology_auto_answer=True,
+            ),
+        )
+        engine.configure_ontology_auto_answer(
+            {
+                "incapacity status": [
+                    {
+                        "factName": "incapacity status",
+                        "relationship": "inf:defaultValue",
+                        "suggestedValue": "current employee",
+                        "confidence": 1.0,
+                        "ontologySnapshotHash": "old-hash",
+                    }
+                ]
+            },
+            ontology_snapshot_hash="new-hash",
+        )
+        assessment = Assessment(node_set, "benefit met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        question = engine.get_next_question(assessment)
+
+        assert engine.get_questions_from_node_to_be_asked(question) == [
+            "incapacity status"
+        ]
+        assert engine.get_ontology_auto_answer_trace()[0]["reason"] == (
+            "stale_or_unversioned_ontology_snapshot"
+        )
+
+    def test_ontology_auto_answer_never_overwrites_asserted_fact(self):
+        node_set = _parse_node_set(
+            """
+INPUT incapacity status AS LIST
+    ITEM current employee
+    ITEM former employee
+
+benefit met
+    AND incapacity status = "former employee"
+""",
+            "synthetic_ontology_auto_answer_asserted_guard",
+        )
+        engine = InferenceEngine(
+            node_set,
+            feature_flags=FeatureFlags(
+                ontology_advisory_enabled=True,
+                ontology_auto_answer=True,
+            ),
+        )
+        engine.configure_ontology_auto_answer(
+            {
+                "incapacity status": [
+                    {
+                        "factName": "incapacity status",
+                        "relationship": "inf:defaultValue",
+                        "suggestedValue": "current employee",
+                        "confidence": 1.0,
+                        "ontologySnapshotHash": "hash-1",
+                    }
+                ]
+            },
+            ontology_snapshot_hash="hash-1",
+        )
+        engine.get_assessment_state().set_fact(
+            "incapacity status",
+            FactValue(["former employee"], FactValueType.LIST),
+            source=FactSource.ASSERTED,
+        )
+        assessment = Assessment(node_set, "benefit met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        engine.get_next_question(assessment)
+
+        fact = engine.get_assessment_state().get_working_memory()["incapacity status"]
+        assert fact.get_value() == ["former employee"]
+
+    def test_ontology_reasoning_disabled_preserves_question_flow(self):
+        node_set = _parse_node_set(
+            """
+INPUT vehicle classification AS STRING
+
+benefit met
+    AND vehicle classification = "forklift"
+    AND vehicle is type approved
+""",
+            "synthetic_ontology_reasoning_disabled",
+        )
+        engine = InferenceEngine(
+            node_set,
+            feature_flags=FeatureFlags(
+                ontology_advisory_enabled=True,
+                ontology_reasoning=False,
+            ),
+        )
+        engine.configure_ontology_reasoner(
+            _test_ontology_reasoner(),
+            _test_vehicle_ontology_index(),
+        )
+        assessment = Assessment(node_set, "benefit met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        first_question = engine.get_next_question(assessment)
+        assert engine.get_questions_from_node_to_be_asked(first_question) == [
+            "vehicle classification"
+        ]
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "vehicle classification",
+            "forklift",
+            FactValueType.STRING,
+            assessment,
+        )
+        second_question = engine.get_next_question(assessment)
+
+        assert engine.get_questions_from_node_to_be_asked(second_question) == [
+            "vehicle is type approved"
+        ]
+        assert engine.get_ontology_materialization_trace() == []
+        assert engine.get_assessment_state().get_fact_store().peek_in_layer(
+            "vehicle is type approved",
+            FactSource.INFERRED,
+        ) is None
+
+    def test_ontology_reasoning_materializes_inferred_fact_and_cascades(self):
+        node_set = _parse_node_set(
+            """
+INPUT vehicle classification AS STRING
+
+benefit met
+    AND vehicle classification = "forklift"
+    AND vehicle is type approved
+""",
+            "synthetic_ontology_reasoning_enabled",
+        )
+        engine = InferenceEngine(
+            node_set,
+            feature_flags=FeatureFlags(
+                ontology_advisory_enabled=True,
+                ontology_reasoning=True,
+                ontology_reasoning_confidence_threshold=0.85,
+            ),
+        )
+        engine.configure_ontology_reasoner(
+            _test_ontology_reasoner(),
+            _test_vehicle_ontology_index(),
+        )
+        assessment = Assessment(node_set, "benefit met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        first_question = engine.get_next_question(assessment)
+        engine.feed_answer_to_node(
+            assessment.get_node_to_be_asked(),
+            "vehicle classification",
+            "forklift",
+            FactValueType.STRING,
+            assessment,
+        )
+        next_question = engine.get_next_question(assessment)
+        working_memory = engine.get_assessment_state().get_working_memory()
+
+        assert engine.get_questions_from_node_to_be_asked(first_question) == [
+            "vehicle classification"
+        ]
+        assert next_question is None
+        assert working_memory["vehicle is type approved"].get_value() is True
+        assert FactSource.INFERRED in engine.get_assessment_state().get_fact_sources(
+            "vehicle is type approved"
+        )
+        assert working_memory["benefit met"].get_value() is True
+        trace = [
+            item
+            for item in engine.get_ontology_materialization_trace()
+            if item["status"] == "materialized"
+        ]
+        assert trace[0]["factName"] == "vehicle is type approved"
+        assert trace[0]["factSource"] == "INFERRED"
+        assert trace[0]["materializedInference"] is True
+        assert trace[0]["ontologySnapshotHash"] == "hash"
+        assert engine.get_ontology_derived_facts() == ["vehicle is type approved"]
+
+    def test_asserted_false_child_short_circuits_without_ontology_overwrite(self):
+        node_set = _parse_node_set(
+            """
+INPUT vehicle classification AS STRING
+
+benefit met
+    AND vehicle classification = "forklift"
+    AND vehicle is type approved
+""",
+            "synthetic_ontology_reasoning_asserted_guard",
+        )
+        engine = InferenceEngine(
+            node_set,
+            feature_flags=FeatureFlags(
+                ontology_advisory_enabled=True,
+                ontology_reasoning=True,
+            ),
+        )
+        engine.configure_ontology_reasoner(
+            _test_ontology_reasoner(),
+            _test_vehicle_ontology_index(),
+        )
+        engine.get_assessment_state().set_fact(
+            "vehicle is type approved",
+            FactValue(False),
+            source=FactSource.ASSERTED,
+        )
+        assessment = Assessment(node_set, "benefit met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        next_question = engine.get_next_question(assessment)
+        working_memory = engine.get_assessment_state().get_working_memory()
+
+        asserted = engine.get_assessment_state().get_fact_store().peek_in_layer(
+            "vehicle is type approved",
+            FactSource.ASSERTED,
+        )
+        assert next_question is None
+        assert working_memory["benefit met"].get_value() is False
+        assert asserted.get_value() is False
+        assert engine.get_assessment_state().get_fact_store().peek_in_layer(
+            "vehicle is type approved",
+            FactSource.INFERRED,
+        ) is None
+        assert engine.get_ontology_materialization_trace() == []
+
+    def test_ontology_question_strategy_disabled_preserves_question_order(self):
+        node_set = _parse_node_set(
+            """
+INPUT medical order signed AS BOOLEAN
+
+benefit met
+    AND benefit evidence available
+    AND medical order signed
+""",
+            "synthetic_semantic_question_strategy_disabled",
+        )
+        node_dict = node_set.get_node_dictionary()
+        preferred_order = [
+            "benefit met",
+            "benefit evidence available",
+            "medical order signed",
+        ]
+        node_set.set_sorted_node_list(
+            [node_dict[name] for name in preferred_order]
+            + [
+                node
+                for node in node_set.get_sorted_node_list()
+                if node.get_node_name() not in preferred_order
+            ]
+        )
+        engine = InferenceEngine(
+            node_set,
+            feature_flags=FeatureFlags(ontology_question_strategy=False),
+        )
+        assessment = Assessment(node_set, "benefit met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        question = engine.get_next_question(assessment)
+
+        assert engine.get_questions_from_node_to_be_asked(question) == [
+            "benefit evidence available"
+        ]
+        assert engine.get_semantic_question_strategy_trace() == []
+
+    def test_ontology_question_strategy_enabled_reorders_frontier_with_trace(self):
+        node_set = _parse_node_set(
+            """
+INPUT medical order signed AS BOOLEAN
+
+benefit met
+    AND benefit evidence available
+    AND medical order signed
+""",
+            "synthetic_semantic_question_strategy_enabled",
+        )
+        node_dict = node_set.get_node_dictionary()
+        preferred_order = [
+            "benefit met",
+            "benefit evidence available",
+            "medical order signed",
+        ]
+        node_set.set_sorted_node_list(
+            [node_dict[name] for name in preferred_order]
+            + [
+                node
+                for node in node_set.get_sorted_node_list()
+                if node.get_node_name() not in preferred_order
+            ]
+        )
+        engine = InferenceEngine(
+            node_set,
+            feature_flags=FeatureFlags(ontology_question_strategy=True),
+        )
+        engine.set_question_strategy(
+            SemanticQuestionStrategy(
+                reasoner=_test_ontology_reasoner(),
+                ontology_index=_test_question_strategy_ontology_index(),
+                fact_store=engine.get_assessment_state().get_fact_store(),
+            )
+        )
+        assessment = Assessment(node_set, "benefit met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        question = engine.get_next_question(assessment)
+
+        assert engine.get_questions_from_node_to_be_asked(question) == [
+            "medical order signed"
+        ]
+        trace = engine.get_semantic_question_strategy_trace()
+        assert trace[0]["questionName"] == "benefit evidence available"
+        assert trace[0]["action"] == "pruned"
+        assert trace[0]["missingPrerequisites"] == ["medical order signed"]
+        assert trace[1]["questionName"] == "medical order signed"
+        assert trace[1]["action"] == "selected"
+        assert trace[1]["expectedInformationGain"] == 1
 
     def test_ontology_strategy_can_skip_unreachable_branch(self):
         goal = _make_node(node_id=0, node_name="goal", variable_name="goal")
@@ -819,6 +2117,7 @@ class TestProcessParentDependencies:
             edges=[("parent_node", "child_node", DependencyType.get_mandatory() | DependencyType.get_and())]
         )
         engine.set_node_set(ns)
+        engine.get_assessment_state().get_inclusive_list().append("parent_node")
         ass = Assessment()
         engine._process_parent_dependencies(node, ass)
         assert "child_node" in engine.get_assessment_state().get_mandatory_list()
@@ -875,11 +2174,415 @@ class TestIsIterateLineChild:
 
 
 class TestCanDetermine:
-    def test_always_returns_true(self):
+    def test_no_graph_returns_false(self):
         engine = InferenceEngine()
         node = _make_node()
-        assert engine._can_determine(node, LineType.VALUE_CONCLUSION) is True
-        assert engine._can_determine(node, LineType.COMPARISON) is True
+        assert engine._can_determine(node, LineType.VALUE_CONCLUSION) is False
+        assert engine._can_determine(node, LineType.COMPARISON) is False
+
+    def test_value_conclusion_and_children_true_sets_fact(self):
+        parent = _make_node(node_name="parent", variable_name="parent", is_plain_statement=True)
+        child = _make_node(node_name="child", variable_name="child")
+        ns = _make_node_set(
+            nodes={"parent": parent, "child": child},
+            edges=[("parent", "child", DependencyType.get_and())],
+        )
+        engine = InferenceEngine(ns)
+        engine.get_assessment_state().set_fact("child", FactValue(True))
+
+        assert engine._can_determine(parent, LineType.VALUE_CONCLUSION) is True
+        assert engine.get_assessment_state().get_working_memory()["parent"].get_value() is True
+        assert engine.get_assessment_state().get_fact_sources("parent") == {FactSource.INFERRED}
+
+    def test_value_conclusion_and_child_false_sets_false_fact(self):
+        parent = _make_node(node_name="parent", variable_name="parent", is_plain_statement=True)
+        child = _make_node(node_name="child", variable_name="child")
+        ns = _make_node_set(
+            nodes={"parent": parent, "child": child},
+            edges=[("parent", "child", DependencyType.get_and())],
+        )
+        engine = InferenceEngine(ns)
+        engine.get_assessment_state().set_fact("child", FactValue(False))
+
+        assert engine._can_determine(parent, LineType.VALUE_CONCLUSION) is True
+        assert engine.get_assessment_state().get_working_memory()["parent"].get_value() is False
+
+    def test_value_conclusion_and_false_child_settles_with_unknown_optional_sibling(self):
+        parent = _make_node(node_name="parent", variable_name="parent", is_plain_statement=True)
+        mandatory_child = _make_node(node_name="mandatory_child", variable_name="mandatory_child")
+        optional_child = _make_node(node_name="optional_child", variable_name="optional_child")
+        ns = _make_node_set(
+            nodes={
+                "parent": parent,
+                "mandatory_child": mandatory_child,
+                "optional_child": optional_child,
+            },
+            edges=[
+                (
+                    "parent",
+                    "mandatory_child",
+                    DependencyType.get_mandatory() | DependencyType.get_and(),
+                ),
+                (
+                    "parent",
+                    "optional_child",
+                    DependencyType.get_optional() | DependencyType.get_and(),
+                ),
+            ],
+        )
+        engine = InferenceEngine(ns)
+        engine.get_assessment_state().set_fact("mandatory_child", FactValue(False))
+
+        assert engine._can_determine(parent, LineType.VALUE_CONCLUSION) is True
+        assert engine.get_assessment_state().get_working_memory()["parent"].get_value() is False
+
+    def test_value_conclusion_false_child_retains_explicit_mandatory_nodes(self):
+        gateway = _make_node(node_name="branch gateway", variable_name="branch gateway", is_plain_statement=True)
+        parent = _make_node(node_name="former branch", variable_name="former branch", is_plain_statement=True)
+        selected_parent = _make_node(node_name="current branch", variable_name="current branch", is_plain_statement=True)
+        false_child = _make_node(node_name="incapacity status = former", variable_name="incapacity status")
+        branch_only_child = _make_node(node_name="step down percentage", variable_name="step down percentage")
+        related_calc = _make_node(
+            node_name="step down percentage IS CALC (weeks of incapacity <= 45 ? 100 : 75)",
+            variable_name="step down percentage",
+        )
+        calc_input = _make_node(node_name="weeks of incapacity", variable_name="weeks of incapacity")
+        shared_child = _make_node(node_name="normal weekly earnings >= actual earnings", variable_name="normal weekly earnings")
+        ns = _make_node_set(
+            nodes={
+                "branch gateway": gateway,
+                "former branch": parent,
+                "current branch": selected_parent,
+                "incapacity status = former": false_child,
+                "step down percentage": branch_only_child,
+                "step down percentage IS CALC (weeks of incapacity <= 45 ? 100 : 75)": related_calc,
+                "weeks of incapacity": calc_input,
+                "normal weekly earnings >= actual earnings": shared_child,
+            },
+            edges=[
+                ("branch gateway", "former branch", DependencyType.get_or()),
+                ("former branch", "incapacity status = former", DependencyType.get_and()),
+                ("former branch", "step down percentage", DependencyType.get_and()),
+                ("former branch", "normal weekly earnings >= actual earnings", DependencyType.get_and()),
+                ("current branch", "normal weekly earnings >= actual earnings", DependencyType.get_and()),
+                (
+                    "step down percentage IS CALC (weeks of incapacity <= 45 ? 100 : 75)",
+                    "weeks of incapacity",
+                    DependencyType.get_mandatory() | DependencyType.get_and(),
+                ),
+            ],
+        )
+        engine = InferenceEngine(ns)
+        state = engine.get_assessment_state()
+        state.set_fact("incapacity status = former", FactValue(False))
+        state.set_inclusive_list([
+            "step down percentage",
+            "normal weekly earnings >= actual earnings",
+        ])
+        state.set_mandatory_list([
+            "step down percentage",
+            "weeks of incapacity",
+            "normal weekly earnings >= actual earnings",
+        ])
+
+        assert engine._can_determine(parent, LineType.VALUE_CONCLUSION) is True
+
+        assert state.get_working_memory()["former branch"].get_value() is False
+        assert "step down percentage" in state.get_inclusive_list()
+        assert "step down percentage" in state.get_mandatory_list()
+        assert "weeks of incapacity" in state.get_mandatory_list()
+        assert "normal weekly earnings >= actual earnings" in state.get_inclusive_list()
+        assert "normal weekly earnings >= actual earnings" in state.get_mandatory_list()
+        retained_nodes = {
+            event["nodeName"]
+            for event in engine.get_branch_prune_trace()
+            if event["action"] == "retained"
+        }
+        assert "step down percentage" in retained_nodes
+        assert "normal weekly earnings >= actual earnings" in retained_nodes
+
+    def test_value_conclusion_or_children_waits_for_missing_facts(self):
+        parent = _make_node(node_name="parent", variable_name="parent", is_plain_statement=True)
+        child = _make_node(node_name="child", variable_name="child")
+        ns = _make_node_set(
+            nodes={"parent": parent, "child": child},
+            edges=[("parent", "child", DependencyType.get_or())],
+        )
+        engine = InferenceEngine(ns)
+
+        assert engine._can_determine(parent, LineType.VALUE_CONCLUSION) is False
+        assert "parent" not in engine.get_assessment_state().get_working_memory()
+
+    def test_comparison_child_dependencies_do_not_determine_comparison_truth(self):
+        parent = _make_node(
+            node_name="parent",
+            variable_name="parent",
+            line_type=LineType.COMPARISON,
+        )
+        parent.self_evaluate.return_value = None
+        child = _make_node(node_name="child", variable_name="child")
+        sibling = _make_node(node_name="sibling", variable_name="sibling")
+        ns = _make_node_set(
+            nodes={"parent": parent, "child": child, "sibling": sibling},
+            edges=[
+                ("parent", "child", DependencyType.get_or()),
+                ("parent", "sibling", DependencyType.get_or()),
+            ],
+        )
+        engine = InferenceEngine(ns)
+        engine.get_assessment_state().set_fact("child", FactValue(False))
+
+        assert engine._compute_parent_truth_from_children("parent") is None
+        assert engine._has_children("parent") is False
+        assert "parent" not in engine.get_assessment_state().get_working_memory()
+
+    def test_comparison_operand_reference_is_not_logical_child_or_inferred(self):
+        rule_text = """
+FIXED DRCA commencement date IS 1/12/1988
+INPUT date of injury or onset AS DATE
+
+DRCA temporal application met
+    AND date of injury or onset >= DRCA commencement date
+"""
+        node_set = _parse_node_set(rule_text, "drca_temporal_regression")
+        comparison_name = "date of injury or onset >= DRCA commencement date"
+        graph = node_set.get_graph()
+
+        assert graph.get_children_flat(comparison_name) == ()
+
+        engine = InferenceEngine(node_set)
+        assessment = Assessment(node_set, "DRCA temporal application met")
+        engine.add_assessment_into_assessment_list(assessment)
+
+        result = engine._compute_parent_truth_from_children("DRCA temporal application met")
+        working_memory = engine.get_assessment_state().get_working_memory()
+
+        assert result is None
+        assert "date of injury or onset" not in working_memory
+        assert working_memory["DRCA commencement date"].get_value() == "01/12/1988"
+        assert comparison_name not in working_memory
+
+    def test_comparison_and_child_false_waits_for_unknown_sibling(self):
+        parent = _make_node(
+            node_name="parent",
+            variable_name="parent",
+            line_type=LineType.COMPARISON,
+        )
+        parent.self_evaluate.return_value = FactValue(True)
+        child = _make_node(node_name="child", variable_name="child")
+        sibling = _make_node(node_name="sibling", variable_name="sibling")
+        ns = _make_node_set(
+            nodes={"parent": parent, "child": child, "sibling": sibling},
+            edges=[
+                ("parent", "child", DependencyType.get_and()),
+                ("parent", "sibling", DependencyType.get_and()),
+            ],
+        )
+        engine = InferenceEngine(ns)
+        engine.get_assessment_state().set_fact("child", FactValue(False))
+
+        assert engine._can_determine(parent, LineType.COMPARISON) is False
+        assert "parent" not in engine.get_assessment_state().get_working_memory()
+
+
+class TestComputeParentTruthFromChildren:
+    def test_known_dependency_uses_fact_presence_not_fact_truth(self):
+        parent = _make_node(node_name="parent", variable_name="parent")
+        child = _make_node(node_name="child", variable_name="child")
+        ns = _make_node_set(
+            nodes={"parent": parent, "child": child},
+            edges=[("parent", "child", DependencyType.get_known() | DependencyType.get_and())],
+        )
+        engine = InferenceEngine(ns)
+        engine.get_assessment_state().set_fact("child", FactValue(False))
+
+        result = engine._compute_parent_truth_from_children("parent")
+
+        assert result.get_value() is True
+
+    def test_known_declared_input_waits_for_answer_when_missing(self):
+        parent = _make_node(node_name="parent", variable_name="parent")
+        child = _make_node(node_name="child", variable_name="child")
+        ns = _make_node_set(
+            nodes={"parent": parent, "child": child},
+            edges=[("parent", "child", DependencyType.get_known() | DependencyType.get_and())],
+        )
+        ns.get_input_dictionary.return_value = {
+            "child": FactValue(None, FactValueType.STRING)
+        }
+        engine = InferenceEngine(ns)
+
+        result = engine._compute_parent_truth_from_children("parent")
+
+        assert result is None
+
+    def test_not_known_dependency_is_true_when_fact_absent(self):
+        parent = _make_node(node_name="parent", variable_name="parent")
+        child = _make_node(node_name="child", variable_name="child")
+        ns = _make_node_set(
+            nodes={"parent": parent, "child": child},
+            edges=[
+                (
+                    "parent",
+                    "child",
+                    DependencyType.get_not() | DependencyType.get_known() | DependencyType.get_and(),
+                )
+            ],
+        )
+        engine = InferenceEngine(ns)
+
+        result = engine._compute_parent_truth_from_children("parent")
+
+        assert result.get_value() is True
+
+    def test_missing_known_inputs_do_not_false_vea_convergence_after_hazard_answer(self):
+        rule_text = """
+INPUT the person has rendered hazardous service AS BOOLEAN
+INPUT ministerial declaration date AS DATE
+INPUT operational area name AS TEXT
+INPUT service rendered in declared operational area AS BOOLEAN
+
+VEA Part II sections 7 to 7C convergence met
+    AND hazardous service gateway met
+        AND the person has rendered hazardous service
+    AND operational area gateway met
+        AND the ministerial declaration is valid
+        AND the operational area matches DVA classification
+
+the ministerial declaration is valid
+    AND KNOWN ministerial declaration date
+
+the operational area matches DVA classification
+    AND KNOWN operational area name
+    AND service rendered in declared operational area
+"""
+        node_set = _parse_node_set(rule_text, "synthetic_vea_7_to_7c_known_inputs")
+        engine = InferenceEngine(node_set)
+        goal = "VEA Part II sections 7 to 7C convergence met"
+        assessment = Assessment(node_set, goal)
+        engine.add_assessment_into_assessment_list(assessment)
+
+        answer_node = node_set.get_node_dictionary()["the person has rendered hazardous service"]
+        assessment.set_node_to_be_asked(answer_node)
+        engine.feed_answer_to_node(
+            answer_node,
+            "the person has rendered hazardous service",
+            True,
+            FactValueType.BOOLEAN,
+            assessment,
+        )
+
+        working_memory = engine.get_assessment_state().get_working_memory()
+        assert goal not in working_memory
+        assert "operational area gateway met" not in working_memory
+
+        next_question = engine.get_next_question(assessment)
+
+        assert next_question is not None
+        assert engine.get_questions_from_node_to_be_asked(next_question)[0] in {
+            "ministerial declaration date",
+            "operational area name",
+            "service rendered in declared operational area",
+        }
+
+    def test_not_and_dependency_negates_each_child_before_grouping(self):
+        parent = _make_node(node_name="parent", variable_name="parent")
+        first = _make_node(node_name="first", variable_name="first")
+        second = _make_node(node_name="second", variable_name="second")
+        ns = _make_node_set(
+            nodes={"parent": parent, "first": first, "second": second},
+            edges=[
+                (
+                    "parent",
+                    "first",
+                    DependencyType.get_not() | DependencyType.get_and(),
+                ),
+                (
+                    "parent",
+                    "second",
+                    DependencyType.get_not() | DependencyType.get_and(),
+                ),
+            ],
+        )
+        engine = InferenceEngine(ns)
+        engine.get_assessment_state().set_fact("first", FactValue(False))
+        engine.get_assessment_state().set_fact("second", FactValue(True))
+
+        result = engine._compute_parent_truth_from_children("parent")
+
+        assert result.get_value() is False
+
+    def test_parent_truth_materializes_determinable_child_parent(self):
+        parent = _make_node(node_name="parent", variable_name="parent")
+        child_parent = _make_node(node_name="child parent", variable_name="child parent")
+        leaf = _make_node(node_name="leaf", variable_name="leaf")
+        ns = _make_node_set(
+            nodes={
+                "parent": parent,
+                "child parent": child_parent,
+                "leaf": leaf,
+            },
+            edges=[
+                ("parent", "child parent", DependencyType.get_and()),
+                ("child parent", "leaf", DependencyType.get_and()),
+            ],
+        )
+        engine = InferenceEngine(ns)
+        engine.get_assessment_state().set_fact("leaf", FactValue(True))
+
+        result = engine._compute_parent_truth_from_children("parent")
+
+        assert result.get_value() is True
+        assert engine.get_assessment_state().get_working_memory()["child parent"].get_value() is True
+
+    def test_parent_truth_recomputes_stale_inferred_child_parent(self):
+        goal = _make_node(node_name="goal", variable_name="goal")
+        branch_parent = _make_node(node_name="branch parent", variable_name="branch parent")
+        first_branch = _make_node(node_name="first branch", variable_name="first branch")
+        second_branch = _make_node(node_name="second branch", variable_name="second branch")
+        ns = _make_node_set(
+            nodes={
+                "goal": goal,
+                "branch parent": branch_parent,
+                "first branch": first_branch,
+                "second branch": second_branch,
+            },
+            edges=[
+                ("goal", "branch parent", DependencyType.get_and()),
+                ("branch parent", "first branch", DependencyType.get_or()),
+                ("branch parent", "second branch", DependencyType.get_or()),
+            ],
+        )
+        engine = InferenceEngine(ns)
+        state = engine.get_assessment_state()
+        state.set_fact("branch parent", FactValue(False), source=FactSource.INFERRED)
+        state.set_fact("first branch", FactValue(False), source=FactSource.INFERRED)
+        state.set_fact("second branch", FactValue(True), source=FactSource.INFERRED)
+
+        result = engine._compute_parent_truth_from_children("goal")
+
+        assert result.get_value() is True
+        assert state.get_working_memory()["branch parent"].get_value() is True
+
+    def test_semantic_only_fact_does_not_satisfy_mandatory_dependency(self):
+        parent = _make_node(node_name="parent", variable_name="parent", is_plain_statement=True)
+        child = _make_node(node_name="child", variable_name="child")
+        ns = _make_node_set(
+            nodes={"parent": parent, "child": child},
+            edges=[("parent", "child", DependencyType.get_mandatory() | DependencyType.get_and())],
+        )
+        engine = InferenceEngine(ns)
+        engine.get_assessment_state().set_fact(
+            "child",
+            FactValue(True),
+            source=FactSource.SEMANTIC,
+        )
+
+        result = engine._compute_parent_truth_from_children("parent")
+
+        assert result is None
+        assert engine._can_determine(parent, LineType.VALUE_CONCLUSION) is False
+        assert "parent" not in engine.get_assessment_state().get_working_memory()
 
 
 class TestHandleNodeEvaluation:
@@ -941,6 +2644,8 @@ class TestFeedAnswerToNode:
         ass.set_node_to_be_asked(ask_node)
         engine.feed_answer_to_node(node, "var1", True, FactValueType.BOOLEAN, ass)
         assert "var1" in engine.get_assessment_state().get_working_memory()
+        assert ass.get_node_to_be_asked() is None
+        assert ass.get_aux_node_to_be_asked() is None
 
     def test_iterate_type_calls_handle_iterate_answer(self):
         engine = InferenceEngine()
@@ -1294,6 +2999,7 @@ class TestShouldAskNode:
         ass = Assessment()
         goal = _make_node(node_id=2, node_name="goal")
         ass._Assessment__goal_node = goal
+        engine.get_assessment_state().get_inclusive_list().append("iter_node")
         with patch.object(engine, '_handle_iterate_node', return_value=True, create=True):
             result = engine._should_ask_node(node, ass, 0)
             assert result is True
@@ -1635,7 +3341,7 @@ class TestGetNextQuestionProcessDependencies:
         engine.get_assessment_state().get_inclusive_list().append("goal")
         result = engine.get_next_question(ass)
 
-    def test_get_next_question_sets_aux_for_iterate(self):
+    def test_goal_fact_clears_stale_iterate_question(self):
         engine = InferenceEngine()
         iterate_node = _make_node(node_id=0, line_type=LineType.ITERATE, node_name="iter_rule", variable_name="iter_var")
         goal = _make_node(node_id=1, node_name="goal", variable_name="goal_var",
@@ -1657,8 +3363,9 @@ class TestGetNextQuestionProcessDependencies:
         ass._Assessment__goal_node_index = 0
         ass.set_node_to_be_asked(iterate_node)
         result = engine.get_next_question(ass)
-        assert result is iterate_node
-        assert ass.get_aux_node_to_be_asked() is iterate_node
+        assert result is None
+        assert ass.get_node_to_be_asked() is None
+        assert ass.get_aux_node_to_be_asked() is None
 
     def test_get_next_question_returns_iterate_sub_question(self):
         engine = InferenceEngine()
@@ -1714,6 +3421,7 @@ class TestProcessNodeDependencies:
             edges=[("parent_node", "child_node", DependencyType.get_mandatory() | DependencyType.get_and())]
         )
         engine.set_node_set(ns)
+        engine.get_assessment_state().get_inclusive_list().append("parent_node")
         engine._process_node_dependencies(child)
         assert "child_node" in engine.get_assessment_state().get_mandatory_list()
 
@@ -1734,6 +3442,7 @@ class TestEvaluateNodeAfterPropagationBranches:
         )
         engine.set_node_set(ns)
         engine.get_assessment_state().set_fact("var1", FactValue(True))
+        engine.get_assessment_state().get_inclusive_list().append("n1")
         with patch.object(engine, '_has_children', return_value=True), \
              patch.object(engine, '_can_determine', return_value=True):
             engine._evaluate_node_after_propagation(node, LineType.VALUE_CONCLUSION, 0, 1)
@@ -1830,6 +3539,9 @@ service history ok
         assert engine.get_questions_from_node_to_be_asked(third_question) == [
             "2nd  period.period of service in days"
         ]
+        assert engine.get_questions_from_node_to_be_asked(third_question) != [
+            "1st  period.period of service in days"
+        ]
 
         engine.feed_answer_to_node(
             assessment.get_node_to_be_asked(),
@@ -1842,6 +3554,9 @@ service history ok
         working_memory = engine.get_assessment_state().get_working_memory()
         assert working_memory["ALL period ITERATE: LIST OF service history"].get_value() is True
         assert working_memory["service history ok"].get_value() is True
+        assert engine.get_next_question(assessment) is None
+        assert assessment.get_node_to_be_asked() is None
+        assert assessment.get_aux_node_to_be_asked() is None
 
 
 class TestResetWorkingMemoryClear:

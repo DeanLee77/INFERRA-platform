@@ -1,7 +1,8 @@
 """Semantic fact enrichment over an in-memory OWL/RDFS-aligned subset."""
 
+import re
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from src.domain.fact_values import FactValue
 from src.domain.state.fact_source import FactSource
@@ -12,7 +13,16 @@ RDFS_SUBCLASS_OF = "http://www.w3.org/2000/01/rdf-schema#subClassOf"
 RDFS_SUBPROPERTY_OF = "http://www.w3.org/2000/01/rdf-schema#subPropertyOf"
 RDFS_DOMAIN = "http://www.w3.org/2000/01/rdf-schema#domain"
 RDFS_RANGE = "http://www.w3.org/2000/01/rdf-schema#range"
+RDFS_LABEL = "http://www.w3.org/2000/01/rdf-schema#label"
 OWL_EQUIVALENT_CLASS = "http://www.w3.org/2002/07/owl#equivalentClass"
+INF_NS = "http://inferra.ai/schema#"
+INF_NAME = f"{INF_NS}name"
+INF_HAS_ITEM = f"{INF_NS}hasItem"
+INF_VALUE_TYPE = f"{INF_NS}valueType"
+INF_DEFAULT_VALUE = f"{INF_NS}defaultValue"
+INF_CONFIDENCE = f"{INF_NS}confidence"
+INF_MINIMUM = f"{INF_NS}minimum"
+INF_MAXIMUM = f"{INF_NS}maximum"
 
 OntologyTriple = Tuple[str, str, str]
 
@@ -25,6 +35,201 @@ class BoundFact:
     subject_iri: str
     predicate_iri: str
     object_iri: str
+    confidence: float = 1.0
+    source_graph_uri: str = "in_memory_triples"
+
+
+@dataclass(frozen=True)
+class OntologyBindingEvidence:
+    """Deterministic fact-to-ontology binding evidence."""
+
+    fact_name: str
+    ontology_iri: str
+    matched_label: str
+    matched_predicate: str
+    source_graph_uri: str
+    confidence: float = 1.0
+    status: str = "bound"
+    source_label: str = FactSource.SEMANTIC.value
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "factName": self.fact_name,
+            "ontologyIri": self.ontology_iri,
+            "matchedLabel": self.matched_label,
+            "matchedPredicate": _compact_relationship(self.matched_predicate),
+            "sourceGraphUri": self.source_graph_uri,
+            "confidence": self.confidence,
+            "status": self.status,
+            "sourceLabel": self.source_label,
+        }
+
+
+@dataclass(frozen=True)
+class OntologyBindingIssue:
+    """Missing or ambiguous binding evidence for a rule fact."""
+
+    fact_name: str
+    status: str
+    candidates: Tuple[str, ...] = ()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "factName": self.fact_name,
+            "status": self.status,
+            "candidates": list(self.candidates),
+            "sourceLabel": FactSource.SEMANTIC.value,
+        }
+
+
+@dataclass(frozen=True)
+class OntologyBindingReport:
+    """Result of deterministic ontology binding resolution."""
+
+    bindings: Tuple[OntologyBindingEvidence, ...]
+    ambiguous: Tuple[OntologyBindingIssue, ...]
+    missing: Tuple[OntologyBindingIssue, ...]
+
+    def binding_by_fact(self) -> Dict[str, OntologyBindingEvidence]:
+        return {item.fact_name: item for item in self.bindings}
+
+    def to_trace(self) -> Dict[str, Any]:
+        return {
+            "bindings": [item.to_dict() for item in self.bindings],
+            "ambiguous": [item.to_dict() for item in self.ambiguous],
+            "missing": [item.to_dict() for item in self.missing],
+            "bindingCount": len(self.bindings),
+            "ambiguityCount": len(self.ambiguous),
+            "missingCount": len(self.missing),
+        }
+
+
+@dataclass(frozen=True)
+class SemanticSuggestion:
+    """Response-only ontology advisory evidence for a user question."""
+
+    fact_name: str
+    ontology_iri: str
+    relationship: str
+    suggested_value: Optional[Any]
+    confidence: float
+    source_graph_uri: str
+    ontology_snapshot_ref: str
+    ontology_snapshot_hash: Optional[str] = None
+    source_label: str = FactSource.SEMANTIC.value
+    advisory_only: bool = True
+    alters_deterministic_outcome: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "factName": self.fact_name,
+            "ontologyIri": self.ontology_iri,
+            "relationship": self.relationship,
+            "suggestedValue": self.suggested_value,
+            "confidence": self.confidence,
+            "sourceGraphUri": self.source_graph_uri,
+            "ontologySnapshotRef": self.ontology_snapshot_ref,
+            "ontologySnapshotHash": self.ontology_snapshot_hash,
+            "sourceLabel": self.source_label,
+            "advisoryOnly": self.advisory_only,
+            "altersDeterministicOutcome": self.alters_deterministic_outcome,
+        }
+
+
+@dataclass(frozen=True)
+class OntologyValueSuggestion:
+    """Candidate ontology default that may pre-fill or auto-answer a question."""
+
+    fact_name: str
+    ontology_iri: str
+    relationship: str
+    suggested_value: Any
+    confidence: float
+    basis: str
+    source_graph_uri: str
+    ontology_snapshot_ref: str
+    ontology_snapshot_hash: Optional[str] = None
+    source_label: str = FactSource.SEMANTIC.value
+    advisory_only: bool = True
+    auto_answer_eligible: bool = True
+    auto_answered: bool = False
+    alters_deterministic_outcome: bool = False
+    status: str = "available"
+    abstain_reason: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "factName": self.fact_name,
+            "ontologyIri": self.ontology_iri,
+            "relationship": self.relationship,
+            "suggestedValue": self.suggested_value,
+            "confidence": self.confidence,
+            "basis": self.basis,
+            "sourceGraphUri": self.source_graph_uri,
+            "ontologySnapshotRef": self.ontology_snapshot_ref,
+            "ontologySnapshotHash": self.ontology_snapshot_hash,
+            "sourceLabel": self.source_label,
+            "advisoryOnly": self.advisory_only,
+            "autoAnswerEligible": self.auto_answer_eligible,
+            "autoAnswered": self.auto_answered,
+            "altersDeterministicOutcome": self.alters_deterministic_outcome,
+            "status": self.status,
+            "abstainReason": self.abstain_reason,
+        }
+
+
+class OntologyBindingResolver:
+    """Resolve fact names to ontology IRIs with deterministic exact-label matching."""
+
+    def resolve(
+        self,
+        fact_names: Iterable[str],
+        ontology_triples: Iterable[OntologyTriple],
+        *,
+        source_graph_uri: str = "in_memory_triples",
+    ) -> OntologyBindingReport:
+        index = OntologyIndex(tuple(ontology_triples))
+        labels = index.label_index()
+        bindings: List[OntologyBindingEvidence] = []
+        ambiguous: List[OntologyBindingIssue] = []
+        missing: List[OntologyBindingIssue] = []
+
+        for fact_name in sorted({str(name) for name in fact_names if str(name).strip()}):
+            key = _normalise_label(fact_name)
+            candidates = tuple(sorted(labels.get(key, ())))
+            if len(candidates) == 1:
+                subject = candidates[0]
+                matched_predicate, matched_label = index.best_label_for(subject)
+                bindings.append(
+                    OntologyBindingEvidence(
+                        fact_name=fact_name,
+                        ontology_iri=subject,
+                        matched_label=matched_label,
+                        matched_predicate=matched_predicate,
+                        source_graph_uri=source_graph_uri,
+                    )
+                )
+            elif len(candidates) > 1:
+                ambiguous.append(
+                    OntologyBindingIssue(
+                        fact_name=fact_name,
+                        status="ambiguous",
+                        candidates=candidates,
+                    )
+                )
+            else:
+                missing.append(
+                    OntologyBindingIssue(
+                        fact_name=fact_name,
+                        status="missing",
+                    )
+                )
+
+        return OntologyBindingReport(
+            bindings=tuple(bindings),
+            ambiguous=tuple(ambiguous),
+            missing=tuple(missing),
+        )
 
 
 @dataclass(frozen=True)
@@ -97,7 +302,7 @@ class SemanticFactEnricher:
         unsupported_ontology_constructs: Iterable[str] = (),
     ) -> SemanticEnrichmentResult:
         triples = tuple(ontology_triples)
-        index = _OntologyIndex(triples)
+        index = OntologyIndex(triples)
         tags: List[SemanticTag] = []
 
         for binding in bindings:
@@ -130,7 +335,7 @@ class SemanticFactEnricher:
         self,
         binding: BoundFact,
         asserted_value: Any,
-        index: "_OntologyIndex",
+        index: "OntologyIndex",
     ) -> List[SemanticTag]:
         tags: List[SemanticTag] = []
         seen: set[Tuple[str, str]] = set()
@@ -229,7 +434,9 @@ class SemanticFactEnricher:
         )
 
 
-class _OntologyIndex:
+class OntologyIndex:
+    """In-memory, deterministic ontology index for the supported RDF/RDFS subset."""
+
     def __init__(self, triples: Sequence[OntologyTriple]) -> None:
         self._triples = tuple((str(s), str(p), str(o)) for s, p, o in triples)
         self._spo: Dict[Tuple[str, str], List[str]] = {}
@@ -238,6 +445,214 @@ class _OntologyIndex:
 
     def objects(self, subject: str, predicate: str) -> Tuple[str, ...]:
         return tuple(self._spo.get((subject, predicate), ()))
+
+    def triples(self) -> Tuple[OntologyTriple, ...]:
+        return self._triples
+
+    def label_index(self) -> Dict[str, Tuple[str, ...]]:
+        labels: Dict[str, set[str]] = {}
+        for subject, predicate, obj in self._triples:
+            if predicate not in (INF_NAME, RDFS_LABEL):
+                continue
+            key = _normalise_label(obj)
+            if key:
+                labels.setdefault(key, set()).add(subject)
+        return {key: tuple(sorted(subjects)) for key, subjects in labels.items()}
+
+    def subjects_for_label(self, label: Any) -> Tuple[str, ...]:
+        return self.label_index().get(_normalise_label(str(label)), ())
+
+    def labels_for_subject(self, subject: str) -> Tuple[str, ...]:
+        labels: List[str] = []
+        for predicate in (INF_NAME, RDFS_LABEL):
+            for value in self.objects(subject, predicate):
+                if value not in labels:
+                    labels.append(value)
+        return tuple(labels)
+
+    def best_label_for(self, subject: str) -> Tuple[str, str]:
+        for predicate in (INF_NAME, RDFS_LABEL):
+            values = self.objects(subject, predicate)
+            if values:
+                return predicate, values[0]
+        return INF_NAME, subject
+
+    def confidence_for(self, subject: str, default: float = 1.0) -> float:
+        return self._confidence_for(subject, default)
+
+    def get_equivalent_classes(self, iri: str) -> Tuple[str, ...]:
+        values = set(self.objects(iri, OWL_EQUIVALENT_CLASS))
+        values.update(
+            subject
+            for subject, predicate, obj in self._triples
+            if predicate == OWL_EQUIVALENT_CLASS and obj == iri
+        )
+        return tuple(sorted(values))
+
+    def get_subclasses(self, iri: str) -> Tuple[str, ...]:
+        return tuple(
+            sorted(
+                subject
+                for subject, predicate, obj in self._triples
+                if predicate == RDFS_SUBCLASS_OF and obj == iri
+            )
+        )
+
+    def get_instances(self, iri: str) -> Tuple[str, ...]:
+        return tuple(
+            sorted(
+                subject
+                for subject, predicate, obj in self._triples
+                if predicate == RDF_TYPE and obj == iri
+            )
+        )
+
+    def semantic_suggestions_for(
+        self,
+        binding: OntologyBindingEvidence,
+        *,
+        ontology_snapshot_ref: str,
+        ontology_snapshot_hash: Optional[str] = None,
+    ) -> Tuple[SemanticSuggestion, ...]:
+        suggestions: List[SemanticSuggestion] = []
+        subject = binding.ontology_iri
+
+        for item in self.objects(subject, INF_HAS_ITEM):
+            suggestions.append(
+                SemanticSuggestion(
+                    fact_name=binding.fact_name,
+                    ontology_iri=subject,
+                    relationship="inf:hasItem",
+                    suggested_value=item,
+                    confidence=binding.confidence,
+                    source_graph_uri=binding.source_graph_uri,
+                    ontology_snapshot_ref=ontology_snapshot_ref,
+                    ontology_snapshot_hash=ontology_snapshot_hash,
+                )
+            )
+
+        for predicate, relationship in (
+            (RDFS_RANGE, "rdfs:range"),
+            (RDFS_DOMAIN, "rdfs:domain"),
+            (INF_VALUE_TYPE, "inf:valueType"),
+        ):
+            for obj in self.objects(subject, predicate):
+                suggestions.append(
+                    SemanticSuggestion(
+                        fact_name=binding.fact_name,
+                        ontology_iri=obj,
+                        relationship=relationship,
+                        suggested_value=None,
+                        confidence=binding.confidence,
+                        source_graph_uri=binding.source_graph_uri,
+                        ontology_snapshot_ref=ontology_snapshot_ref,
+                        ontology_snapshot_hash=ontology_snapshot_hash,
+                    )
+                )
+
+        return tuple(suggestions)
+
+    def value_suggestions_for(
+        self,
+        binding: OntologyBindingEvidence,
+        *,
+        ontology_snapshot_ref: str,
+        ontology_snapshot_hash: Optional[str] = None,
+    ) -> Tuple[OntologyValueSuggestion, ...]:
+        suggestions: List[OntologyValueSuggestion] = []
+        subject = binding.ontology_iri
+        confidence = self._confidence_for(subject, binding.confidence)
+
+        defaults = tuple(dict.fromkeys(self.objects(subject, INF_DEFAULT_VALUE)))
+        if len(defaults) == 1:
+            suggestions.append(
+                OntologyValueSuggestion(
+                    fact_name=binding.fact_name,
+                    ontology_iri=subject,
+                    relationship="inf:defaultValue",
+                    suggested_value=defaults[0],
+                    confidence=confidence,
+                    basis="explicit_default_value",
+                    source_graph_uri=binding.source_graph_uri,
+                    ontology_snapshot_ref=ontology_snapshot_ref,
+                    ontology_snapshot_hash=ontology_snapshot_hash,
+                )
+            )
+        elif len(defaults) > 1:
+            suggestions.append(
+                OntologyValueSuggestion(
+                    fact_name=binding.fact_name,
+                    ontology_iri=subject,
+                    relationship="inf:defaultValue",
+                    suggested_value=None,
+                    confidence=0.0,
+                    basis="contradictory_default_values",
+                    source_graph_uri=binding.source_graph_uri,
+                    ontology_snapshot_ref=ontology_snapshot_ref,
+                    ontology_snapshot_hash=ontology_snapshot_hash,
+                    auto_answer_eligible=False,
+                    status="abstained",
+                    abstain_reason="contradictory_default_values",
+                )
+            )
+
+        enum_items = tuple(dict.fromkeys(self.objects(subject, INF_HAS_ITEM)))
+        if not defaults and len(enum_items) == 1:
+            suggestions.append(
+                OntologyValueSuggestion(
+                    fact_name=binding.fact_name,
+                    ontology_iri=subject,
+                    relationship="inf:hasItem",
+                    suggested_value=enum_items[0],
+                    confidence=min(confidence, 0.9),
+                    basis="single_allowed_value",
+                    source_graph_uri=binding.source_graph_uri,
+                    ontology_snapshot_ref=ontology_snapshot_ref,
+                    ontology_snapshot_hash=ontology_snapshot_hash,
+                )
+            )
+
+        return tuple(suggestions)
+
+    def constraint_suggestions_for(
+        self,
+        binding: OntologyBindingEvidence,
+        *,
+        ontology_snapshot_ref: str,
+        ontology_snapshot_hash: Optional[str] = None,
+    ) -> Tuple[SemanticSuggestion, ...]:
+        suggestions: List[SemanticSuggestion] = []
+        subject = binding.ontology_iri
+        for predicate, relationship in (
+            (RDFS_RANGE, "rdfs:range"),
+            (RDFS_DOMAIN, "rdfs:domain"),
+            (INF_VALUE_TYPE, "inf:valueType"),
+            (INF_MINIMUM, "inf:minimum"),
+            (INF_MAXIMUM, "inf:maximum"),
+        ):
+            for obj in self.objects(subject, predicate):
+                suggestions.append(
+                    SemanticSuggestion(
+                        fact_name=binding.fact_name,
+                        ontology_iri=subject,
+                        relationship=relationship,
+                        suggested_value=obj,
+                        confidence=binding.confidence,
+                        source_graph_uri=binding.source_graph_uri,
+                        ontology_snapshot_ref=ontology_snapshot_ref,
+                        ontology_snapshot_hash=ontology_snapshot_hash,
+                    )
+                )
+        return tuple(suggestions)
+
+    def _confidence_for(self, subject: str, default: float) -> float:
+        values = self.objects(subject, INF_CONFIDENCE)
+        if not values:
+            return default
+        try:
+            return float(values[0])
+        except (TypeError, ValueError):
+            return default
 
     def class_ancestors(self, class_iri: str) -> Tuple[Tuple[str, OntologyTriple], ...]:
         return self._closure(
@@ -282,6 +697,74 @@ class _OntologyIndex:
                         results.append((subject, basis))
                         queue.append(subject)
         return results
+
+
+_OntologyIndex = OntologyIndex
+
+
+def build_semantic_suggestions(
+    fact_names: Iterable[str],
+    ontology_triples: Iterable[OntologyTriple],
+    *,
+    source_graph_uri: str = "in_memory_triples",
+    ontology_snapshot_ref: str,
+    ontology_snapshot_hash: Optional[str] = None,
+) -> Tuple[OntologyBindingReport, Dict[str, Tuple[SemanticSuggestion, ...]]]:
+    """Resolve bindings and build response-only advisory suggestions."""
+    triples = tuple(ontology_triples)
+    index = OntologyIndex(triples)
+    report = OntologyBindingResolver().resolve(
+        fact_names,
+        triples,
+        source_graph_uri=source_graph_uri,
+    )
+    suggestions = {
+        binding.fact_name: index.semantic_suggestions_for(
+            binding,
+            ontology_snapshot_ref=ontology_snapshot_ref,
+            ontology_snapshot_hash=ontology_snapshot_hash,
+        )
+        for binding in report.bindings
+    }
+    return report, suggestions
+
+
+def build_ontology_value_suggestions(
+    report: OntologyBindingReport,
+    ontology_triples: Iterable[OntologyTriple],
+    *,
+    ontology_snapshot_ref: str,
+    ontology_snapshot_hash: Optional[str] = None,
+) -> Dict[str, Tuple[OntologyValueSuggestion, ...]]:
+    """Build default-value candidates from already-resolved ontology bindings."""
+    index = OntologyIndex(tuple(ontology_triples))
+    return {
+        binding.fact_name: index.value_suggestions_for(
+            binding,
+            ontology_snapshot_ref=ontology_snapshot_ref,
+            ontology_snapshot_hash=ontology_snapshot_hash,
+        )
+        for binding in report.bindings
+    }
+
+
+def build_ontology_constraint_suggestions(
+    report: OntologyBindingReport,
+    ontology_triples: Iterable[OntologyTriple],
+    *,
+    ontology_snapshot_ref: str,
+    ontology_snapshot_hash: Optional[str] = None,
+) -> Dict[str, Tuple[SemanticSuggestion, ...]]:
+    """Build range/domain/type advisory payloads without fact-store writes."""
+    index = OntologyIndex(tuple(ontology_triples))
+    return {
+        binding.fact_name: index.constraint_suggestions_for(
+            binding,
+            ontology_snapshot_ref=ontology_snapshot_ref,
+            ontology_snapshot_hash=ontology_snapshot_hash,
+        )
+        for binding in report.bindings
+    }
 
 
 def _build_receipt(
@@ -471,6 +954,10 @@ def _semantic_tag_fact_name(fact_name: str) -> str:
     return f"{fact_name}__semantic_tags"
 
 
+def _normalise_label(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value).strip()).casefold()
+
+
 def _append_tag(tags: List[SemanticTag], tag: SemanticTag | None) -> None:
     if tag is not None:
         tags.append(tag)
@@ -522,6 +1009,14 @@ def _compact_relationship(predicate: str) -> str:
         RDFS_SUBPROPERTY_OF: "rdfs:subPropertyOf",
         RDFS_DOMAIN: "rdfs:domain",
         RDFS_RANGE: "rdfs:range",
+        RDFS_LABEL: "rdfs:label",
         OWL_EQUIVALENT_CLASS: "owl:equivalentClass",
+        INF_NAME: "inf:name",
+        INF_HAS_ITEM: "inf:hasItem",
+        INF_VALUE_TYPE: "inf:valueType",
+        INF_DEFAULT_VALUE: "inf:defaultValue",
+        INF_CONFIDENCE: "inf:confidence",
+        INF_MINIMUM: "inf:minimum",
+        INF_MAXIMUM: "inf:maximum",
     }
     return mapping.get(predicate, predicate)

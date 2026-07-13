@@ -33,6 +33,16 @@ def run_post_reasoning(
 ) -> Optional[Dict[str, str]]:
     """Publish ontology post-reasoning work if the feature flag is enabled."""
     flags = feature_flags if feature_flags is not None else FeatureFlags()
+    if not flags.generate_post_reasoning_ttl:
+        log.debug(
+            "post_reasoning_ttl_generation_disabled",
+            session_id=session_id,
+            node_id="",
+            fact_source="SEMANTIC",
+            correlation_id=session_id,
+            rule_name=rule_name,
+        )
+        return None
     if not flags.async_post_reasoning:
         log.debug(
             "async_post_reasoning_disabled",

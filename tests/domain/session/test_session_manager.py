@@ -30,6 +30,19 @@ def test_convergence_goal_reached_when_goal_and_mandatory_known():
     assert result.reason == "GOAL_REACHED"
 
 
+def test_convergence_pending_when_boolean_goal_is_false():
+    mgr = SessionManager()
+    ctx = _ctx(mandatory=["m1"])
+    ctx.fact_store.set_fact("goal", FactValue(False), FactSource.INFERRED)
+    ctx.fact_store.set_fact("m1", FactValue(True), FactSource.ASSERTED)
+    mgr.create_snapshot("s1", ctx)
+
+    result = mgr.check_convergence("s1")
+
+    assert result.converged is False
+    assert result.reason == "PENDING"
+
+
 def test_convergence_fixed_point_after_stable_hash():
     mgr = SessionManager()
     ctx = _ctx()

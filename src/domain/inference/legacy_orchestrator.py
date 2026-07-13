@@ -23,6 +23,20 @@ class LegacyOrchestrator:
 
         state = self.engine.get_assessment_state()
         wm = state.get_working_memory()
-        if goal.get_node_name() in wm and state.all_mandatory_node_determined():
+        if (
+            _goal_fact_is_satisfied(wm.get(goal.get_node_name()))
+            and state.all_mandatory_node_determined()
+        ):
             return ConvergenceResult(True, "GOAL_REACHED", 0, "", 0, session_id=session_id)
         return ConvergenceResult(False, "PENDING", 0, "", 0, session_id=session_id)
+
+
+def _goal_fact_is_satisfied(value) -> bool:
+    if value is None:
+        return False
+    raw_value = value.get_value() if hasattr(value, "get_value") else value
+    if raw_value is None:
+        return False
+    if isinstance(raw_value, bool):
+        return raw_value is True
+    return True

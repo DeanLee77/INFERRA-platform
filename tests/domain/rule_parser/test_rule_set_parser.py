@@ -549,3 +549,21 @@ class TestRuleSetParserHandleNotKnownManOptPos:
     def test_or_base_with_no_modifier(self, parser):
         result = parser._handle_not_known_man_opt_pos("OR something", DependencyType.get_or())
         assert result & DependencyType.get_or() == DependencyType.get_or()
+
+    def test_and_not_modifier_sets_not_bit(self, parser):
+        result = parser._handle_not_known_man_opt_pos(
+            "AND NOT something",
+            DependencyType.get_and(),
+        )
+
+        assert result & DependencyType.get_and() == DependencyType.get_and()
+        assert result & DependencyType.get_not() == DependencyType.get_not()
+
+    def test_and_mandatory_needs_modifier_sets_mandatory_bit(self, parser):
+        result = parser._handle_not_known_man_opt_pos(
+            "AND MANDATORY NEEDS something",
+            DependencyType.get_and(),
+        )
+
+        assert result & DependencyType.get_and() == DependencyType.get_and()
+        assert result & DependencyType.get_mandatory() == DependencyType.get_mandatory()

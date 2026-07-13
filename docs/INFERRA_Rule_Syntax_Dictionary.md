@@ -2178,7 +2178,130 @@ INPUT the claim due date AS DATE
 
 ---
 
-## 11. Quick Reference Card
+## 11. Governed Trigger Policies
+
+Trigger policies are governed authoring records that connect one completed rule-set outcome or direct event to a downstream rule set or action proposal. They are not inline rule-block statements. Author trigger policies as JSON records and store them with the companion rule-set examples so reviewers can inspect the rule source, target, guardrails, and receipt expectations together.
+
+**Policy Syntax:**
+
+```json
+{
+  "policyId": "aegis-trigger-source-to-target",
+  "version": "v1",
+  "status": "active",
+  "mode": "automatic",
+  "source": {
+    "type": "rule_set",
+    "ruleName": "aegis_trigger_source_assessment"
+  },
+  "target": {
+    "type": "rule_set",
+    "ruleName": "aegis_trigger_target_eligibility",
+    "targetNodeName": "triggered eligibility accepted"
+  },
+  "when": {
+    "outcome": true
+  },
+  "constraints": {
+    "maxDepth": 3,
+    "confidenceThreshold": 0.75,
+    "factSourceFilter": ["ASSERTED", "INFERRED"],
+    "requiredEvidenceRefs": ["ev-source-assessment"],
+    "approvalRole": "override authority"
+  }
+}
+```
+
+**Execution Syntax:**
+
+```json
+{
+  "policyId": "aegis-trigger-source-to-target",
+  "idempotencyKey": "source-run-123:trigger:v1",
+  "correlationId": "corr-source-run-123",
+  "actor": {
+    "kind": "system",
+    "id": "workflow-runtime",
+    "role": "workflow runtime"
+  },
+  "sourceResult": {
+    "ruleName": "aegis_trigger_source_assessment",
+    "outcome": true,
+    "confidence": 0.91,
+    "evidenceRefs": ["ev-source-assessment"],
+    "facts": {
+      "downstream age": {"value": 42, "source": "ASSERTED"}
+    }
+  }
+}
+```
+
+**Direct Trigger Syntax:**
+
+```json
+{
+  "policyId": "aegis-trigger-direct-release",
+  "mode": "human_approval_required",
+  "source": {
+    "type": "direct",
+    "eventType": "operator.release"
+  },
+  "target": {
+    "type": "action",
+    "workflowId": "robot-action-firewall",
+    "action": {
+      "kind": "robot.reroute",
+      "target": "AMR-17"
+    }
+  },
+  "constraints": {
+    "maxDepth": 2,
+    "confidenceThreshold": 0.8,
+    "requiredEvidenceRefs": ["ev-operator-release"],
+    "approvalRole": "override authority"
+  }
+}
+```
+
+**Plain English:** A trigger says: "When this source result or direct event is approved by policy, start this next rule set or propose this action under guardrails, and record an audit receipt."
+
+**Technical Detail:**
+- Create or update trigger policies through `POST /api/v1/aegis/trigger-policies`.
+- Invoke outcome-triggered policies through `POST /api/v1/aegis/triggers/outcome`.
+- Invoke direct-triggered policies through `POST /api/v1/aegis/triggers/direct`.
+- `source.type` is `rule_set` or `direct`.
+- A `rule_set` source requires `ruleName`; a `direct` source requires `eventType`.
+- `target.type` is `rule_set` or `action`.
+- A `rule_set` target requires `ruleName` and `targetNodeName`; the target node must exist after import-aware parsing.
+- An `action` target requires `action.kind` and `action.target`; `workflowId` defaults to the AEGIS action firewall when omitted.
+- `when.outcome` matches the completed source outcome. Boolean and text outcomes are normalized for matching.
+- `mode` controls execution:
+  - `recommend_only` records a recommendation receipt and does not start downstream execution.
+  - `human_approval_required` records a waiting receipt with the required approval role.
+  - `automatic` executes the target only after guardrails pass.
+- Guardrails include `maxDepth`, `confidenceThreshold`, `requiredEvidenceRefs`, `factSourceFilter`, and feature flag snapshot matching when a snapshot is supplied.
+- `factSourceFilter` defaults to `ASSERTED` and `INFERRED`; filtered facts are copied into downstream rule-set sessions with their source layer preserved.
+- Every trigger request must provide an `idempotencyKey`. Reusing the same key with different content is a conflict.
+- Trigger receipts record `triggerRunId`, `policyHash`, decision, status, source summary, facts passed, approval state, execution state, guardrail result, correlation ID, and idempotent replay state.
+- Active rule-set-to-rule-set trigger policies cannot create cycles.
+- When API auth is enabled, write operations require the `aegis:write` scope.
+
+**When to Use:**
+- To launch a downstream rule set only after an upstream rule outcome is available and policy conditions match.
+- To route a direct operational event into a governed action proposal instead of allowing untracked side effects.
+- To preserve audit evidence for automated or approval-gated chained execution.
+
+**When NOT to Use:**
+- To model ordinary logical dependencies inside a single rule set; use `AND`, `OR`, and imports for that.
+- To bypass human approval for high-risk actions. Use `human_approval_required` or `recommend_only`.
+- To trigger a target rule set without a valid target node.
+- To reuse a trigger idempotency key for materially different content.
+
+**Examples:** See `docs/reference/examples/authoring_catalog.json` for discoverable trigger authoring examples. The catalog points to companion source rule sets, target rule sets, trigger policy JSON, and sample trigger requests.
+
+---
+
+## 12. Quick Reference Card
 
 ### Structural Directives
 
@@ -2252,3 +2375,18 @@ INPUT the claim due date AS DATE
 | Literals | Double-quoted strings (e.g., `"MALE"`) |
 | Variables | Unquoted names reference other variables (e.g., `another person's last name`) |
 | Order | Optional IMPORT directives first, then FIXED, then INPUT, then rule blocks |
+
+### Governed Trigger Policies
+
+| Field | Purpose | Example |
+|-------|---------|---------|
+| `policyId` | Stable trigger policy identifier | `aegis-trigger-source-to-target` |
+| `mode` | `recommend_only`, `human_approval_required`, or `automatic` | `automatic` |
+| `source.type` | Trigger source kind | `rule_set` or `direct` |
+| `target.type` | Trigger target kind | `rule_set` or `action` |
+| `when.outcome` | Outcome condition for rule-set sources | `true` |
+| `constraints.maxDepth` | Maximum trigger chain depth | `3` |
+| `constraints.confidenceThreshold` | Minimum source confidence | `0.75` |
+| `constraints.factSourceFilter` | Source fact layers copied downstream | `["ASSERTED", "INFERRED"]` |
+| `constraints.requiredEvidenceRefs` | Evidence references required before execution | `["ev-source-assessment"]` |
+| `idempotencyKey` | Replay-safe trigger request identity | `source-run-123:trigger:v1` |

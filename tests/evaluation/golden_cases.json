@@ -1,0 +1,70 @@
+{
+  "harnessVersion": "neuro-symbolic-golden-cases-0.1",
+  "command": "python -m pytest tests/evaluation/test_neuro_symbolic_golden_cases.py",
+  "cases": [
+    {
+      "id": "symbolic_consistency.certify_ready",
+      "category": "symbolic_consistency",
+      "description": "All required synthetic evidence is present and no hard-stop contraindication exists.",
+      "fixtureCaseId": "certify-ready",
+      "expectedOutcome": "CERTIFY",
+      "expectedMissingEvidence": [],
+      "requiredInputFactSource": "synthetic_case:no_phi_no_customer_data"
+    },
+    {
+      "id": "symbolic_consistency.review_missing_order",
+      "category": "symbolic_consistency",
+      "description": "A required evidence flag is absent, so the deterministic fixture routes to review.",
+      "fixtureCaseId": "review-missing-order",
+      "expectedOutcome": "REVIEW",
+      "expectedMissingEvidence": ["supplier order complete"],
+      "requiredInputFactSource": "synthetic_case:no_phi_no_customer_data"
+    },
+    {
+      "id": "symbolic_consistency.deny_contraindication",
+      "category": "symbolic_consistency",
+      "description": "A hard-stop safety contraindication forces deterministic denial even when other evidence is present.",
+      "fixtureCaseId": "deny-contraindication",
+      "expectedOutcome": "DENY",
+      "expectedMissingEvidence": [],
+      "requiredInputFactSource": "synthetic_case:no_phi_no_customer_data"
+    },
+    {
+      "id": "retrieval_provenance.semantic_ontology_tags",
+      "category": "retrieval_provenance",
+      "description": "In-memory ontology retrieval adds advisory semantic tags with explicit provenance and no authoritative fact override.",
+      "assertedFact": {
+        "name": "requested_service",
+        "value": "power_wheelchair"
+      },
+      "inferredFact": {
+        "name": "authorization_outcome",
+        "value": "REVIEW"
+      },
+      "ontologySnapshotRef": "synthetic-pa-ontology-v0",
+      "expectedEventKinds": [
+        "asserted_fact",
+        "inferred_fact",
+        "semantic_tag",
+        "hypothesis",
+        "ontology_discovered_candidate"
+      ]
+    },
+    {
+      "id": "abstention.no_alternate_route",
+      "category": "abstention",
+      "description": "When deduction is stalled and optional routes are disabled or empty, the router preserves deterministic control and exposes the abstention reason.",
+      "expectedDecision": {
+        "mode": "DEDUCTION",
+        "action": "CONTINUE_LOOP",
+        "reason": "no_alternate_route"
+      }
+    },
+    {
+      "id": "failure_reporting.unknown_fixture_case",
+      "category": "failure_reporting",
+      "description": "Unknown golden-case IDs fail loudly and include the accepted fixture IDs.",
+      "unknownCaseId": "not-a-golden-case"
+    }
+  ]
+}

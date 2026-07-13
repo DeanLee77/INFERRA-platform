@@ -5,6 +5,7 @@ Implements access levels and strong typing where appropriate.
 """
 
 import json
+import re
 from typing import Any, Dict, Optional
 from src.infrastructure.logging_config import get_logger
 from src.domain.nodes.node import Node
@@ -79,9 +80,15 @@ class ValueConclusionLine(Node):
         token_string_list_size = len(tokens.get_tokens_string_list())
         self.__is_plain_statement_format = len(list(filter(lambda c: 'IS' in c, tokens.get_tokens_list()))) == 0
 
+        is_in_list_match = re.search(r"\bIS\s+IN\s+LIST:\s*", node_text, re.IGNORECASE)
+
         if not self.__is_plain_statement_format:
             self._variable_name = node_text[:node_text.index(' IS')].strip()
-            last_token = tokens.get_tokens_list()[token_string_list_size - 1]
+            last_token = (
+                node_text[is_in_list_match.end():].strip()
+                if is_in_list_match
+                else tokens.get_tokens_list()[token_string_list_size - 1]
+            )
         else:
             self._variable_name = node_text
             last_token = 'False'
@@ -127,15 +134,17 @@ class ValueConclusionLine(Node):
                 list_name = self.get_fact_value().get_value()
                 if working_memory.get(list_name) is not None:
                     variable_value_from_working_memory = working_memory.get(self._variable_name)
+                    raw_list = working_memory[list_name].get_value()
                     if variable_value_from_working_memory is not None:
+                        target = variable_value_from_working_memory.get_value()
                         line_value = len(list(filter(
-                            lambda fact_value: fact_value.get_value() == variable_value_from_working_memory.get_value(),
-                            working_memory[list_name].get_value()
+                            lambda item: (item.get_value() if isinstance(item, FactValue) else item) == target,
+                            raw_list
                         ))) > 0
                     else:
                         line_value = len(list(filter(
-                            lambda fact_value: self._variable_name == fact_value.get_value(),
-                            working_memory[list_name].get_value()
+                            lambda item: self._variable_name == (item.get_value() if isinstance(item, FactValue) else item),
+                            raw_list
                         ))) > 0
                 fv = FactValue(line_value)
         return fv

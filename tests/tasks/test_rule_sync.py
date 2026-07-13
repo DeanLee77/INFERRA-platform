@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.adapters.outbound.ontology.inferra_to_rdf_compiler import COMPILER_VERSION
 from src.domain.state.feature_flags import FeatureFlags
 from src.tasks.rule_sync import (
     _inflight_tasks,
@@ -208,13 +209,26 @@ class TestCompileAndPushToFusekiTask:
         try:
             with patch("src.adapters.outbound.ontology.inferra_to_rdf_compiler.InferraToRdfCompiler.compile", return_value=[("s", "p", "o")]) as compile_rule:
                 with patch("src.tasks.rule_sync._fuseki_write_with_breaker") as write:
-                    result = rule_sync.compile_and_push_to_fuseki.run("rule1", "rule text", "hash1")
+                    with patch("src.tasks.rule_sync.FusekiAdapter.get_named_graph_triple_count", return_value=1):
+                        result = rule_sync.compile_and_push_to_fuseki.run("rule1", "rule text", "hash1")
         finally:
             rule_sync.compile_and_push_to_fuseki.pop_request()
 
         compile_rule.assert_called_once_with("rule text", "rule1")
-        write.assert_called_once_with([("s", "p", "o")], version="hash1")
-        assert result == {"status": "success", "rule": "rule1", "hash": "hash1"}
+        write.assert_called_once_with(
+            [("s", "p", "o")],
+            version="hash1",
+            graph_uri="http://inferra.ai/schema#projection/rule/rule1",
+        )
+        assert result == {
+            "status": "success",
+            "rule": "rule1",
+            "hash": "hash1",
+            "compiler_version": COMPILER_VERSION,
+            "compiled_triple_count": 1,
+            "stored_triple_count": 1,
+            "graph_uri": "http://inferra.ai/schema#projection/rule/rule1",
+        }
         assert "hash1" not in _inflight_tasks
 
     def test_task_retries_before_dead_letter(self):

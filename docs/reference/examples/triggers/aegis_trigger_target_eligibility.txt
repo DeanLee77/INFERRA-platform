@@ -1,0 +1,9 @@
+# Example: target rule set started by a governed trigger
+INPUT downstream age AS NUMBER
+INPUT downstream evidence packet received AS BOOLEAN
+INPUT downstream applicant identity verified AS BOOLEAN
+
+triggered eligibility accepted
+    AND downstream age >= 18
+    AND downstream evidence packet received
+    AND downstream applicant identity verified

@@ -1,5 +1,7 @@
 from fastapi import APIRouter
 
+from src.adapters.inbound.http.routes.aegis import router as aegis_router
+from src.adapters.inbound.http.routes.aegis_rules import router as aegis_rules_router
 from src.adapters.inbound.http.routes.files import router as files_router
 from src.adapters.inbound.http.routes.inference import router as inference_router
 from src.adapters.inbound.http.routes.llm import router as llm_router
@@ -14,6 +16,8 @@ from src.adapters.inbound.http.routes.validation import router as validation_rou
 
 
 api_router = APIRouter()
+api_router.include_router(aegis_rules_router)
+api_router.include_router(aegis_router)
 api_router.include_router(system_router)
 api_router.include_router(rules_router)
 api_router.include_router(validation_router)
