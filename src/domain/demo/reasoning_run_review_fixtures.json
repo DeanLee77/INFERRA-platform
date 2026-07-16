@@ -20,7 +20,7 @@
       "id": "example_mrca_master_convergence",
       "path": "docs/reference/examples/mrca/mrca_ultimate_master_convergence_met.txt",
       "file_type": "txt",
-      "sha256": "970a017df13eaef2fa40b1d897dc12e96553ac21e8bfd62d8fd1f18a4b9b6635",
+      "sha256": "07d61efb559d0824d3110766abeb6d6e33b79dbe9e3133002561da76d8d618b5",
       "origin_module": "docs.reference.examples",
       "fact_source": "ASSERTED",
       "usage": "symbolic convergence source fixture"
@@ -29,7 +29,7 @@
       "id": "example_drca_master_convergence",
       "path": "docs/reference/examples/drca/drca_ultimate_master_convergence_met.txt",
       "file_type": "txt",
-      "sha256": "d553f8a5da126b3f053a6cd206417778469bffcef1e29896fd15f70885a3bc7f",
+      "sha256": "ab9f6899907e72139ace0eb0c88cbdecac3c3fb98801774609430e20e2307c0a",
       "origin_module": "docs.reference.examples",
       "fact_source": "ASSERTED",
       "usage": "symbolic convergence contrast fixture"
@@ -38,7 +38,7 @@
       "id": "example_vea_service_options",
       "path": "docs/reference/examples/vea/vea_part_ii_sections_5_to_6.txt",
       "file_type": "txt",
-      "sha256": "d9f4de6e5d566f3448dcc713964db292a9eef95359a3f1a17867119c0f6db14a",
+      "sha256": "2fa30a3d5ca49e872a9e688cfad84ac816d16e5d7d9ea9c12f7eda94896c0300",
       "origin_module": "docs.reference.examples",
       "fact_source": "ASSERTED",
       "usage": "LIST-option retrieval and provenance fixture"

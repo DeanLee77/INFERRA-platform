@@ -8,6 +8,7 @@ from src.domain.demo.reasoning_run_review_fixture import (
     build_reasoning_run_review_fixture,
     build_reasoning_run_review_run,
     validate_reasoning_run_review_fixture,
+    _source_rule_example_hash,
 )
 
 
@@ -49,6 +50,15 @@ def test_source_rule_examples_are_txt_files_grounded_in_reference_examples():
         assert source["fact_source"] == "ASSERTED"
         assert source["origin_module"] == "docs.reference.examples"
         assert len(source["sha256"]) == 64
+
+
+def test_source_rule_example_hash_is_line_ending_independent(tmp_path):
+    lf_path = tmp_path / "lf.txt"
+    crlf_path = tmp_path / "crlf.txt"
+    lf_path.write_bytes(b"first\nsecond\n")
+    crlf_path.write_bytes(b"first\r\nsecond\r\n")
+
+    assert _source_rule_example_hash(lf_path) == _source_rule_example_hash(crlf_path)
 
 
 @pytest.mark.parametrize("state", sorted(REQUIRED_RESULT_STATES))

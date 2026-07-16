@@ -108,9 +108,16 @@ def _validate_source_rule_examples(fixture: dict, errors: list[str]) -> None:
             continue
 
         expected_hash = example.get("sha256")
-        actual_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        actual_hash = _source_rule_example_hash(source_path)
         if expected_hash != actual_hash:
             errors.append(f"{example_id}: source rule example hash mismatch")
+
+
+def _source_rule_example_hash(source_path: Path) -> str:
+    """Hash logical UTF-8 content independently of checkout line endings."""
+    content = source_path.read_text(encoding="utf-8")
+    canonical_content = content.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(canonical_content.encode("utf-8")).hexdigest()
 
 
 def _validate_claim_evidence(run: dict, state: str, errors: list[str]) -> None:
