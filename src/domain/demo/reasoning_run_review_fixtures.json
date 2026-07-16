@@ -18,7 +18,7 @@
   "source_rule_examples": [
     {
       "id": "example_mrca_master_convergence",
-      "path": "docs/reference/examples/mrca_ultimate_master_convergence_met.txt",
+      "path": "docs/reference/examples/mrca/mrca_ultimate_master_convergence_met.txt",
       "file_type": "txt",
       "sha256": "970a017df13eaef2fa40b1d897dc12e96553ac21e8bfd62d8fd1f18a4b9b6635",
       "origin_module": "docs.reference.examples",
@@ -27,7 +27,7 @@
     },
     {
       "id": "example_drca_master_convergence",
-      "path": "docs/reference/examples/drca_ultimate_master_convergence_met.txt",
+      "path": "docs/reference/examples/drca/drca_ultimate_master_convergence_met.txt",
       "file_type": "txt",
       "sha256": "d553f8a5da126b3f053a6cd206417778469bffcef1e29896fd15f70885a3bc7f",
       "origin_module": "docs.reference.examples",
@@ -36,7 +36,7 @@
     },
     {
       "id": "example_vea_service_options",
-      "path": "docs/reference/examples/vea_part_ii_sections_5_to_6.txt",
+      "path": "docs/reference/examples/vea/vea_part_ii_sections_5_to_6.txt",
       "file_type": "txt",
       "sha256": "d9f4de6e5d566f3448dcc713964db292a9eef95359a3f1a17867119c0f6db14a",
       "origin_module": "docs.reference.examples",

@@ -1,0 +1,61 @@
+# ==========================================
+# AU FRAUD COMMON DEFINITIONS
+# ==========================================
+# Deployment note:
+# These FIXED values are defaults for examples. Australian insurers, Medicare
+# claiming workflows, banks, and regulated entities should override them through
+# local imported modules when policy, scheme rules, or risk appetite differs.
+
+FIXED maximum daily provider billing hours IS 24
+FIXED maximum daily unique patients IS 60
+FIXED high risk fraud score threshold IS 85
+FIXED investigation hold penalty rate IS 0.10
+FIXED mbs duplicate lookback days IS 1
+
+FIXED high risk mbs service categories AS LIST
+    ITEM mental health treatment
+    ITEM diagnostic imaging
+    ITEM pathology
+    ITEM allied health
+    ITEM telehealth attendance
+    ITEM durable medical equipment
+
+FIXED mental health mbs item numbers AS LIST
+    ITEM 2700
+    ITEM 2701
+    ITEM 2715
+    ITEM 2717
+    ITEM 80000
+    ITEM 80010
+
+FIXED claim status active or paid list AS LIST
+    ITEM active
+    ITEM paid
+    ITEM accepted
+    ITEM settled
+
+FIXED mbs item status active list AS LIST
+    ITEM active
+    ITEM operative
+
+# ==========================================
+# TYPE DECLARATIONS
+# ==========================================
+
+TYPE external claim record
+    FIELD external claim status AS TEXT
+    FIELD external claim injury type AS TEXT
+    FIELD external claim scheme AS TEXT
+
+TYPE daily mbs service record
+    FIELD service date AS DATE
+    FIELD mbs item number AS TEXT
+    FIELD mbs service category AS TEXT
+    FIELD provider number AS TEXT
+
+TYPE billed mbs item record
+    FIELD mbs item number AS TEXT
+    FIELD mbs service category AS TEXT
+    FIELD mbs item is bundled component AS BOOLEAN
+    FIELD primary procedure billed AS BOOLEAN
+    FIELD mbs item status AS TEXT

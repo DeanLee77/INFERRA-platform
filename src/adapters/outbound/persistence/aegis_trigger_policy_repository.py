@@ -9,17 +9,17 @@ from sqlalchemy.orm import Session
 
 from src.domain.aegis.rule_store import stable_hash
 from src.infrastructure.logging_config import get_logger
+from src.ports.aegis_repository_ports import (
+    AegisTriggerIdempotencyConflictError,
+    AegisTriggerPolicyPort,
+)
 
 from .models import AegisTriggerPolicyORM, AegisTriggerReceiptORM
 
 _logger = get_logger(__name__)
 
 
-class AegisTriggerIdempotencyConflictError(ValueError):
-    """Raised when a trigger idempotency key is replayed with different content."""
-
-
-class AegisTriggerPolicyRepository:
+class AegisTriggerPolicyRepository(AegisTriggerPolicyPort):
     """SQLAlchemy adapter for governed trigger policies and receipts."""
 
     def __init__(self, db: Session):

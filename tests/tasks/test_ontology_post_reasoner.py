@@ -1,9 +1,15 @@
+import inspect
 import json
 import types
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.domain.fact_values import FactValue
-from src.domain.state.feature_flags import FeatureFlags
+from src.domain.state.feature_flags import (
+    FeatureFlagSnapshotMismatchError,
+    FeatureFlags,
+)
 from src.infrastructure.convergence_metrics import convergence_metrics
 import src.tasks.ontology_post_reasoner as post_reasoner
 from src.tasks.ontology_post_reasoner import (
@@ -77,14 +83,24 @@ def test_publish_dead_letter_event_uses_post_reasoning_queue():
 
 
 def test_run_post_reasoning_returns_none_when_disabled():
-    result = run_post_reasoning(
-        "s1",
-        "rule",
-        [{"name": "approved", "value": True}],
-        FeatureFlags(async_post_reasoning=False),
-    )
+    for flags in (
+        FeatureFlags(
+            async_post_reasoning=False,
+            generate_post_reasoning_ttl=True,
+        ),
+        FeatureFlags(
+            async_post_reasoning=True,
+            generate_post_reasoning_ttl=False,
+        ),
+    ):
+        result = run_post_reasoning(
+            "s1",
+            "rule",
+            [{"name": "approved", "value": True}],
+            flags,
+        )
 
-    assert result is None
+        assert result is None
 
 
 def test_run_post_reasoning_returns_none_when_celery_unavailable(monkeypatch):
@@ -95,7 +111,10 @@ def test_run_post_reasoning_returns_none_when_celery_unavailable(monkeypatch):
         "s1",
         "rule",
         [{"name": "approved", "value": True}],
-        FeatureFlags(async_post_reasoning=True),
+        FeatureFlags(
+            async_post_reasoning=True,
+            generate_post_reasoning_ttl=True,
+        ),
     )
 
     assert result is None
@@ -116,6 +135,11 @@ def test_run_post_reasoning_publishes_celery_payload(monkeypatch):
     task = FakeTask()
     monkeypatch.setattr(post_reasoner, "CELERY_AVAILABLE", True)
     monkeypatch.setattr(post_reasoner, "_ontology_post_reasoner_task", task)
+    monkeypatch.setattr(
+        post_reasoner,
+        "get_effective_feature_flag_snapshot_hash",
+        lambda: "snapshot-hash",
+    )
 
     result = run_post_reasoning(
         "s1",
@@ -125,7 +149,97 @@ def test_run_post_reasoning_publishes_celery_payload(monkeypatch):
     )
 
     assert result == {"task_id": "task-1", "session_id": "s1"}
-    assert task.calls == [("s1", "rule", [{"name": "approved", "value": True}])]
+    assert task.calls == [
+        (
+            "s1",
+            "rule",
+            [{"name": "approved", "value": True}],
+            "snapshot-hash",
+        )
+    ]
+
+
+def test_completed_session_helper_passes_frozen_flags_to_publisher():
+    from src.adapters.inbound.http.routes.inference import _run_ontology_post_reasoning
+    from src.domain.state.fact_source import FactSource
+
+    fact_store = MagicMock()
+    approved_value = FactValue(True)
+    layers = {
+        FactSource.INFERRED: {"approved": approved_value},
+        FactSource.LEARNED: {},
+        FactSource.HYPOTHETICAL: {},
+    }
+    fact_store.get_layer_snapshot.side_effect = layers.__getitem__
+    assessment_state = MagicMock()
+    assessment_state.get_fact_store.return_value = fact_store
+    flags = FeatureFlags(
+        async_post_reasoning=True,
+        generate_post_reasoning_ttl=True,
+    )
+    flags.freeze()
+    expected = {"task_id": "task-1", "session_id": "s1"}
+
+    with patch(
+        "src.adapters.inbound.http.routes.inference.run_post_reasoning",
+        return_value=expected,
+    ) as publish:
+        result = _run_ontology_post_reasoning(
+            "s1",
+            "rule",
+            assessment_state,
+            flags,
+        )
+
+    assert result == expected
+    publish.assert_called_once_with(
+        session_id="s1",
+        rule_name="rule",
+        concluded_facts=[{"name": "approved", "value": approved_value}],
+        feature_flags=flags,
+    )
+
+
+def test_terminal_feed_path_invokes_post_reasoning_after_session_save():
+    from src.adapters.inbound.http.routes.inference import feed_answer
+
+    source = inspect.getsource(feed_answer)
+    save_position = source.index("_save_session_or_409(session_service, session)")
+    publish_position = source.index("_run_ontology_post_reasoning(")
+
+    assert "if not response.has_more_questions:" in source
+    assert save_position < publish_position
+    assert "feature_flags=session.feature_flags or get_feature_flags()" in source
+
+
+def test_completed_session_publisher_failure_does_not_escape_primary_flow():
+    from src.adapters.inbound.http.routes.inference import _run_ontology_post_reasoning
+    from src.domain.state.fact_source import FactSource
+
+    fact_store = MagicMock()
+    fact_store.get_layer_snapshot.side_effect = lambda source: (
+        {"approved": FactValue(True)}
+        if source is FactSource.INFERRED
+        else {}
+    )
+    assessment_state = MagicMock()
+    assessment_state.get_fact_store.return_value = fact_store
+
+    with patch(
+        "src.adapters.inbound.http.routes.inference.run_post_reasoning",
+        side_effect=RuntimeError("queue unavailable"),
+    ):
+        result = _run_ontology_post_reasoning(
+            "s1",
+            "rule",
+            assessment_state,
+            FeatureFlags(
+                async_post_reasoning=True,
+                generate_post_reasoning_ttl=True,
+            ),
+        )
+
+    assert result is None
 
 
 def test_execute_post_reasoning_writes_fuseki_and_records_metrics():
@@ -196,6 +310,20 @@ def test_celery_post_reasoner_task_success_when_available():
 
     assert result == {"status": "success"}
     execute.assert_called_once()
+
+
+def test_celery_post_reasoner_task_rejects_flag_mismatch_when_available():
+    task = post_reasoner._ontology_post_reasoner_task
+    if task is None or not hasattr(task, "run"):
+        return
+
+    with pytest.raises(FeatureFlagSnapshotMismatchError):
+        task.run(
+            "s1",
+            "rule",
+            [{"name": "x", "value": 1}],
+            "publisher-mismatch",
+        )
 
 
 def test_celery_post_reasoner_task_dead_letters_final_failure():

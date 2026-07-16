@@ -86,6 +86,7 @@ def test_loki_and_promtail_are_configured_for_compose_log_explorer():
 
     assert "auth_enabled: false" in loki
     assert "schema: v13" in loki
-    assert "docker_sd_configs" in promtail
+    assert "static_configs" in promtail
+    assert "__path__: /var/lib/docker/containers/*/*.log" in promtail
     assert "compose_service" in promtail
     assert "http://loki:3100/loki/api/v1/push" in promtail

@@ -20,14 +20,17 @@ def test_celery_induction_adapter_start_batch():
 def test_celery_induction_adapter_start_batch_is_idempotent():
     CeleryInductionAdapter.clear_idempotency_cache()
     adapter = CeleryInductionAdapter()
-    with patch("src.tasks.induction.run_induction_batch") as task:
+    with patch(
+        "src.adapters.outbound.reasoning.celery_induction_adapter.get_effective_feature_flag_snapshot_hash",
+        return_value="snapshot-hash",
+    ), patch("src.tasks.induction.run_induction_batch") as task:
         task.delay.return_value = MagicMock(id="job-1")
 
         first = adapter.start_batch(["s2", "s1"], "rule")
         second = adapter.start_batch(["s1", "s2"], "rule")
 
     assert first == second
-    task.delay.assert_called_once_with(["s2", "s1"], "rule")
+    task.delay.assert_called_once_with(["s2", "s1"], "rule", "snapshot-hash")
 
 
 def test_celery_induction_adapter_get_status_success():

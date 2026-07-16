@@ -31,6 +31,31 @@ function Assert-LastExitCode {
 
 Set-Location $Root
 
+Invoke-Step "API/worker feature flag evidence" {
+    $EvidencePath = Join-Path $Root "artifacts/release/feature-flag-snapshots.json"
+    $StandaloneCompose = Get-Command docker-compose -ErrorAction SilentlyContinue
+    if ($null -ne $StandaloneCompose) {
+        if ($EnforceProductionFlags) {
+            $ComposeJson = & docker-compose -f docker-compose.yml -f docker-compose.prod.yml config --format json
+        }
+        else {
+            $ComposeJson = & docker-compose -f docker-compose.yml config --format json
+        }
+    }
+    else {
+        if ($EnforceProductionFlags) {
+            $ComposeJson = & docker compose -f docker-compose.yml -f docker-compose.prod.yml config --format json
+        }
+        else {
+            $ComposeJson = & docker compose -f docker-compose.yml config --format json
+        }
+    }
+    Assert-LastExitCode -CommandName "docker compose config"
+
+    $ComposeJson | python scripts/capture_feature_flag_evidence.py --compose-config - --output $EvidencePath --quiet
+    Assert-LastExitCode -CommandName "feature flag evidence"
+}
+
 Invoke-Step "Backend coverage gate" {
     pytest --cov=src --cov-fail-under=97
     Assert-LastExitCode -CommandName "pytest coverage"

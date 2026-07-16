@@ -12,7 +12,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.adapters.outbound.ontology.inferra_to_rdf_compiler import COMPILER_VERSION
-from src.domain.state.feature_flags import FeatureFlags
+from src.domain.state.feature_flags import (
+    FeatureFlagSnapshotMismatchError,
+    FeatureFlags,
+)
 from src.tasks.rule_sync import (
     _inflight_tasks,
     _is_task_pending,
@@ -82,6 +85,7 @@ class TestPublishRuleUpdatedEvent:
                     publish_rule_updated_event("rule1", "text", flags)
                     call_args = mock_app.delay.call_args
                     assert call_args[0][2] == expected_hash
+                    assert len(call_args[0][3]) == 64
 
     def test_stores_inflight_task_id(self):
         flags = FeatureFlags(async_sync_enabled=True)
@@ -201,6 +205,17 @@ class TestFusekiWriteWithBreaker:
     reason="Celery task is unavailable",
 )
 class TestCompileAndPushToFusekiTask:
+    def test_task_rejects_publisher_worker_flag_mismatch(self):
+        from src.tasks import rule_sync
+
+        with pytest.raises(FeatureFlagSnapshotMismatchError):
+            rule_sync.compile_and_push_to_fuseki.run(
+                "rule1",
+                "rule text",
+                "hash1",
+                "publisher-mismatch",
+            )
+
     def test_task_compiles_pushes_and_clears_inflight(self):
         from src.tasks import rule_sync
 

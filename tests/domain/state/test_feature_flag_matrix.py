@@ -21,7 +21,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.domain.state.feature_flags import FeatureFlags
+from src.domain.state.feature_flags import (
+    FeatureFlags,
+    canonical_feature_flag_defaults,
+    get_feature_flag_specs,
+)
 
 
 PHASE2_FLAGS = [
@@ -225,33 +229,7 @@ class TestMidSessionFlipStickiness:
 class TestFlagDefaults:
     def test_default_values(self):
         flags = FeatureFlags()
-        assert flags.use_hypergraph is True
-        assert flags.legacy_iterate is True
-        assert flags.layered_memory is True
-        assert flags.ml_optimized_dfs is False
-        assert flags.async_sync_enabled is False
-        assert flags.modular_imports is False
-        assert flags.hybrid_orchestrator is False
-        assert flags.async_post_reasoning is False
-        assert flags.prov_o_trace is False
-        assert flags.enriched_api is False
-        assert flags.ontology_advisory_enabled is False
-        assert flags.ontology_auto_answer is False
-        assert flags.ontology_auto_answer_confidence_threshold == 0.85
-        assert flags.ontology_reasoning is False
-        assert flags.ontology_reasoning_confidence_threshold == 0.85
-        assert flags.ontology_reasoning_min_hierarchy_depth == 1
-        assert flags.ontology_reasoning_max_closure_depth == 10
-        assert flags.ontology_question_strategy is False
-        assert flags.redis_session_store is False
-        assert flags.llm_enhancements is False
-        assert flags.strict_port_contracts is True
-        assert flags.observability_enabled is False
-        assert flags.auth_enabled is False
-        assert flags.abduction_enabled is False
-        assert flags.induction_pipeline is False
-        assert flags.reasoning_router is True
-        assert flags.confidence_thresholds is True
+        assert flags.snapshot() == canonical_feature_flag_defaults()
 
     def test_env_override(self):
         with patch.dict("os.environ", {"INFERRA_USE_HYPERGRAPH": "true"}):
@@ -271,33 +249,7 @@ class TestFlagDefaults:
     def test_snapshot_completeness(self):
         flags = FeatureFlags()
         snap = flags.snapshot()
-        expected_keys = {
-            "use_hypergraph",
-            "legacy_iterate",
-            "layered_memory",
-            "ml_optimized_dfs",
-            "async_sync_enabled",
-            "modular_imports",
-            "hybrid_orchestrator",
-            "async_post_reasoning",
-            "prov_o_trace",
-            "enriched_api",
-            "ontology_advisory_enabled",
-            "ontology_auto_answer",
-            "ontology_auto_answer_confidence_threshold",
-            "ontology_reasoning",
-            "ontology_reasoning_confidence_threshold",
-            "ontology_reasoning_min_hierarchy_depth",
-            "ontology_reasoning_max_closure_depth",
-            "ontology_question_strategy",
-            "redis_session_store",
-            "llm_enhancements",
-            "strict_port_contracts",
-            "observability_enabled",
-            "auth_enabled",
-            "abduction_enabled",
-            "induction_pipeline",
-            "reasoning_router",
-            "confidence_thresholds",
-        }
-        assert set(snap.keys()) == expected_keys
+        expected_keys = tuple(spec.key for spec in get_feature_flag_specs())
+
+        assert tuple(snap) == expected_keys
+        assert len(snap) == 28

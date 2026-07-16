@@ -1,4 +1,16 @@
+import os
+
 import pytest
+
+from src.domain.state.feature_flags import get_feature_flag_specs
+
+
+# Test collection must not inherit a developer's root .env. Environment-loading
+# behavior is covered explicitly with temporary files in infrastructure tests.
+os.environ.setdefault("INFERRA_LOAD_DOTENV", "false")
+for _spec in get_feature_flag_specs():
+    for _env_name in _spec.environment_names:
+        os.environ.pop(_env_name, None)
 
 
 def pytest_addoption(parser):

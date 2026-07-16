@@ -65,7 +65,17 @@ src/
 
 ## 2. Phases & Feature Flags
 
-The system is organized into 5 phases with granular feature flags:
+The system is organized into 5 phases with granular feature flags and typed
+feature settings. The values in this section are **code defaults** from
+`FEATURE_FLAG_SPECS` in `src/domain/state/feature_flags.py`. That immutable
+registry contains each snapshot key, primary environment name, type, default,
+phase, description, numeric constraints, compatibility aliases, and
+session-stickiness policy.
+`get_feature_flag_specs()` exposes it for read-only introspection. Exported
+`INFERRA_*` variables, Compose, and permitted per-session ontology inputs can
+override the code defaults. Effective values are available through
+`get_effective_feature_flag_snapshot()` and are snapshotted and frozen when an
+inference session starts.
 
 ### Phase 1 (Core — ✅ Default ON)
 
@@ -74,6 +84,7 @@ The system is organized into 5 phases with granular feature flags:
 | `USE_HYPERGRAPH` | `true` | `HyperAdjacencyGraph` as canonical dependency graph |
 | `LAYERED_MEMORY` | `true` | `LayeredFactStore` with provenance tagging |
 | `LEGACY_ITERATE` | `true` | Nested inference engine for iterate (compatibility) |
+| `ML_OPTIMIZED_DFS` | `false` | History-aware DFS ordering |
 
 ### Phase 2 (Async + Modular — ⚙️ Default OFF)
 
@@ -88,11 +99,16 @@ The system is organized into 5 phases with granular feature flags:
 |------|---------|---------|
 | `HYBRID_ORCHESTRATOR` | `false` | Async convergence loop |
 | `ASYNC_POST_REASONING` | `false` | Ontology post-reasoning events |
+| `GENERATE_POST_REASONING_TTL` | `false` | Post-reasoning TTL artifact generation |
 | `PROV_O_TRACE` | `false` | W3C PROV-O trace generation |
 | `ENRICHED_API` | `false` | Provenance-enriched API responses |
 | `ONTOLOGY_ADVISORY_ENABLED` | `false` | Ontology advisory suggestions |
 | `ONTOLOGY_AUTO_ANSWER_ENABLED` | `false` | Auto-answer from ontology defaults |
+| `ONTOLOGY_AUTO_ANSWER_CONFIDENCE_THRESHOLD` | `0.85` | Minimum auto-answer confidence |
 | `ONTOLOGY_REASONING_ENABLED` | `false` | Materialized ontology reasoning |
+| `ONTOLOGY_REASONING_CONFIDENCE_THRESHOLD` | `0.85` | Minimum materialization confidence |
+| `ONTOLOGY_REASONING_MIN_HIERARCHY_DEPTH` | `1` | Minimum hierarchy depth |
+| `ONTOLOGY_REASONING_MAX_CLOSURE_DEPTH` | `10` | Maximum ontology closure depth |
 | `ONTOLOGY_QUESTION_STRATEGY_ENABLED` | `false` | Semantic question ordering/pruning |
 
 ### Phase 4 (Redis + Auth — ⚙️ Default OFF)
@@ -113,6 +129,46 @@ The system is organized into 5 phases with granular feature flags:
 | `INDUCTION_PIPELINE` | `false` | Celery batch pattern discovery |
 | `REASONING_ROUTER` | `true` | Deduction-first routing |
 | `CONFIDENCE_THRESHOLDS` | `true` | Hypothesis confidence gating |
+
+### Code Defaults vs Overrides
+
+| Source | Meaning | Current flag differences from code defaults |
+| --- | --- | --- |
+| `src/domain/state/feature_flags.py` | Canonical library defaults used when no higher-priority value exists | None; this is the baseline |
+| Exported process environment | Operator or launcher overrides read when `FeatureFlags` is constructed | Any supported `INFERRA_*` value may override its corresponding default; API and worker entry points load `.env` first without replacing exported values, while the domain registry remains filesystem-independent |
+| Base Compose API service | Feature-rich, loopback-only local deployment profile | Receives one operator-substitutable 28-entry profile; Redis sessions, async sync, both post-reasoning gates, PROV-O, enriched API responses, abduction, induction, observability, and auth default to enabled |
+| Base Compose worker | Same feature-rich local deployment profile | Receives the identical 28-entry mapping as the API so cross-process workflows resolve the same session-relevant values |
+| Production Compose overlay | Production safety overlay used with the base file | Requires the production environment and defaults auth to enabled; otherwise inherits base-service flag values |
+| Per-session ontology input | Request-level override applied after the global snapshot | May select an ontology profile or override advisory, auto-answer, reasoning, and question-strategy Booleans only |
+
+Compose and environment values are deployment choices, not alternative
+definitions of the code defaults. Effective per-session values are frozen when
+the session is created.
+
+`src.main` and `src.tasks.celery_app` call
+`load_process_environment()` before application imports. It reads `.env` by
+default, supports `INFERRA_ENV_FILE`, and can be disabled with
+`INFERRA_LOAD_DOTENV=false`. Invalid numeric flag values fail fast in both
+processes rather than silently falling back. Compose uses `.env` for host-side
+interpolation, exports the resolved values, and disables container-side dotenv
+loading.
+
+Runtime wiring is enforced as follows:
+
+- `USE_HYPERGRAPH`, `LAYERED_MEMORY`, and `STRICT_PORT_CONTRACTS` are
+  required-true compatibility invariants at API/worker startup and session
+  creation. Direct construction remains available for migration tests only.
+- `ASYNC_POST_REASONING` and `GENERATE_POST_REASONING_TTL` must be enabled or
+  disabled together.
+- `ML_OPTIMIZED_DFS` controls whether stored history reaches
+  `MLTopologicalSortStrategy`.
+- stalled inference sessions construct the legacy or hybrid orchestrator and
+  real or null reasoning router from their frozen snapshot; abduction,
+  induction, and confidence gates are propagated into that router.
+- `PROV_O_TRACE` gates trace export and `ENRICHED_API` gates provenance and
+  reasoning enrichment without changing the response schema.
+- request `enabled` fields can opt out of globally enabled reasoning features,
+  but cannot bypass a disabled process flag.
 
 ### Ontology Assistance Profiles
 
@@ -632,20 +688,33 @@ NVIDIA_API_KEY=your_nvidia_key
 
 # Feature Flags (defaults shown)
 INFERRA_USE_HYPERGRAPH=true
-INFERRA_LAYERED_MEMORY=true
 INFERRA_LEGACY_ITERATE=true
+INFERRA_LAYERED_MEMORY=true
+INFERRA_ML_OPTIMIZED_DFS=false
 INFERRA_ASYNC_SYNC_ENABLED=false
 INFERRA_MODULAR_IMPORTS=false
 INFERRA_HYBRID_ORCHESTRATOR=false
+INFERRA_ASYNC_POST_REASONING=false
+INFERRA_GENERATE_POST_REASONING_TTL=false
+INFERRA_PROV_O_TRACE=false
+INFERRA_ENRICHED_API=false
 INFERRA_ONTOLOGY_ADVISORY_ENABLED=false
 INFERRA_ONTOLOGY_AUTO_ANSWER_ENABLED=false
+INFERRA_ONTOLOGY_AUTO_ANSWER_CONFIDENCE_THRESHOLD=0.85
 INFERRA_ONTOLOGY_REASONING_ENABLED=false
+INFERRA_ONTOLOGY_REASONING_CONFIDENCE_THRESHOLD=0.85
+INFERRA_ONTOLOGY_REASONING_MIN_HIERARCHY_DEPTH=1
+INFERRA_ONTOLOGY_REASONING_MAX_CLOSURE_DEPTH=10
 INFERRA_ONTOLOGY_QUESTION_STRATEGY_ENABLED=false
 INFERRA_REDIS_SESSION_STORE=false
 INFERRA_LLM_ENHANCEMENTS=false
+INFERRA_STRICT_PORT_CONTRACTS=true
+INFERRA_OBSERVABILITY_ENABLED=false
 INFERRA_AUTH_ENABLED=false
 INFERRA_ABDUCTION_ENABLED=false
 INFERRA_INDUCTION_PIPELINE=false
+INFERRA_REASONING_ROUTER=true
+INFERRA_CONFIDENCE_THRESHOLDS=true
 
 # Security (when AUTH_ENABLED=true)
 INFERRA_API_KEY_HEADER=X-API-Key
@@ -704,13 +773,13 @@ docker run -d --name inferra-redis -p 6379:6379 redis:7
 ```bash
 cd inferra-platform
 pip install -r requirements.txt
-uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+INFERRA_ENV_FILE=.env uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 #### Production Mode
 
 ```bash
-gunicorn src.main:app \
+INFERRA_LOAD_DOTENV=false gunicorn src.main:app \
   -w 4 \
   -k uvicorn.workers.UvicornWorker \
   --bind 0.0.0.0:8000
@@ -720,12 +789,12 @@ gunicorn src.main:app \
 
 Terminal 1 — API:
 ```bash
-uvicorn src.main:app --host 0.0.0.0 --port 8000
+INFERRA_ENV_FILE=.env uvicorn src.main:app --host 0.0.0.0 --port 8000
 ```
 
 Terminal 2 — Worker:
 ```bash
-celery -A src.tasks.celery_app worker --loglevel=info
+INFERRA_ENV_FILE=.env celery -A src.tasks.celery_app worker --loglevel=info
 ```
 
 ### Docker Compose
@@ -1507,7 +1576,7 @@ docker run -d --name inferra-db \
 alembic upgrade head
 
 # Start API
-uvicorn src.main:app --reload
+INFERRA_ENV_FILE=.env uvicorn src.main:app --reload
 ```
 
 Visit `http://localhost:8000/docs` for Swagger UI.

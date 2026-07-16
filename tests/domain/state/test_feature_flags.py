@@ -10,12 +10,21 @@ session termination).
 
 import pytest
 
+import src.domain.state.feature_flags as feature_flags_module
 from src.domain.state.feature_flags import (
+    FeatureFlagSnapshotMismatchError,
     FeatureFlags,
+    assert_feature_flag_snapshot_match,
+    build_effective_feature_flag_report,
+    canonical_feature_flag_defaults,
+    feature_flag_snapshot_hash,
     feature_flags_from_snapshot,
+    get_feature_flags,
+    get_feature_flag_specs,
     normalize_ontology_flag_overrides,
     normalize_ontology_profile,
     reset_feature_flags,
+    validate_runtime_feature_flags,
 )
 
 
@@ -25,9 +34,7 @@ class TestFeatureFlagStickiness:
     def test_default_values(self):
         """Feature flags have correct defaults."""
         flags = FeatureFlags()
-        assert flags.use_hypergraph is True
-        assert flags.legacy_iterate is True
-        assert flags.layered_memory is True
+        assert flags.snapshot() == canonical_feature_flag_defaults()
 
     def test_explicit_overrides(self):
         """Feature flags can be explicitly set."""
@@ -51,36 +58,12 @@ class TestFeatureFlagStickiness:
         flags = FeatureFlags(use_hypergraph=True, legacy_iterate=False)
         snap = flags.snapshot()
 
-        assert snap == {
-            "use_hypergraph": True,
-            "legacy_iterate": False,
-            "layered_memory": True,
-            "ml_optimized_dfs": False,
-            "async_sync_enabled": False,
-            "modular_imports": False,
-            "hybrid_orchestrator": False,
-            "async_post_reasoning": False,
-            "generate_post_reasoning_ttl": False,
-            "prov_o_trace": False,
-            "enriched_api": False,
-            "ontology_advisory_enabled": False,
-            "ontology_auto_answer": False,
-            "ontology_auto_answer_confidence_threshold": 0.85,
-            "ontology_reasoning": False,
-            "ontology_reasoning_confidence_threshold": 0.85,
-            "ontology_reasoning_min_hierarchy_depth": 1,
-            "ontology_reasoning_max_closure_depth": 10,
-            "ontology_question_strategy": False,
-            "redis_session_store": False,
-            "llm_enhancements": False,
-            "strict_port_contracts": True,
-            "observability_enabled": False,
-            "auth_enabled": False,
-            "abduction_enabled": False,
-            "induction_pipeline": False,
-            "reasoning_router": True,
-            "confidence_thresholds": True,
-        }
+        expected = canonical_feature_flag_defaults()
+        expected.update(use_hypergraph=True, legacy_iterate=False)
+
+        assert snap == expected
+        assert tuple(snap) == tuple(spec.key for spec in get_feature_flag_specs())
+        assert len(snap) == 28
 
     def test_snapshot_before_and_after_freeze(self):
         """Snapshot values are identical before and after freeze."""
@@ -126,6 +109,17 @@ class TestFeatureFlagStickiness:
         # New session would use the new flags
         assert new_global_flags.use_hypergraph is True
 
+    def test_process_flags_are_built_lazily_and_remain_stable(self, monkeypatch):
+        monkeypatch.setattr(feature_flags_module, "_default_flags", None)
+        monkeypatch.setenv("INFERRA_USE_HYPERGRAPH", "false")
+
+        first = get_feature_flags()
+        monkeypatch.setenv("INFERRA_USE_HYPERGRAPH", "true")
+        second = get_feature_flags()
+
+        assert first is second
+        assert second.use_hypergraph is False
+
     def test_legacy_retirement_report_identifies_production_flag_gaps(self):
         flags = FeatureFlags(
             use_hypergraph=True,
@@ -141,6 +135,8 @@ class TestFeatureFlagStickiness:
         assert report["legacy_iterate"]["ready"] is False
         assert report["legacy_iterate"]["expected"] is False
         assert report["ml_optimized_dfs"]["ready"] is True
+        assert report["strict_port_contracts"]["ready"] is True
+        assert report["strict_port_contracts"]["status"] == "retirement_pending"
 
     def test_ontology_advisory_flag_defaults_disabled(self):
         flags = FeatureFlags()
@@ -236,3 +232,94 @@ class TestFeatureFlagStickiness:
         flags = FeatureFlags()
 
         assert flags.ontology_question_strategy is True
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["use_hypergraph", "layered_memory", "strict_port_contracts"],
+)
+def test_runtime_invariants_reject_required_flag_disabled(key):
+    values = canonical_feature_flag_defaults()
+    values[key] = False
+
+    with pytest.raises(RuntimeError, match=rf"{key} must be true"):
+        validate_runtime_feature_flags(FeatureFlags(**values))
+
+
+@pytest.mark.parametrize(
+    ("async_enabled", "ttl_enabled"),
+    [(True, False), (False, True)],
+)
+def test_runtime_invariants_reject_half_enabled_post_reasoning(
+    async_enabled,
+    ttl_enabled,
+):
+    flags = FeatureFlags(
+        async_post_reasoning=async_enabled,
+        generate_post_reasoning_ttl=ttl_enabled,
+    )
+
+    with pytest.raises(RuntimeError, match="must be enabled or disabled together"):
+        validate_runtime_feature_flags(flags)
+
+
+def test_runtime_invariants_accept_canonical_defaults_and_return_same_instance():
+    flags = FeatureFlags()
+
+    assert validate_runtime_feature_flags(flags) is flags
+
+
+def test_snapshot_hash_is_stable_and_requires_canonical_shape():
+    defaults = canonical_feature_flag_defaults()
+    reversed_snapshot = dict(reversed(tuple(defaults.items())))
+
+    assert feature_flag_snapshot_hash(defaults) == feature_flag_snapshot_hash(
+        reversed_snapshot
+    )
+    assert len(feature_flag_snapshot_hash(defaults)) == 64
+
+    incomplete = dict(defaults)
+    incomplete.pop("reasoning_router")
+    with pytest.raises(ValueError, match="missing: reasoning_router"):
+        feature_flag_snapshot_hash(incomplete)
+
+
+def test_effective_report_contains_defaults_values_sources_and_retirement(monkeypatch):
+    monkeypatch.setenv("INFERRA_REASONING_ROUTER", "false")
+    flags = FeatureFlags()
+
+    report = build_effective_feature_flag_report(
+        "API",
+        flags=flags,
+        deployment_profile="Production",
+    )
+
+    assert report["process_role"] == "api"
+    assert report["deployment_profile"] == "production"
+    assert report["flag_count"] == 28
+    assert report["canonical_defaults"]["reasoning_router"] is True
+    assert report["effective"]["reasoning_router"] is False
+    assert report["sources"]["reasoning_router"] == {
+        "classification": "environment",
+        "environment_name": "INFERRA_REASONING_ROUTER",
+    }
+    assert report["legacy_retirement"]["strict_port_contracts"]["ready"] is True
+    assert report["snapshot_hash"] == feature_flag_snapshot_hash(flags.snapshot())
+
+
+def test_cross_process_snapshot_mismatch_is_rejected():
+    publisher_hash = feature_flag_snapshot_hash(FeatureFlags().snapshot())
+    worker_flags = FeatureFlags(reasoning_router=False)
+
+    with pytest.raises(
+        FeatureFlagSnapshotMismatchError,
+        match="publisher=.*worker=",
+    ):
+        assert_feature_flag_snapshot_match(
+            publisher_hash,
+            flags=worker_flags,
+        )
+
+    assert assert_feature_flag_snapshot_match(None, flags=worker_flags) == (
+        feature_flag_snapshot_hash(worker_flags.snapshot())
+    )

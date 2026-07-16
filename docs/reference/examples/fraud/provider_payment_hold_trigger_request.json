@@ -1,0 +1,22 @@
+{
+  "policyId": "fraud-provider-payment-hold-clinical-review-continue",
+  "idempotencyKey": "provider-payment-hold-example-1",
+  "correlationId": "provider-fraud-review-example-1",
+  "actor": {
+    "kind": "system",
+    "id": "provider-payment-controller",
+    "role": "workflow runtime"
+  },
+  "sourceResult": {
+    "ruleName": "provider_payment_hold_controller",
+    "outcome": true,
+    "confidence": 0.93,
+    "facts": {
+      "provider payment hold is required": {
+        "value": true,
+        "source": "INFERRED"
+      }
+    },
+    "evidenceRefs": ["ev-provider-verification"]
+  }
+}

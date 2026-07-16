@@ -1,0 +1,66 @@
+IMPORT: insurance_fraud_common_definitions
+
+# ==========================================
+# INPUT DECLARATIONS
+# ==========================================
+
+INPUT number of billed mbs items today AS NUMBER
+INPUT billed mbs items today AS COLLECTION OF billed mbs item record
+    SIZE FROM number of billed mbs items today
+
+INPUT number of daily mbs services AS NUMBER
+INPUT daily billed mbs services AS COLLECTION OF daily mbs service record
+    SIZE FROM number of daily mbs services
+
+INPUT patient attendance or service event verified AS BOOLEAN
+INPUT service billed category AS TEXT
+INPUT provider billed hours today AS NUMBER
+INPUT provider unique patients today AS NUMBER
+INPUT claim service date AS DATE
+INPUT upcoding pattern detected AS BOOLEAN
+INPUT modifier or attendance abuse detected AS BOOLEAN
+
+# ==========================================
+# RULE BLOCKS
+# ==========================================
+
+# Reference: Provider billing investigation controls.
+# Original: A provider billing investigation signal is detected when phantom billing, MBS unbundling, duplicate same-day services, clinical coding abuse, or abnormal billing velocity is detected.
+provider billing investigation signal detected
+    OR phantom billing detected
+    OR unbundling detected
+    OR duplicate same day mbs service detected
+    OR provider clinical coding abuse detected
+    OR provider daily velocity is abnormal
+
+# Reference: Medicare service event verification.
+# Original: Phantom billing is detected when attendance or service delivery is not verified and the billed service category is high risk.
+phantom billing detected
+    AND NOT patient attendance or service event verified
+    AND service billed category IS IN LIST: high risk mbs service categories
+
+# Reference: MBS item bundling and co-claim restrictions.
+# Original: Unbundling is detected when an item that should be included in a primary procedure is billed separately on the same day.
+unbundling detected
+    AND SOME mbs item IN billed mbs items today
+        AND mbs item.mbs item is bundled component
+        AND mbs item.primary procedure billed
+
+# Reference: MBS duplicate service edits.
+# Original: A duplicate same-day MBS service is detected when at least two mental health item claims exist on the same claim date.
+duplicate same day mbs service detected
+    AND AT LEAST 2 service IN daily billed mbs services
+        AND service.service date = claim service date
+        AND service.mbs item number IS IN LIST: mental health mbs item numbers
+
+# Reference: Provider billing velocity controls.
+# Original: Provider daily velocity is abnormal when billed hours or unique patient counts exceed configurable Australian scheme thresholds.
+provider daily velocity is abnormal
+    OR provider billed hours today > maximum daily provider billing hours
+    OR provider unique patients today > maximum daily unique patients
+
+# Reference: MBS billing integrity and professional attendance controls.
+# Original: Provider clinical coding abuse is detected when upcoding or attendance modifier abuse is externally identified.
+provider clinical coding abuse detected
+    OR upcoding pattern detected
+    OR modifier or attendance abuse detected

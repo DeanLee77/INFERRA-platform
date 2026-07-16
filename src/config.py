@@ -52,7 +52,9 @@ class Settings(BaseSettings):
     ALLOWED_EXTENSIONS: List[str] = [".pdf", ".docx", ".doc"]
     ALLOWED_MIMES: List[str] = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword"]
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    # File loading belongs to API/worker process boundaries. Settings consumes
+    # the already-resolved process environment only.
+    model_config = {"extra": "ignore"}
 
     @model_validator(mode="after")
     def resolve_secret_backed_database_uris(self) -> "Settings":

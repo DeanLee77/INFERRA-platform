@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -19,6 +19,7 @@ from src.adapters.outbound.session.in_memory_session_store import InMemorySessio
 from src.domain.exceptions import ConcurrentModificationError
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.session import InferenceContext
+from src.domain.session.session_manager import ConvergenceResult
 from src.domain.state.fact_source import FactSource
 from src.domain.state.feature_flags import FeatureFlags
 from src.domain.inference.session import InferenceSession
@@ -585,7 +586,10 @@ eligible
             "altersDeterministicOutcome": False,
         }
         session = _make_mock_session(active_node_name="incapacity status")
-        session.feature_flags = FeatureFlags(ontology_advisory_enabled=True)
+        session.feature_flags = FeatureFlags(
+            ontology_advisory_enabled=True,
+            enriched_api=True,
+        )
         session.context = InferenceContext(
             session_id=session.session_id,
             rule_name=session.rule_name,
@@ -651,7 +655,10 @@ eligible
             "altersDeterministicOutcome": False,
         }
         session = _make_mock_session(active_node_name="incapacity status")
-        session.feature_flags = FeatureFlags(ontology_advisory_enabled=True)
+        session.feature_flags = FeatureFlags(
+            ontology_advisory_enabled=True,
+            enriched_api=True,
+        )
         session.context = InferenceContext(
             session_id=session.session_id,
             rule_name=session.rule_name,
@@ -755,6 +762,7 @@ class TestGetSummary:
     def test_summary_returns_fact_source(self, mock_init, mock_get):
         """Test that summary items include fact_source provenance."""
         session = _make_mock_session()
+        session.feature_flags = FeatureFlags(enriched_api=True)
         # Add a second fact so we have multiple items
         session.inference_engine.get_assessment_state().set_fact(
             "other_fact", FactValue(42, FactValueType.INTEGER)
@@ -793,6 +801,37 @@ class TestGetSummary:
         assert "limit" in data
         assert data["limit"] == 1
         assert len(data["summary"]) <= 1
+
+    @patch("src.domain.inference.session_service.InferenceSessionService.get_session")
+    @patch("src.domain.inference.session_service.InferenceSessionService.__init__", return_value=None)
+    def test_summary_omits_provenance_when_enriched_api_disabled(
+        self,
+        mock_init,
+        mock_get,
+    ):
+        session = _make_mock_session()
+        session.feature_flags = FeatureFlags(enriched_api=False)
+        session.context = InferenceContext(
+            session_id=session.session_id,
+            rule_name=session.rule_name,
+            target=session.target_node_name,
+            mandatory=[],
+            fact_store=session.inference_engine.get_assessment_state().get_fact_store(),
+            reasoning_mode="ABDUCTION",
+            confidence=0.7,
+        )
+        mock_get.return_value = session
+
+        with TestClient(app) as c:
+            response = c.get(
+                "/api/v1/inference/summary?session_id=test-session-123"
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert all(item["fact_source"] is None for item in data["summary"])
+        assert data["reasoning_mode"] == "DEDUCTION"
+        assert data["confidence"] == 1.0
 
     @patch("src.domain.inference.session_service.InferenceSessionService.get_session")
     @patch("src.domain.inference.session_service.InferenceSessionService.__init__", return_value=None)
@@ -838,7 +877,11 @@ eligible
 
         store = InMemorySessionStore()
         service = InferenceSessionService(store)
-        session = service.create_session("test_rule", "eligible", node_set)
+        with patch(
+            "src.domain.inference.session_service.get_feature_flags",
+            return_value=FeatureFlags(enriched_api=True),
+        ):
+            session = service.create_session("test_rule", "eligible", node_set)
         app.dependency_overrides[_session_service] = lambda: service
 
         try:
@@ -1200,6 +1243,7 @@ class TestGetTrace:
     def test_trace_returns_turtle(self, mock_init, mock_get):
         pytest.importorskip("rdflib")
         session = _make_mock_session()
+        session.feature_flags = FeatureFlags(prov_o_trace=True)
         mock_get.return_value = session
 
         with TestClient(app) as c:
@@ -1218,6 +1262,7 @@ class TestGetTrace:
     def test_trace_supports_json_ld(self, mock_init, mock_get):
         pytest.importorskip("rdflib")
         session = _make_mock_session()
+        session.feature_flags = FeatureFlags(prov_o_trace=True)
         mock_get.return_value = session
 
         with TestClient(app) as c:
@@ -1229,6 +1274,25 @@ class TestGetTrace:
         data = response.json()
         assert data["format"] == "json-ld"
         assert "ASSERTED" in data["trace"]
+
+    @patch("src.domain.inference.session_service.InferenceSessionService.get_session")
+    @patch("src.domain.inference.session_service.InferenceSessionService.__init__", return_value=None)
+    def test_trace_is_unavailable_when_session_gate_is_disabled(
+        self,
+        mock_init,
+        mock_get,
+    ):
+        session = _make_mock_session()
+        session.feature_flags = FeatureFlags(prov_o_trace=False)
+        mock_get.return_value = session
+
+        with TestClient(app) as c:
+            response = c.get(
+                "/api/v1/inference/trace?session_id=test-session-123"
+            )
+
+        assert response.status_code == 503
+        assert "disabled for this session" in response.json()["detail"]
 
     @patch("src.domain.inference.session_service.InferenceSessionService.get_session")
     @patch("src.domain.inference.session_service.InferenceSessionService.__init__", return_value=None)
@@ -1402,6 +1466,7 @@ class TestRobertStyleVirtualOneConvergence:
                         / "docs"
                         / "reference"
                         / "examples"
+                        / "drca"
                         / "drca_part_i_sections_1_to_13a.txt"
                     ).read_text(encoding="utf-8"),
                     "drca_part_ii_sections_14_to_33": (
@@ -1409,6 +1474,7 @@ class TestRobertStyleVirtualOneConvergence:
                         / "docs"
                         / "reference"
                         / "examples"
+                        / "drca"
                         / "drca_part_ii_sections_14_to_33.txt"
                     ).read_text(encoding="utf-8"),
                 }
@@ -1420,6 +1486,9 @@ class TestRobertStyleVirtualOneConvergence:
                 return RuleFileEntity(file_id=1, rule_id=1, files=text.encode("utf-8"))
 
             def find_rule_by_rule_name(self, name):
+                return None
+
+            def find_rule_by_rule_name_with_latest_history(self, name):
                 return None
 
         store = InMemorySessionStore()
@@ -2146,6 +2215,7 @@ async def test_summary_formats_fact_sources_missing_summary_items_and_list_value
     from src.adapters.inbound.http.routes.inference import get_summary
 
     session = _make_mock_session()
+    session.feature_flags = FeatureFlags(enriched_api=True)
     session.context = InferenceContext(
         session_id=session.session_id,
         rule_name=session.rule_name,
@@ -2228,6 +2298,7 @@ async def test_trace_runtime_error_becomes_503():
     from src.adapters.inbound.http.routes.inference import get_trace
 
     session = _make_mock_session()
+    session.feature_flags = FeatureFlags(prov_o_trace=True)
     session.context = InferenceContext(
         session_id=session.session_id,
         rule_name="rule",
@@ -2246,6 +2317,74 @@ async def test_trace_runtime_error_becomes_503():
             )
 
     assert exc.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_stalled_next_question_invokes_session_orchestration():
+    from src.adapters.inbound.http.routes.inference import get_next_question
+
+    session = _make_mock_session()
+    session.feature_flags = FeatureFlags(
+        hybrid_orchestrator=True,
+        reasoning_router=False,
+    )
+    unresolved_state = AssessmentState()
+    session.inference_engine.get_assessment_state.return_value = unresolved_state
+    session.inference_engine.get_next_question_with_goal_name.return_value = None
+    session.assessment.get_node_to_be_asked.return_value = None
+    runtime = MagicMock()
+    runtime.evaluate_stalled_session = AsyncMock(
+        return_value=ConvergenceResult(
+            converged=False,
+            reason="ITERATION_CAP",
+            iteration=10,
+            working_memory_hash="hash",
+            ontology_delta=0,
+            session_id=session.session_id,
+        )
+    )
+
+    with patch(
+        "src.adapters.inbound.http.routes.inference.get_inference_orchestration_service",
+        return_value=runtime,
+    ):
+        response = await get_next_question(
+            session_id=session.session_id,
+            session=session,
+            session_service=MagicMock(),
+        )
+
+    runtime.evaluate_stalled_session.assert_awaited_once_with(session)
+    assert response.questions == []
+    assert response.convergence_state == "ITERATION_CAP"
+
+
+@pytest.mark.asyncio
+async def test_terminal_goal_skips_alternate_reasoning_orchestration():
+    from src.adapters.inbound.http.routes.inference import get_next_question
+
+    session = _make_mock_session()
+    session.feature_flags = FeatureFlags(
+        hybrid_orchestrator=True,
+        reasoning_router=True,
+        abduction_enabled=True,
+    )
+    session.inference_engine.get_next_question_with_goal_name.return_value = None
+    runtime = MagicMock()
+    runtime.evaluate_stalled_session = AsyncMock()
+
+    with patch(
+        "src.adapters.inbound.http.routes.inference.get_inference_orchestration_service",
+        return_value=runtime,
+    ):
+        response = await get_next_question(
+            session_id=session.session_id,
+            session=session,
+            session_service=MagicMock(),
+        )
+
+    runtime.evaluate_stalled_session.assert_not_awaited()
+    assert response.convergence_state == "GOAL_REACHED"
 
 
 @pytest.mark.asyncio

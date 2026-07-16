@@ -18,6 +18,7 @@ from src.domain.fact_values import FactValue, FactValueType
 from src.domain.inference.assessment_state import AssessmentState
 from src.domain.inference.session import InferenceSession
 from src.domain.state.fact_source import FactSource
+from src.domain.state.feature_flags import FeatureFlags
 from src.main import app
 from src.services.rule_validation_service import RuleValidationService
 
@@ -46,6 +47,7 @@ class TestFactStoreToApiIntegration:
         mock_get.return_value = InferenceSession(
             session_id="s1", rule_name="r", target_node_name="goal",
             inference_engine=mock_ie, assessment=mock_assessment,
+            feature_flags=FeatureFlags(enriched_api=True),
         )
 
         with TestClient(app) as c:
@@ -75,6 +77,7 @@ class TestFactStoreToApiIntegration:
         mock_get.return_value = InferenceSession(
             session_id="s2", rule_name="r", target_node_name="goal",
             inference_engine=mock_ie, assessment=mock_assessment,
+            feature_flags=FeatureFlags(enriched_api=True),
         )
 
         with TestClient(app) as c:

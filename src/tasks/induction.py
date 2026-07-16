@@ -5,6 +5,7 @@ from typing import Any, Iterable, List, Optional
 
 import structlog
 
+from src.domain.state.feature_flags import assert_feature_flag_snapshot_match
 from src.infrastructure.secrets import redis_client_from_env
 from src.tasks.celery_app import CELERY_AVAILABLE, app
 
@@ -154,8 +155,14 @@ def publish_induction_dead_letter(job_id: str, rule_name: str, error: str) -> No
 if CELERY_AVAILABLE:
 
     @app.task(bind=True, max_retries=3, default_retry_delay=30, rate_limit="5/m")
-    def run_induction_batch(self, session_ids: list[str], rule_name: str) -> dict:
+    def run_induction_batch(
+        self,
+        session_ids: list[str],
+        rule_name: str,
+        publisher_snapshot_hash: Optional[str] = None,
+    ) -> dict:
         job_id = self.request.id
+        assert_feature_flag_snapshot_match(publisher_snapshot_hash)
         try:
             _induction_circuit.before_call()
             log.info(
@@ -195,7 +202,7 @@ else:  # pragma: no cover
         id = ""
 
     class _RunInductionBatch:
-        def delay(self, session_ids, rule_name):
+        def delay(self, session_ids, rule_name, publisher_snapshot_hash=None):
             return _ImmediateResult()
 
     run_induction_batch = _RunInductionBatch()

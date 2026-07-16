@@ -3,6 +3,7 @@ from threading import Lock
 
 import structlog
 
+from src.domain.state.feature_flags import get_effective_feature_flag_snapshot_hash
 from src.services.rule_sandbox import RuleSandbox
 from src.ports.induction_port import InductionPort
 
@@ -39,7 +40,11 @@ class CeleryInductionAdapter(InductionPort):
                 )
                 return dict(existing)
 
-        result = run_induction_batch.delay(session_ids, rule_name)
+        result = run_induction_batch.delay(
+            session_ids,
+            rule_name,
+            get_effective_feature_flag_snapshot_hash(),
+        )
         payload = {
             "job_id": result.id,
             "status": "submitted",

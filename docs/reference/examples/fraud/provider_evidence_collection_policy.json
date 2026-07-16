@@ -1,0 +1,34 @@
+{
+  "policyId": "fraud-provider-evidence-collection",
+  "version": "v1",
+  "status": "active",
+  "mode": "automatic",
+  "description": "Collect AU provider evidence from configured official adapters and optional LLM advisory channels before provider fraud inference runs.",
+  "source": {
+    "type": "direct",
+    "eventType": "claim.provider.submitted"
+  },
+  "target": {
+    "type": "action",
+    "workflowId": "provider-verification",
+    "action": {
+      "kind": "provider.evidence.collect",
+      "target": "provider-verification-service",
+      "parameters": {
+        "officialSources": ["ahpra", "abn_lookup", "hpos"],
+        "llmAdvisoryAllowed": false,
+        "allowPublicWebSearch": false,
+        "allowUserSuppliedUrls": true,
+        "allowUserSuppliedDocuments": true,
+        "requireOfficialSourceConfirmation": true
+      }
+    }
+  },
+  "constraints": {
+    "maxDepth": 2,
+    "confidenceThreshold": 0.8,
+    "factSourceFilter": ["ASSERTED", "INFERRED"],
+    "requiredEvidenceRefs": ["ev-claim-provider-submitted"],
+    "approvalRole": "fraud evidence reviewer"
+  }
+}

@@ -63,7 +63,12 @@ class BackwardChainOrchestrator:
                         convergence_trace=trace,
                     )
 
-                if ctx is not None and self.reasoning_router is not None and not ctx.abduction_attempted:
+                if (
+                    ctx is not None
+                    and self.reasoning_router is not None
+                    and not ctx.abduction_attempted
+                    and not ctx.induction_job_id
+                ):
                     decision = self.reasoning_router.route(
                         session_id=session_id,
                         target=ctx.target,
@@ -72,6 +77,7 @@ class BackwardChainOrchestrator:
                         iteration_count=iteration,
                         has_unasked_questions=False,
                         converged=False,
+                        trace_backlog_size=len(trace),
                         rule_name=ctx.rule_name,
                     )
                     if decision.mode == "ABDUCTION" and decision.action == "INJECT_HYPOTHESIS":

@@ -1,0 +1,14 @@
+IMPORT: provider_legitimacy_validator
+IMPORT: provider_trust_risk_detector
+IMPORT: provider_billing_investigation_hold_amount
+
+# ==========================================
+# RULE BLOCKS
+# ==========================================
+
+# Reference: AU provider payment-hold workflow.
+# Original: Provider payment should be held for investigation when legitimacy, trust, or billing-hold evidence raises an investigation flag. Clinical review may continue through the downstream workflow action.
+provider payment hold is required
+    OR provider legitimacy investigation flag raised
+    OR provider trust investigation flag raised
+    OR provider billing investigation hold amount is required

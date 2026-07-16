@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from src.domain.aegis.rule_store import stable_hash
 from src.domain.aegis.session_snapshot import build_session_snapshot
 from src.infrastructure.logging_config import get_logger
+from src.ports.aegis_repository_ports import AegisEventLedgerPort
 
 from .models import (
     AegisActionProposalORM,
@@ -33,7 +34,7 @@ class AegisIdempotencyConflictError(ValueError):
     """Raised when an idempotency key is reused with different event content."""
 
 
-class AegisEventLedgerRepository:
+class AegisEventLedgerRepository(AegisEventLedgerPort):
     """SQLAlchemy adapter for persistent AEGIS event ledger and snapshots."""
 
     def __init__(self, db: Session):
@@ -88,14 +89,6 @@ class AegisEventLedgerRepository:
     def get_workflow_run(self, run_id: str) -> dict[str, Any] | None:
         run = self._run_orm(run_id)
         return self._run_to_dict(run) if run else None
-
-    def list_workflow_runs(self) -> list[dict[str, Any]]:
-        runs = (
-            self._db.query(AegisWorkflowRunORM)
-            .order_by(AegisWorkflowRunORM.created_at.asc(), AegisWorkflowRunORM.run_id.asc())
-            .all()
-        )
-        return [self._run_to_dict(run) for run in runs]
 
     def get_run_id_for_proposal(self, proposal_id: str) -> str | None:
         proposal = self._db.query(AegisActionProposalORM).filter_by(proposal_id=proposal_id).first()

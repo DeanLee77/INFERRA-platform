@@ -15,7 +15,11 @@ import structlog
 
 from src.adapters.outbound.ontology.fuseki_adapter import INF_NS, FusekiAdapter
 from src.domain.fact_values import FactValue
-from src.domain.state.feature_flags import FeatureFlags
+from src.domain.state.feature_flags import (
+    FeatureFlags,
+    assert_feature_flag_snapshot_match,
+    get_effective_feature_flag_snapshot_hash,
+)
 from src.infrastructure.convergence_metrics import convergence_metrics
 from src.infrastructure.secrets import redis_client_from_env
 from src.tasks.celery_app import CELERY_AVAILABLE, app
@@ -66,7 +70,12 @@ def run_post_reasoning(
         return None
 
     facts_payload = _json_ready_facts(concluded_facts)
-    result = _ontology_post_reasoner_task.delay(session_id, rule_name, facts_payload)
+    result = _ontology_post_reasoner_task.delay(
+        session_id,
+        rule_name,
+        facts_payload,
+        get_effective_feature_flag_snapshot_hash(),
+    )
     log.info(
         "post_reasoning_task_published",
         session_id=session_id,
@@ -291,6 +300,7 @@ if CELERY_AVAILABLE:
         session_id: str,
         rule_name: str,
         concluded_facts: List[Dict[str, Any]],
+        publisher_snapshot_hash: Optional[str] = None,
     ) -> Dict[str, Any]:
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(
@@ -300,6 +310,7 @@ if CELERY_AVAILABLE:
             fact_source="SEMANTIC",
             correlation_id=session_id,
         )
+        assert_feature_flag_snapshot_match(publisher_snapshot_hash)
         try:
             return execute_post_reasoning(session_id, rule_name, concluded_facts)
         except Exception as exc:

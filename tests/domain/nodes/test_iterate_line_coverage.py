@@ -8,7 +8,7 @@ Additional coverage tests for iterate_line.py — targeting MISSED lines:
 
 import json
 from typing import Any, Dict
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -741,3 +741,348 @@ class TestTransferFactValue:
         line._transfer_fact_value({"fact": FactValue(True)}, parent_ast)
 
         assert parent_ast.get_working_memory()["fact"].get_value() is True
+
+
+class TestRemainingIterateCoverage:
+    @pytest.mark.asyncio
+    @patch("src.domain.nodes.iterate_line.IterationEngine")
+    async def test_iteration_engine_answer_progress_and_evaluation(self, engine_type):
+        iteration_engine = MagicMock()
+        iteration_engine.record_answer = AsyncMock(return_value=True)
+        iteration_engine.get_progress.return_value = (2, 2)
+        iteration_engine.evaluate.return_value = FactValue(True)
+        engine_type.return_value = iteration_engine
+        line = _make_iterate_line(quantifier="ALL", list_size=2)
+        flags = FeatureFlags(legacy_iterate=False)
+
+        completed = await line.feed_iterate_answer(
+            "1st  services  answer",
+            True,
+            FactValueType.BOOLEAN,
+            feature_flags=flags,
+            parent_fact_store=MagicMock(),
+        )
+
+        assert completed is True
+        assert line.get_progress(flags) == (2, 2)
+        assert line.can_be_self_evaluated({}, flags) is True
+        assert line.self_evaluate({}, flags).get_value() is True
+        iteration_engine.initialise.assert_called_once_with(
+            list_size=2,
+            quantifier="ALL",
+            list_name="services",
+        )
+
+    @patch("src.domain.nodes.iterate_line.NodeSet")
+    def test_create_node_set_skips_missing_child_and_empty_sort(self, node_set_type):
+        line = _make_iterate_line(list_size=1)
+        parent = MagicMock(spec=NodeSet)
+        parent.get_node_dictionary.return_value = {line.get_node_name(): line}
+        parent.get_node_set_name.return_value = "parent"
+        parent.get_fact_dictionary.return_value = {}
+        parent.get_input_dictionary.return_value = {}
+        parent.get_type_dictionary.return_value = {}
+        parent.get_collection_dictionary.return_value = {}
+        parent_graph = MagicMock()
+        parent_graph.get_children_flat.return_value = ["missing"]
+        parent_graph.lookup_by_name.return_value = 1
+        parent.get_graph.return_value = parent_graph
+
+        created = MagicMock(spec=NodeSet)
+        created_graph = MagicMock()
+        created_graph.topological_sort.return_value = []
+        created.get_graph.return_value = created_graph
+        node_set_type.return_value = created
+
+        assert line.create_iterate_node_set(parent) is created
+        created.set_sorted_node_list.assert_called_once()
+        assert created.set_sorted_node_list.call_args.args[0] == [line]
+
+    def test_json_feed_executes_question_loop_and_transfers_result(self):
+        line = _make_iterate_line(list_size=1)
+        iterate_engine = MagicMock()
+        assessment = MagicMock()
+        iterate_engine.get_assessment_of_rule.return_value = assessment
+        question_node = MagicMock()
+        question_node.get_variable_name.return_value = "1st services answer"
+        line.get_iterate_next_question = MagicMock(return_value=question_node)
+        iterate_engine.find_type_of_element_to_be_asked.return_value = {
+            "1st services answer": FactValueType.STRING
+        }
+        iterate_engine.get_questions_from_node_to_be_asked.return_value = [
+            "1st services answer"
+        ]
+        iterate_engine.get_assessment_state.return_value.get_working_memory.side_effect = [
+            {},
+            {"1st services answer": FactValue(True)},
+            {line.get_node_name(): FactValue(True)},
+        ]
+        line._IterateLine__iterate_node_set = MagicMock(spec=NodeSet)
+        line._IterateLine__iterate_ie = iterate_engine
+        line.self_evaluate = MagicMock(return_value=FactValue(True))
+        parent_ast = AssessmentState()
+
+        line.iterate_feed_answers_with_json(
+            json.dumps(
+                {
+                    "services": {
+                        "1st services": {"1st services answer": "yes"}
+                    }
+                }
+            ),
+            MagicMock(spec=NodeSet),
+            parent_ast,
+            MagicMock(),
+        )
+
+        assert parent_ast.get_working_memory()[line.get_node_name()].get_value() is True
+        assert parent_ast.get_working_memory()["1st services answer"].get_value() is True
+
+    @patch("src.domain.nodes.iterate_line.InferenceEngine")
+    def test_json_feed_registers_missing_nested_assessment(self, engine_type):
+        line = _make_iterate_line(list_size=0)
+        nested = MagicMock()
+        nested.get_assessment_of_rule.return_value = None
+        nested.get_assessment_state.return_value.get_working_memory.return_value = {
+            line.get_node_name(): FactValue(True)
+        }
+        engine_type.return_value = nested
+        line.create_iterate_node_set = MagicMock(return_value=MagicMock(spec=NodeSet))
+
+        line.iterate_feed_answers_with_json(
+            json.dumps({"services": []}),
+            MagicMock(spec=NodeSet),
+            AssessmentState(),
+            MagicMock(),
+        )
+
+        nested.add_assessment_into_assessment_list.assert_called_once()
+
+    @patch("src.domain.nodes.iterate_line.InferenceEngine")
+    def test_legacy_paths_create_missing_assessments(self, engine_type):
+        line = _make_iterate_line(list_size=0)
+        parent = MagicMock(spec=NodeSet)
+        parent_ast = AssessmentState()
+        assessment = MagicMock()
+        nested = MagicMock()
+        nested.get_assessment_of_rule.side_effect = [None, assessment, assessment]
+        nested.get_assessment_state.return_value.get_working_memory.return_value = {}
+        engine_type.return_value = nested
+        line.create_iterate_node_set = MagicMock(return_value=MagicMock(spec=NodeSet))
+        list_node = _make_mock_node(1, "services", LineType.COMPARISON, "services")
+
+        line._iterate_feed_answers_legacy(
+            list_node,
+            "services",
+            ["a", "b"],
+            FactValueType.LIST,
+            parent,
+            parent_ast,
+            MagicMock(),
+        )
+        nested.add_assessment_into_assessment_list.assert_called_once()
+
+        second = _make_iterate_line(list_size=0)
+        nested2 = MagicMock()
+        nested2.get_assessment_of_rule.side_effect = [None, assessment, assessment]
+        nested2.get_assessment_state.return_value.get_working_memory.return_value = {}
+        engine_type.return_value = nested2
+        second.create_iterate_node_set = MagicMock(return_value=MagicMock(spec=NodeSet))
+        first = _make_mock_node(1, "count", LineType.COMPARISON, "count")
+        second._first_iterate_question_node = MagicMock(return_value=first)
+        second._iterate_feed_answers_legacy(
+            first,
+            "count",
+            2,
+            FactValueType.INTEGER,
+            parent,
+            parent_ast,
+            MagicMock(),
+        )
+        assert second._IterateLine__given_list_size == 2
+        nested2.add_assessment_into_assessment_list.assert_called_once()
+
+    def test_context_collection_size_and_list_question_paths(self):
+        parent = MagicMock(spec=NodeSet)
+        parent_ast = AssessmentState()
+        target = _make_mock_node(1, "count", LineType.COMPARISON, "count")
+        line = _make_iterate_line(list_size=0)
+        line._is_collection_size_question = MagicMock(return_value=True)
+
+        line._iterate_feed_answers_via_context(
+            target,
+            "count",
+            "2",
+            FactValueType.INTEGER,
+            parent,
+            parent_ast,
+            MagicMock(),
+        )
+        assert line._IterateLine__given_list_size == 2
+        assert line.get_progress() == (0, 2)
+
+        listed = _make_iterate_line(list_size=0)
+        listed._is_collection_size_question = MagicMock(return_value=False)
+        listed._is_given_list_question = MagicMock(return_value=True)
+        listed._iterate_feed_answers_via_context(
+            target,
+            "services",
+            '["a", "b", "c"]',
+            FactValueType.LIST,
+            parent,
+            parent_ast,
+            MagicMock(),
+        )
+        assert listed._IterateLine__given_list_size == 3
+        assert listed.get_progress() == (0, 3)
+
+    def test_next_question_terminal_and_missing_list_paths(self):
+        line = _make_iterate_line(list_size=0)
+        parent_ast = AssessmentState()
+        parent_ast.set_fact(line.get_node_name(), FactValue(True))
+        assert IterateLine.get_iterate_next_question(
+            line, MagicMock(spec=NodeSet), parent_ast
+        ) is None
+
+        empty = _make_iterate_line(list_size=0)
+        empty._first_iterate_question_node = MagicMock(return_value=None)
+        assert IterateLine.get_iterate_next_question(
+            empty, MagicMock(spec=NodeSet), AssessmentState()
+        ) is None
+
+    @pytest.mark.parametrize(
+        ("quantifier", "true_count", "list_size", "expected"),
+        [
+            ("NOT ALL", 1, 2, True),
+            ("NOT NONE", 1, 2, True),
+        ],
+    )
+    def test_remaining_quantifier_variants(
+        self, quantifier, true_count, list_size, expected
+    ):
+        line = _make_iterate_line(quantifier=quantifier)
+        assert line._evaluate_quantifier(true_count, list_size).get_value() is expected
+
+    def test_recursive_and_child_graph_absence_paths(self):
+        line = _make_iterate_line()
+        parent = MagicMock(spec=NodeSet)
+        parent.get_graph.return_value = None
+        assert line._iterate_child_names(parent) == []
+        line._create_iterate_node_set_aux(
+            parent,
+            MagicMock(spec=NodeSet),
+            {},
+            "parent",
+            "clone",
+            "1st",
+        )
+
+        graph = MagicMock()
+        graph.get_children_flat.return_value = ["missing"]
+        parent.get_graph.return_value = graph
+        parent.get_node_dictionary.return_value = {}
+        line._create_iterate_node_set_aux(
+            parent,
+            MagicMock(spec=NodeSet),
+            {},
+            "parent",
+            "clone",
+            "1st",
+        )
+
+    def test_first_question_selection_fallbacks(self):
+        line = _make_iterate_line()
+        parent = MagicMock(spec=NodeSet)
+        explicit = MagicMock()
+        line._collection_size_question_node = MagicMock(return_value=None)
+        line._explicit_list_question_node = MagicMock(return_value=explicit)
+        assert line._first_iterate_question_node(parent) is explicit
+
+        synthetic = MagicMock()
+        line._explicit_list_question_node.return_value = None
+        line._declared_given_list_fact = MagicMock(return_value=FactValue([]))
+        line._synthetic_list_question_node = MagicMock(return_value=synthetic)
+        assert line._first_iterate_question_node(parent) is synthetic
+
+        child = MagicMock()
+        line._declared_given_list_fact.return_value = None
+        line._iterate_child_names = MagicMock(return_value=["child"])
+        parent.get_node_dictionary.return_value = {"child": child}
+        assert line._first_iterate_question_node(parent) is child
+        line._iterate_child_names.return_value = []
+        assert line._first_iterate_question_node(parent) is synthetic
+
+    def test_list_question_metadata_and_declaration_fallbacks(self):
+        parent = MagicMock(spec=NodeSet)
+        line = _make_iterate_line(list_name="")
+        line._IterateLine__given_list_name = None
+        line._value = FactValue("")
+        assert line._explicit_list_question_node(parent) is None
+        assert line._synthetic_list_question_node(parent) is None
+        assert line._collection_metadata(parent) == {}
+        assert line._declared_given_list_fact(parent) is None
+        assert line._is_given_list_question(None, "question") is False
+
+        line = _make_iterate_line(list_name="services")
+        declared = FactValue(3.0, FactValueType.DOUBLE)
+        parent.get_input_dictionary.return_value = {"services": declared}
+        parent.get_fact_dictionary.return_value = {}
+        node = line._synthetic_list_question_node(parent)
+        assert node.get_variable_name() == "services"
+
+        line._iterate_child_names = MagicMock(return_value=["missing"])
+        parent.get_node_dictionary.return_value = {}
+        assert line._explicit_list_question_node(parent) is None
+
+    def test_known_list_size_and_scalar_parsing_branches(self):
+        parent = MagicMock(spec=NodeSet)
+        parent.get_input_dictionary.return_value = {}
+        parent.get_fact_dictionary.return_value = {"count": FactValue("4")}
+        parent.get_collection_dictionary.return_value = {
+            "services": {"size_from": "count"}
+        }
+        line = _make_iterate_line(list_size=0)
+        line._set_given_list_size_from_known_list(parent, AssessmentState())
+        assert line._IterateLine__given_list_size == 4
+
+        for raw, expected in [
+            ([1, 2], 2),
+            (3, 3),
+            ('["a", "b"]', 2),
+            ("5", 5),
+            ("a, b, c", 3),
+        ]:
+            item = _make_iterate_line(list_size=0)
+            item._set_given_list_size_from_fact_value(FactValue(raw))
+            assert item._IterateLine__given_list_size == expected
+
+    def test_fact_value_conversion_and_list_answer_branches(self):
+        line = _make_iterate_line()
+        assert line._fact_value_to_int(FactValue(True)) == 1
+        assert line._fact_value_to_int(FactValue(3)) == 3
+        assert line._fact_value_to_int(FactValue(3.8)) == 3
+        assert line._fact_value_to_int(FactValue("4")) == 4
+        assert line._fact_value_to_int(FactValue("bad")) == 0
+        assert line._fact_value_to_int(object()) == 0
+
+        existing = FactValue("a")
+        result = line._fact_value_from_iterate_list_answer(
+            [existing, "b"], FactValueType.LIST
+        )
+        assert [item.get_value() for item in result.get_value()] == ["a", "b"]
+        result = line._fact_value_from_iterate_list_answer(
+            '["a", "b"]', FactValueType.LIST
+        )
+        assert len(result.get_value()) == 2
+        result = line._fact_value_from_iterate_list_answer(
+            "a, b", FactValueType.LIST
+        )
+        assert len(result.get_value()) == 2
+        assert line._fact_value_from_iterate_list_answer(
+            "a", FactValueType.STRING
+        ).get_value() == "a"
+
+        node_set = MagicMock(spec=NodeSet)
+        node_set.get_graph.return_value = None
+        assert line._dependency_type(node_set, "parent", "child") == DependencyType.get_or()
+        assert line._number_of_true_children({}) == 0

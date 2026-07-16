@@ -1,0 +1,23 @@
+IMPORT: insurance_fraud_common_definitions
+IMPORT: provider_billing_investigation_signals
+
+# ==========================================
+# INPUT DECLARATIONS
+# ==========================================
+
+INPUT claimed amount aud AS NUMBER
+
+# ==========================================
+# RULE BLOCKS
+# ==========================================
+
+# Reference: Investigation hold amount readiness for provider billing review.
+# Original: A provider billing investigation hold amount is required when provider billing signals trigger investigation and the calculated hold amount can be produced.
+provider billing investigation hold amount is required
+    AND provider billing investigation signal detected
+    AND MANDATORY provider billing investigation hold amount aud > 0
+
+# Reference: Investigation hold calculation.
+# Original: The provider billing investigation hold amount is a configurable percentage of the claimed amount.
+provider billing investigation hold amount aud IS CALC (claimed amount aud * investigation hold penalty rate)
+    NEEDS claimed amount aud

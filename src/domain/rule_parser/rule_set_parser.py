@@ -166,8 +166,8 @@ class RuleSetParser(IScanFeeder, ABC):
                         elif i == 1:  # expr conclusion matcher
                             node_data = ExprConclusionLine(next_node_id, parent_text, tokens, meta_data)
                             self._handle_expr_conclusion_node(node_data, parent_text)
-                        else:
-                            self.handle_warning(parent_text)
+                        # The fixed matcher list exhausts warning, value, and expression cases.
+                        # No fallback branch is reachable here.
                         
                         self._parent_node_data_set(node_data, line_number, meta_data)
                         break
@@ -629,8 +629,8 @@ class RuleSetParser(IScanFeeder, ABC):
                         node_data = IterateLine(next_node_id, child_text, tokens)
                     elif line_kind == "expression":
                         node_data = ExprConclusionLine(next_node_id, child_text, tokens)
-                    else:
-                        self.handle_warning(child_text)
+                    # The fixed matcher table exhausts every declared line kind.
+                    # No fallback branch is reachable here.
                     
                     if node_data:
                         node_data.set_node_line(line_number)

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from src.adapters.outbound.persistence.aegis_event_ledger_repository import AegisEventLedgerRepository
+from src.ports.aegis_repository_ports import AegisEventLedgerPort
 from src.domain.aegis.autonomy import (
     CERTIFIED_CONFIDENCE_THRESHOLD,
     evaluate_autonomy_enforcement,
@@ -115,7 +115,7 @@ AUTHORITATIVE_FACT_CLASSES = {"asserted", "inferred"}
 class AegisPhase3RuntimeService:
     """State-aware facade over the persistent AEGIS event ledger."""
 
-    def __init__(self, repository: AegisEventLedgerRepository):
+    def __init__(self, repository: AegisEventLedgerPort):
         self._repository = repository
 
     def create_action_proposal(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -1883,12 +1883,12 @@ def _policy_overlap(target_policy: dict[str, Any], candidate_policy: dict[str, A
 
 
 def _evidence_completeness_similarity(target: dict[str, Any], candidate: dict[str, Any]) -> float:
-    target_completeness = _evidence_completeness(target)
-    candidate_completeness = _evidence_completeness(candidate)
+    target_completeness = _evidence_completeness_ratio(target)
+    candidate_completeness = _evidence_completeness_ratio(candidate)
     return 1.0 - abs(target_completeness - candidate_completeness)
 
 
-def _evidence_completeness(snapshot: dict[str, Any]) -> float:
+def _evidence_completeness_ratio(snapshot: dict[str, Any]) -> float:
     evidence = _dict_value(snapshot.get("evidence"))
     refs = _string_list(evidence.get("refs"))
     hashes = _dict_value(evidence.get("hashes"))

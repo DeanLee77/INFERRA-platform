@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session as DbSession
 
-from src.adapters.inbound.http.dependencies import get_db_session
+from src.adapters.inbound.http.dependencies import get_db_session, require_scope
 from src.adapters.outbound.persistence.llm_product_configuration_repository import (
     LLMProductConfigurationRepository,
 )
@@ -34,6 +34,7 @@ from src.domain.nodes.line_type import LineType
 from src.domain.session import InferenceContext
 from src.domain.state import FactSource
 from src.domain.state.feature_flags import (
+    FeatureFlags,
     ONTOLOGY_ASSISTANCE_PROFILES,
     get_feature_flags,
     normalize_ontology_profile,
@@ -80,6 +81,9 @@ from src.adapters.inbound.http.schemas.ontology_artifacts import (
 from src.services.rule_service import RuleService
 from src.adapters.inbound.http.dependencies import get_session_store, get_rule_repository
 from src.services.llm_configuration_service import LLMConfigurationService
+from src.services.inference_orchestration_service import (
+    get_inference_orchestration_service,
+)
 
 import structlog
 
@@ -238,6 +242,27 @@ def _session_context(session: InferenceSession) -> InferenceContext:
             else {}
         ),
     ))
+
+
+def _session_feature_flags(session: InferenceSession) -> FeatureFlags:
+    """Return the frozen session snapshot, with a legacy-session fallback."""
+    return session.feature_flags or get_feature_flags()
+
+
+def _enriched_question_suggestions(
+    context: Optional[InferenceContext],
+    question: str,
+) -> List[Dict[str, Any]]:
+    if context is None:
+        return []
+    suggestions: List[Dict[str, Any]] = []
+    for mapping in (
+        context.ontology_advisory_suggestions,
+        context.ontology_value_suggestions,
+        context.ontology_constraint_suggestions,
+    ):
+        suggestions.extend(dict(item) for item in mapping.get(question, ()))
+    return suggestions
 
 
 def _refresh_session_context(
@@ -489,6 +514,7 @@ async def list_sessions(
     "/sessions",
     response_model=SessionCreateResponse,
     responses={404: {"model": ErrorResponse}, 400: {"model": ErrorResponse}},
+    dependencies=[Depends(require_scope("inference:write"))],
 )
 async def create_session(
     request: SessionCreateRequest,
@@ -517,6 +543,7 @@ async def create_session(
 @router.delete(
     "/sessions/{session_id}",
     response_model=SessionDeleteResponse,
+    dependencies=[Depends(require_scope("inference:write"))],
 )
 async def delete_session(
     session_id: str,
@@ -536,6 +563,7 @@ async def delete_session(
     "/sessions/ml",
     response_model=SessionCreateResponse,
     responses={404: {"model": ErrorResponse}, 400: {"model": ErrorResponse}},
+    dependencies=[Depends(require_scope("inference:write"))],
 )
 async def create_ml_session(
     request: MLSessionCreateRequest,
@@ -579,12 +607,38 @@ async def get_next_question(
     next_question_node = inference_engine.get_next_question_with_goal_name(target_node_name)
 
     if next_question_node is None:
+        convergence_state = _convergence_state(session)
+        if convergence_state != "GOAL_REACHED":
+            try:
+                result = (
+                    await get_inference_orchestration_service()
+                    .evaluate_stalled_session(session)
+                )
+                if result.reason != "PENDING":
+                    convergence_state = result.reason
+                else:
+                    convergence_state = _convergence_state(session)
+            except Exception:
+                logger.exception(
+                    "stalled_session_orchestration_failed",
+                    session_id=session_id,
+                )
         _save_session_or_409(session_service, session)
+        goal_reached = convergence_state == "GOAL_REACHED"
         return NextQuestionResponse(
             session_id=session_id,
             questions=[],
             has_more_questions=False,
-            convergence_state=_convergence_state(session),
+            convergence_state=convergence_state,
+            question_flow_state=(
+                "GOAL_REACHED" if goal_reached else "BLOCKED_INCONSISTENT_STATE"
+            ),
+            blocked_reason=None if goal_reached else "NO_ASKABLE_QUESTION",
+            blocked_detail=(
+                None
+                if goal_reached
+                else "The goal is unresolved, but no askable question remains."
+            ),
         )
 
     iterate_progress: Optional[IterateProgress] = None
@@ -611,6 +665,8 @@ async def get_next_question(
 
     question_types = inference_engine.find_type_of_element_to_be_asked(next_question_node)
     questions = inference_engine.get_questions_from_node_to_be_asked(next_question_node)
+    flags = _session_feature_flags(session)
+    enriched_context = _session_context(session) if flags.enriched_api else None
 
     question_items = []
     for question in questions:
@@ -622,6 +678,10 @@ async def get_next_question(
             control="select" if options else None,
             options=options,
             selection_mode="single" if options else None,
+            semantic_suggestions=_enriched_question_suggestions(
+                enriched_context,
+                question,
+            ),
         ))
 
     working_memory = inference_engine.get_assessment_state().get_working_memory()
@@ -643,6 +703,7 @@ async def get_next_question(
     "/feed-answer",
     response_model=FeedAnswerResponse,
     responses={404: {"model": ErrorResponse}, 400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    dependencies=[Depends(require_scope("inference:write"))],
 )
 async def feed_answer(
     request: FeedAnswerRequest,
@@ -769,6 +830,13 @@ async def feed_answer(
         )
 
     _save_session_or_409(session_service, session)
+    if not response.has_more_questions:
+        _run_ontology_post_reasoning(
+            session_id=session_id,
+            rule_name=session.rule_name,
+            assessment_state=inference_engine.get_assessment_state(),
+            feature_flags=session.feature_flags or get_feature_flags(),
+        )
     if cache_key:
         _idempotency_store.put(cache_key, response)
     return response
@@ -778,6 +846,7 @@ async def feed_answer(
     "/defer-question",
     response_model=DeferQuestionResponse,
     responses={404: {"model": ErrorResponse}, 400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    dependencies=[Depends(require_scope("inference:write"))],
 )
 async def defer_question(
     request: DeferQuestionRequest,
@@ -846,26 +915,40 @@ async def defer_question(
     )
 
 
-def _run_ontology_post_reasoning(session_id: str, rule_name: str, assessment_state: Any) -> None:
+def _run_ontology_post_reasoning(
+    session_id: str,
+    rule_name: str,
+    assessment_state: Any,
+    feature_flags: FeatureFlags,
+) -> Optional[Dict[str, str]]:
     fact_store = assessment_state.get_fact_store()
     concluded_facts = []
     for source in (FactSource.INFERRED, FactSource.LEARNED, FactSource.HYPOTHETICAL):
         for name, fact_value in fact_store.get_layer_snapshot(source).items():
             concluded_facts.append({"name": name, "value": fact_value})
     if not concluded_facts:
-        return
-    run_post_reasoning(
-        session_id=session_id,
-        rule_name=rule_name,
-        concluded_facts=concluded_facts,
-        feature_flags=get_feature_flags(),
-    )
+        return None
+    try:
+        return run_post_reasoning(
+            session_id=session_id,
+            rule_name=rule_name,
+            concluded_facts=concluded_facts,
+            feature_flags=feature_flags,
+        )
+    except Exception:
+        logger.exception(
+            "ontology_post_reasoning_publish_failed",
+            session_id=session_id,
+            rule_name=rule_name,
+        )
+        return None
 
 
 @router.post(
     "/reset-answer",
     response_model=EditAnswerResponse,
     responses={404: {"model": ErrorResponse}, 400: {"model": ErrorResponse}},
+    dependencies=[Depends(require_scope("inference:write"))],
 )
 async def reset_answer(
     request: ResetAnswerRequest,
@@ -926,25 +1009,31 @@ async def get_summary(
     assessment_state = inference_engine.get_assessment_state()
     working_memory = assessment_state.get_working_memory()
     summary_list = assessment_state.get_summary_list()
+    flags = _session_feature_flags(session)
 
     fact_sources_map: Dict[str, str] = {}
-    try:
-        from src.domain.state.fact_source import FactSource
-        for name in working_memory:
-            sources = assessment_state.get_fact_store().get_fact_sources(name)
-            if sources:
-                if FactSource.ASSERTED in sources:
-                    fact_sources_map[name] = FactSource.ASSERTED.value
-                elif FactSource.INFERRED in sources:
-                    fact_sources_map[name] = FactSource.INFERRED.value
-                elif FactSource.LEARNED in sources:
-                    fact_sources_map[name] = FactSource.LEARNED.value
-                elif FactSource.HYPOTHETICAL in sources:
-                    fact_sources_map[name] = FactSource.HYPOTHETICAL.value
-                elif FactSource.SEMANTIC in sources:
-                    fact_sources_map[name] = FactSource.SEMANTIC.value
-    except Exception:
-        logger.warning("fact_source_lookup_failed", session_id=session_id, exc_info=True)
+    if flags.enriched_api:
+        try:
+            from src.domain.state.fact_source import FactSource
+            for name in working_memory:
+                sources = assessment_state.get_fact_store().get_fact_sources(name)
+                if sources:
+                    if FactSource.ASSERTED in sources:
+                        fact_sources_map[name] = FactSource.ASSERTED.value
+                    elif FactSource.INFERRED in sources:
+                        fact_sources_map[name] = FactSource.INFERRED.value
+                    elif FactSource.LEARNED in sources:
+                        fact_sources_map[name] = FactSource.LEARNED.value
+                    elif FactSource.HYPOTHETICAL in sources:
+                        fact_sources_map[name] = FactSource.HYPOTHETICAL.value
+                    elif FactSource.SEMANTIC in sources:
+                        fact_sources_map[name] = FactSource.SEMANTIC.value
+        except Exception:
+            logger.warning(
+                "fact_source_lookup_failed",
+                session_id=session_id,
+                exc_info=True,
+            )
 
     summary_items = []
 
@@ -976,17 +1065,17 @@ async def get_summary(
     else:
         paginated = summary_items[offset:]
 
-    ctx = _session_context(session)
+    ctx = _session_context(session) if flags.enriched_api else None
     return SummaryResponse(
         session_id=session_id,
         summary=paginated,
         total_count=total_count,
         offset=offset,
         limit=limit,
-        reasoning_mode=ctx.reasoning_mode,
-        confidence=ctx.confidence,
+        reasoning_mode=ctx.reasoning_mode if ctx is not None else "DEDUCTION",
+        confidence=ctx.confidence if ctx is not None else 1.0,
         status=_convergence_state(session),
-        origin_job_id=ctx.induction_job_id,
+        origin_job_id=ctx.induction_job_id if ctx is not None else None,
     )
 
 
@@ -1006,6 +1095,12 @@ async def get_trace(
     session: InferenceSession = Depends(_get_session_or_404),
 ) -> TraceResponse:
     logger.info("getting_trace", session_id=session_id, trace_format=trace_format)
+    flags = _session_feature_flags(session)
+    if not flags.prov_o_trace:
+        raise HTTPException(
+            status_code=503,
+            detail="PROV-O trace generation is disabled for this session",
+        )
     ctx = _session_context(session)
     normalized_format = "json-ld" if trace_format == "jsonld" else trace_format
     try:
@@ -1017,8 +1112,8 @@ async def get_trace(
         session_id=session_id,
         format=normalized_format,
         trace=trace,
-        reasoning_mode=ctx.reasoning_mode,
-        confidence=ctx.confidence,
+        reasoning_mode=ctx.reasoning_mode if flags.enriched_api else "DEDUCTION",
+        confidence=ctx.confidence if flags.enriched_api else 1.0,
     )
 
 

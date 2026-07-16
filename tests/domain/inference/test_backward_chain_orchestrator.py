@@ -7,6 +7,7 @@ from src.domain.reasoning import Hypothesis, ReasoningRouter
 from src.domain.session import InferenceContext, SessionManager
 from src.domain.state import FactSource, LayeredFactStore
 from src.adapters.outbound.reasoning.mock_abduction_adapter import MockAbductionAdapter
+from src.adapters.outbound.reasoning.mock_induction_adapter import MockInductionAdapter
 
 
 def _manager_with_goal():
@@ -85,3 +86,35 @@ async def test_orchestrator_injects_abduction_hypothesis_under_lock():
     assert store.peek_in_layer("goal", FactSource.HYPOTHETICAL).get_value() is True
     assert ctx.abduction_attempted is True
     assert "ABDUCTION_INJECTED" in result.convergence_trace
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_starts_induction_once_when_deduction_stalls():
+    manager = SessionManager()
+    store = LayeredFactStore()
+    ctx = InferenceContext(
+        session_id="s1",
+        rule_name="rule",
+        target="goal",
+        mandatory=[],
+        fact_store=store,
+    )
+    manager.create_snapshot("s1", ctx)
+    router = ReasoningRouter(
+        MockAbductionAdapter([]),
+        induction=MockInductionAdapter(),
+        abduction_enabled=False,
+        induction_pipeline=True,
+    )
+    orchestrator = BackwardChainOrchestrator(
+        InferenceEngine(),
+        manager,
+        reasoning_router=router,
+    )
+
+    result = await orchestrator.run_convergence_loop("s1", max_iterations=3)
+
+    assert result.converged is False
+    assert ctx.induction_job_id == "mock-induction-1"
+    assert ctx.reasoning_mode == "INDUCTION"
+    assert result.convergence_trace.count("INDUCTION_STARTED") == 1

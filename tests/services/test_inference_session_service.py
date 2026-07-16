@@ -200,6 +200,28 @@ class TestInferenceSessionService:
                 target_node_name="invalid_goal",
                 node_set=mock_node_set,
             )
+
+    @pytest.mark.parametrize(
+        "key",
+        ["use_hypergraph", "layered_memory", "strict_port_contracts"],
+    )
+    def test_create_session_rejects_unsupported_runtime_profile(
+        self,
+        inference_session_service,
+        key,
+    ):
+        node_set = MagicMock()
+        node_set.get_node_dictionary.return_value = {"test_goal": MagicMock()}
+
+        with patch(
+            "src.domain.inference.session_service.get_feature_flags",
+            return_value=FeatureFlags(**{key: False}),
+        ), pytest.raises(RuntimeError, match=rf"{key} must be true"):
+            inference_session_service.create_session(
+                rule_name="test_rule",
+                target_node_name="test_goal",
+                node_set=node_set,
+            )
     
     def test_create_session_from_rule_success(self, inference_session_service, mock_session_store):
         """Test creating a session from a rule."""
@@ -216,7 +238,10 @@ class TestInferenceSessionService:
         mock_inference_engine = MagicMock()
         mock_inference_engine.get_node_set.return_value = mock_node_set
         
-        with patch("src.domain.inference.session_service.InferenceEngine") as mock_engine_class, \
+        with patch(
+            "src.domain.inference.session_service.get_feature_flags",
+            return_value=FeatureFlags(ml_optimized_dfs=True),
+        ), patch("src.domain.inference.session_service.InferenceEngine") as mock_engine_class, \
              patch("src.domain.inference.session_service.Assessment"):
             
             mock_engine_class.return_value = mock_inference_engine
@@ -236,6 +261,43 @@ class TestInferenceSessionService:
                 "test_rule",
                 {"history": "data"},
             )
+
+    def test_create_session_from_rule_ignores_history_when_ml_dfs_disabled(
+        self,
+        inference_session_service,
+    ):
+        mock_node_set = MagicMock()
+        mock_node_set.get_node_dictionary.return_value = {"test_goal": MagicMock()}
+        mock_parser = MagicMock()
+        mock_parser.get_node_set.return_value = mock_node_set
+        mock_rule_service = MagicMock()
+        mock_rule_service.get_history_for_ml_inference.return_value = {
+            "history": "data"
+        }
+        mock_rule_service.build_rule_set_parser.return_value = mock_parser
+        mock_inference_engine = MagicMock()
+        mock_inference_engine.get_node_set.return_value = mock_node_set
+
+        with patch(
+            "src.domain.inference.session_service.get_feature_flags",
+            return_value=FeatureFlags(ml_optimized_dfs=False),
+        ), patch(
+            "src.domain.inference.session_service.InferenceEngine",
+            return_value=mock_inference_engine,
+        ), patch("src.domain.inference.session_service.Assessment"):
+            inference_session_service.create_session_from_rule(
+                rule_name="test_rule",
+                target_node_name="test_goal",
+                rule_service=mock_rule_service,
+            )
+
+        mock_rule_service.get_history_for_ml_inference.assert_called_once_with(
+            "test_rule"
+        )
+        mock_rule_service.build_rule_set_parser.assert_called_once_with(
+            "test_rule",
+            None,
+        )
     
     def test_create_session_from_rule_with_history(self, inference_session_service, mock_session_store):
         """Test creating an ML-enhanced session from a rule."""

@@ -6,7 +6,7 @@ from src.domain.inference.backward_chain_orchestrator import BackwardChainOrches
 from src.domain.inference.inference_engine import InferenceEngine
 from src.domain.inference.legacy_orchestrator import LegacyOrchestrator
 from src.domain.inference.question_strategy import ConservativeQuestionStrategy
-from src.domain.state.feature_flags import FeatureFlags
+from src.domain.state.feature_flags import FeatureFlags, get_feature_flags
 from src.ports.question_strategy_port import QuestionStrategyPort
 from src.ports.session_manager_port import SessionManagerPort
 
@@ -22,7 +22,7 @@ def create_orchestrator(
     feature_flags: Optional[FeatureFlags] = None,
 ) -> Any:
     """Create the inference orchestrator selected by sticky feature flags."""
-    flags = feature_flags if feature_flags is not None else FeatureFlags()
+    flags = feature_flags if feature_flags is not None else get_feature_flags()
     if flags.hybrid_orchestrator:
         selected = BackwardChainOrchestrator(
             engine=engine,
@@ -44,4 +44,3 @@ def create_orchestrator(
         implementation=implementation,
     )
     return selected
-

@@ -80,7 +80,7 @@
       "audience": ["authoring_page", "fraud_reviewer", "workflow_reviewer"],
       "featureTags": ["fraud", "provider-verification", "payment-hold", "clinical-review", "trigger"],
       "authoringSurface": {
-        "section": "Fraud examples",
+        "section": "Trigger policies",
         "searchTerms": ["provider", "Ahpra", "ABN", "HPOS", "payment hold", "clinical review"],
         "recommendedPrimaryPath": "docs/reference/examples/fraud/provider_payment_hold_action_policy.json"
       },
@@ -103,6 +103,11 @@
         {
           "label": "Payment hold action policy",
           "path": "docs/reference/examples/fraud/provider_payment_hold_action_policy.json",
+          "mediaType": "application/json"
+        },
+        {
+          "label": "Payment hold outcome trigger request",
+          "path": "docs/reference/examples/fraud/provider_payment_hold_trigger_request.json",
           "mediaType": "application/json"
         },
         {

@@ -339,6 +339,17 @@ class TestHealthEndpointIntegration:
         data = response.json()
         assert data == {"status": "ok", "version": "2.0.0"}
 
+    def test_effective_feature_flag_report_is_complete_and_redaction_safe(self):
+        response = self.client.get("/api/v1/system/feature-flags")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["process_role"] == "api"
+        assert data["flag_count"] == 28
+        assert len(data["snapshot_hash"]) == 64
+        assert set(data["effective"]) == set(data["canonical_defaults"])
+        assert "legacy_retirement" in data
+
     def test_root_endpoint_returns_service_metadata(self):
         response = self.client.get("/")
         assert response.status_code == 200

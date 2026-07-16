@@ -1,0 +1,280 @@
+IMPORT: drca_part_i_sections_1_to_13a
+
+FIXED Defence Related Claims Act IS "Safety, Rehabilitation and Compensation (Defence-related Claims) Act 1988"
+FIXED DVA policy update requirement IS "Update manually when DVA operational policy or indexation changes"
+FIXED initial incapacity period weeks IS 45
+FIXED permanent impairment minimum threshold percentage IS 10
+FIXED DVA medical provider status AS LIST
+    ITEM approved medical practitioner
+    ITEM approved hospital
+    ITEM unapproved provider
+    ITEM emergency provider
+FIXED DVA incapacity status AS LIST
+    ITEM current employee
+    ITEM former employee
+    ITEM reservist
+    ITEM other
+FIXED DVA dependant status AS LIST
+    ITEM wholly dependent
+    ITEM partly dependent
+    ITEM not dependent
+
+INPUT property damaged in course of employment AS BOOLEAN
+INPUT medical treatment obtained AS BOOLEAN
+INPUT medical provider status AS LIST
+    ITEM approved medical practitioner
+    ITEM approved hospital
+    ITEM unapproved provider
+    ITEM emergency provider
+INPUT medical costs are reasonable AS BOOLEAN
+INPUT normal weekly earnings AS NUMBER
+INPUT actual earnings AS NUMBER
+INPUT weeks of incapacity AS NUMBER
+INPUT incapacity status AS LIST
+    ITEM current employee
+    ITEM former employee
+    ITEM reservist
+    ITEM other
+INPUT reserve earnings component AS NUMBER
+INPUT superannuation pension received AS BOOLEAN
+INPUT superannuation lump sum received AS BOOLEAN
+INPUT superannuation adjustment amount AS NUMBER
+INPUT degree of permanent impairment assessed AS BOOLEAN
+INPUT impairment points AS NUMBER
+INPUT impairment is permanent AS BOOLEAN
+INPUT interim impairment assessment required AS BOOLEAN
+INPUT death resulted from injury or disease AS BOOLEAN
+INPUT dependant status AS LIST
+    ITEM wholly dependent
+    ITEM partly dependent
+    ITEM not dependent
+INPUT funeral expenses incurred AS BOOLEAN
+INPUT funeral expenses amount AS NUMBER
+INPUT common law action initiated against Commonwealth AS BOOLEAN
+INPUT damages recovered from third party AS BOOLEAN
+INPUT damages amount recovered AS NUMBER
+INPUT commission determination required AS BOOLEAN
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 14 - Compensation for injuries
+# Original: Where an employee suffers an injury resulting in death, incapacity for work, or permanent impairment, Comcare (or the MRCC for defence members) is liable to pay compensation in accordance with this Part.
+DRCA liability to pay compensation established
+    AND DRCA part I sections 1 to 13A convergence met
+    AND claim for compensation lodged
+    AND MANDATORY commission determination required
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 15 - Compensation for property loss or damage
+# Original: Compensation is payable for the loss or damage to property (e.g., clothing, medical aids, or vehicles) that occurred in the course of the employee's employment or as a result of an accepted injury.
+DRCA property loss or damage compensation met
+    AND DRCA liability to pay compensation established
+    AND property damaged in course of employment
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 16 - Compensation in respect of medical treatment
+# Original: Where an employee suffers an accepted injury, the relevant authority is liable to pay compensation in respect of the cost of medical treatment obtained in relation to the injury.
+DRCA medical treatment compensation payable
+    AND DRCA liability to pay compensation established
+    AND medical treatment obtained
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 17 - Compensation in respect of medical treatment—practical arrangements
+# Original: Medical treatment must be provided by an approved medical practitioner or approved hospital, except in emergencies or where specific Commission approval is granted.
+DRCA medical treatment practical arrangements met
+    AND DRCA medical treatment compensation payable
+    AND provider pathway virtual ONE
+        OR approved provider path
+            AND medical provider status = "approved medical practitioner"
+        OR approved hospital path
+            AND medical provider status = "approved hospital"
+        OR emergency provider path
+            AND medical provider status = "emergency provider"
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 18 - Compensation in respect of medical treatment—amount
+# Original: The amount of compensation payable for medical treatment is the amount that the relevant authority determines to be reasonable in the circumstances, often guided by scheduled medical fees.
+DRCA medical treatment amount calculated
+    AND DRCA medical treatment practical arrangements met
+    AND medical costs are reasonable
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 19 - Compensation in respect of incapacity for work—preliminary
+# Original: Establishes the preliminary definitions and framework for calculating incapacity payments, specifically defining Normal Weekly Earnings (NWE) and Actual Earnings (AE).
+DRCA incapacity for work preliminary met
+    AND DRCA liability to pay compensation established
+    AND KNOWN normal weekly earnings
+    AND KNOWN actual earnings
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 20 - Incapacity for work—employees who are not former employees
+# Original: For current employees, the incapacity payment is calculated as the difference between their Normal Weekly Earnings (NWE) and their Actual Earnings (AE) while incapacitated.
+DRCA incapacity for current employees calculated
+    AND DRCA incapacity for work preliminary met
+    AND incapacity status = "current employee"
+    AND normal weekly earnings >= actual earnings
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 21 - Incapacity for work—former employees
+# Original: For former employees, the compensation rate steps down after the first 45 weeks of incapacity. For the first 45 weeks, it is 100% of NWE minus AE; thereafter, it steps down to 75% of NWE minus AE.
+DRCA incapacity step down percentage IS CALC (weeks of incapacity <= initial incapacity period weeks ? 100 : 75)
+    NEEDS weeks of incapacity
+    NEEDS initial incapacity period weeks
+
+DRCA incapacity for former employees calculated
+    AND DRCA incapacity for work preliminary met
+    AND incapacity status = "former employee"
+    AND KNOWN DRCA incapacity step down percentage
+    AND normal weekly earnings >= actual earnings
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 22 - Incapacity for work—members of the Reserve forces
+# Original: For Reservists, Normal Weekly Earnings (NWE) includes a specific reserve earnings component that combines their civilian employment income with their reserve service pay to ensure accurate compensation.
+DRCA incapacity for reservists calculated
+    AND DRCA incapacity for work preliminary met
+    AND incapacity status = "reservist"
+    AND KNOWN reserve earnings component
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 23 - Incapacity for work—other cases and superannuation offsets
+# Original: Covers specific edge cases for incapacity and mandates that if a former employee receives a superannuation pension or lump sum, the incapacity payment must be reduced by a prescribed statutory adjustment amount to prevent dual compensation.
+DRCA incapacity other cases and superannuation offsets applied
+    AND DRCA incapacity for work preliminary met
+    AND incapacity status = "other"
+    AND superannuation pathway virtual ONE
+        OR superannuation pension path
+            AND superannuation pension received
+            AND KNOWN superannuation adjustment amount
+        OR superannuation lump sum path
+            AND superannuation lump sum received
+            AND KNOWN superannuation adjustment amount
+        OR no superannuation path
+            AND NOT superannuation pension received
+            AND NOT superannuation lump sum received
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 24 - Compensation for permanent impairment
+# Original: Where an injury results in a permanent impairment, the relevant authority is liable to pay compensation. However, no compensation is payable unless the degree of permanent impairment is at least 10%.
+DRCA permanent impairment compensation payable
+    AND DRCA liability to pay compensation established
+    AND degree of permanent impairment assessed
+    AND impairment is permanent
+    AND impairment points >= permanent impairment minimum threshold percentage
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 25 - Interim compensation for permanent impairment
+# Original: If the degree of permanent impairment cannot be finally determined but is assessed at 10% or more, an interim payment may be made based on the preliminary assessment.
+DRCA interim permanent impairment compensation payable
+    AND DRCA liability to pay compensation established
+    AND interim impairment assessment required
+    AND impairment points >= permanent impairment minimum threshold percentage
+    AND NOT impairment is permanent
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 26 - Compensation for permanent impairment—former employees
+# Original: Specific calculation rules apply to former employees to ensure their permanent impairment lump sums are correctly indexed and adjusted for any prior interim payments.
+DRCA permanent impairment for former employees calculated
+    AND DRCA permanent impairment compensation payable
+    AND incapacity status = "former employee"
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 27 - Compensation for permanent impairment—members of the Reserve forces
+# Original: Specific calculation rules apply to Reservists to account for their dual civilian and military earnings baselines when assessing non-economic loss.
+DRCA permanent impairment for reservists calculated
+    AND DRCA permanent impairment compensation payable
+    AND incapacity status = "reservist"
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 28 - Compensation for permanent impairment—other cases
+# Original: Covers the calculation of permanent impairment compensation for all other employee categories not explicitly defined as former employees or reservists.
+DRCA permanent impairment other cases calculated
+    AND DRCA permanent impairment compensation payable
+    AND incapacity status = "other"
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 29 - Compensation in respect of death
+# Original: Where an injury results in the death of the employee, the relevant authority is liable to pay compensation to the dependants of the deceased employee.
+DRCA death compensation payable
+    AND DRCA liability to pay compensation established
+    AND death resulted from injury or disease
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 30 - Payments to dependants
+# Original: The compensation for death is distributed among the dependants (wholly or partly dependent) according to their level of financial reliance on the deceased member.
+DRCA payments to dependants calculated
+    AND DRCA death compensation payable
+    AND dependant status IS IN LIST: DVA dependant status
+    AND NOT dependant status = "not dependent"
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 31 - Funeral expenses
+# Original: The relevant authority is liable to pay a lump sum for funeral expenses incurred by the dependants or the estate of the deceased employee, up to the prescribed statutory maximum.
+DRCA funeral expenses payable
+    AND DRCA death compensation payable
+    AND funeral expenses incurred
+    AND funeral expenses amount > 0
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 32 - Exclusion of compensation where action brought against Commonwealth or licensed corporation
+# Original: If an employee or dependant brings a common law action for damages against the Commonwealth or a licensed corporation in respect of an injury, statutory compensation under this Part is strictly excluded or suspended to prevent dual recovery.
+DRCA exclusion where action brought applied
+    AND common law action initiated against Commonwealth
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 33 - Recovery of damages adjustments
+# Original: Where an employee recovers damages from a third party in respect of an injury, the relevant authority may reduce, suspend, or recover the statutory compensation already paid to prevent double-dipping.
+DRCA recovery of damages adjustments applied
+    AND damages recovered from third party
+    AND damages amount recovered > 0
+    AND MANDATORY commission determination required
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: DRCA Part II Sections 14 to 33 Convergence [ENGINE CONSTRUCT - NOT LEGISLATIVE]
+# Original: Structural checkpoint to ensure liability, property loss, medical treatment, incapacity (including 45-week step-downs and superannuation offsets), permanent impairment (including the 10% threshold), death benefits, and common law exclusions are evaluated deterministically before proceeding to DRCA Part III (Rehabilitation).
+DRCA part II sections 14 to 33 convergence met
+    AND liability and property gateway met
+        AND DRCA liability to pay compensation established
+        AND property evaluation virtual ONE
+            OR property damaged path
+                AND DRCA property loss or damage compensation met
+            OR no property damage path
+                AND NOT property damaged in course of employment
+    AND medical treatment gateway met
+        AND medical evaluation virtual ONE
+            OR treatment payable path
+                AND DRCA medical treatment amount calculated
+            OR no treatment path
+                AND NOT medical treatment obtained
+    AND incapacity gateway met
+        AND incapacity evaluation virtual ONE
+            OR current employee path
+                AND DRCA incapacity for current employees calculated
+            OR former employee path
+                AND DRCA incapacity for former employees calculated
+            OR reservist path
+                AND DRCA incapacity for reservists calculated
+            OR other cases path
+                AND DRCA incapacity other cases and superannuation offsets applied
+    AND permanent impairment gateway met
+        AND impairment evaluation virtual ONE
+            OR final impairment path
+                AND DRCA permanent impairment compensation payable
+            OR interim impairment path
+                AND DRCA interim permanent impairment compensation payable
+            OR below threshold path
+                AND impairment points < permanent impairment minimum threshold percentage
+    AND death and common law gateway met
+        AND death evaluation virtual ONE
+            OR death payable path
+                AND DRCA payments to dependants calculated
+                AND DRCA funeral expenses payable
+            OR no death path
+                AND NOT death resulted from injury or disease
+        AND common law evaluation virtual ONE
+            OR action brought path
+                AND DRCA exclusion where action brought applied
+            OR damages recovered path
+                AND DRCA recovery of damages adjustments applied
+            OR no common law path
+                AND NOT common law action initiated against Commonwealth
+                AND NOT damages recovered from third party
+    AND MANDATORY commission determination required

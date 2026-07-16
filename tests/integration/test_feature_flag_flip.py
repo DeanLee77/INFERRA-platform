@@ -78,7 +78,7 @@ class TestFlagFreezeAtSessionStart:
             feature_flags_module,
             "_default_flags",
             FeatureFlags(
-                use_hypergraph=False,
+                use_hypergraph=True,
                 legacy_iterate=True,
                 layered_memory=True,
                 ml_optimized_dfs=True,
@@ -97,7 +97,7 @@ class TestFlagFreezeAtSessionStart:
 
         assert session.feature_flags is not None
         assert session.feature_flags.is_frozen() is True
-        assert session.feature_flags.use_hypergraph is False
+        assert session.feature_flags.use_hypergraph is True
         assert session.feature_flags.legacy_iterate is True
         assert session.feature_flags.ml_optimized_dfs is True
         assert session.feature_flags.async_sync_enabled is True
@@ -107,7 +107,12 @@ class TestFlagFreezeAtSessionStart:
         monkeypatch.setattr(
             feature_flags_module,
             "_default_flags",
-            FeatureFlags(use_hypergraph=False, legacy_iterate=True, layered_memory=True),
+            FeatureFlags(
+                use_hypergraph=True,
+                legacy_iterate=True,
+                layered_memory=True,
+                modular_imports=False,
+            ),
         )
 
         ns = _node_set_with_target()
@@ -122,12 +127,18 @@ class TestFlagFreezeAtSessionStart:
         monkeypatch.setattr(
             feature_flags_module,
             "_default_flags",
-            FeatureFlags(use_hypergraph=True, legacy_iterate=False, layered_memory=True),
+            FeatureFlags(
+                use_hypergraph=True,
+                legacy_iterate=False,
+                layered_memory=True,
+                modular_imports=True,
+            ),
         )
 
         # Session A keeps its frozen snapshot
-        assert session_a.feature_flags.use_hypergraph is False
+        assert session_a.feature_flags.use_hypergraph is True
         assert session_a.feature_flags.legacy_iterate is True
+        assert session_a.feature_flags.modular_imports is False
 
         # Session B sees the new flags
         session_b = service.create_session(
@@ -137,6 +148,7 @@ class TestFlagFreezeAtSessionStart:
         )
         assert session_b.feature_flags.use_hypergraph is True
         assert session_b.feature_flags.legacy_iterate is False
+        assert session_b.feature_flags.modular_imports is True
 
     def test_engine_and_session_share_the_same_frozen_flags(self, monkeypatch):
         monkeypatch.setattr(
@@ -293,7 +305,7 @@ class TestFrozenFlagsImmutability:
         monkeypatch.setattr(
             feature_flags_module,
             "_default_flags",
-            FeatureFlags(use_hypergraph=False, legacy_iterate=True, layered_memory=True),
+            FeatureFlags(use_hypergraph=True, legacy_iterate=True, layered_memory=True),
         )
 
         ns = _node_set_with_target()
@@ -309,4 +321,4 @@ class TestFrozenFlagsImmutability:
         # Building a fresh global FeatureFlags doesn't unfreeze the session's instance
         feature_flags_module._default_flags = FeatureFlags(use_hypergraph=True)
         assert session.feature_flags.is_frozen() is True
-        assert session.feature_flags.use_hypergraph is False
+        assert session.feature_flags.use_hypergraph is True

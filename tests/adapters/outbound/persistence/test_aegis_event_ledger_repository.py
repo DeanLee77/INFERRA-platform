@@ -1,4 +1,7 @@
+from unittest.mock import MagicMock
+
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -7,6 +10,9 @@ from src.adapters.outbound.persistence import database
 from src.adapters.outbound.persistence.aegis_event_ledger_repository import (
     AegisEventLedgerRepository,
     AegisEventSequenceError,
+    AegisIdempotencyConflictError,
+    _dict_value,
+    _string_list,
 )
 from src.adapters.outbound.persistence.models import (
     AegisActionProposalORM,
@@ -302,3 +308,134 @@ def test_correction_events_preserve_original_history_and_surface_snapshot_correc
         ]
     finally:
         db.close()
+
+
+def test_run_lookup_listing_validation_and_idempotency_conflict_paths():
+    db, repository = _repository()
+    try:
+        assert repository.get_workflow_run("missing") is None
+        assert repository.get_run_id_for_proposal("missing") is None
+        assert repository.list_workflow_runs() == []
+        assert repository.get_latest_snapshot("missing") is None
+        with pytest.raises(LookupError, match="workflow run 'missing'"):
+            repository.list_events("missing")
+        with pytest.raises(ValueError, match="event_type is required"):
+            repository.append_event(
+                run_id="missing", event_type=" ", idempotency_key="key"
+            )
+        with pytest.raises(ValueError, match="idempotency_key is required"):
+            repository.append_event(
+                run_id="missing", event_type="event", idempotency_key=" "
+            )
+        with pytest.raises(LookupError, match="event 'missing'"):
+            repository.append_correction(
+                run_id="missing",
+                corrects_event_id="missing",
+                idempotency_key="correction",
+                reason="reason",
+                patch={},
+            )
+
+        created = _create_run(repository)
+        assert created["runId"] == "run-robot-1"
+        assert repository.get_workflow_run("run-robot-1")["workflowId"] == "workflow-robot"
+        assert repository.get_run_id_for_proposal("proposal-robot-1") == "run-robot-1"
+        assert len(repository.list_workflow_runs()) == 1
+        assert len(repository.list_workflow_runs(workflow_id="workflow-robot")) == 1
+        assert repository.list_workflow_runs(workflow_id="other") == []
+        assert repository.get_latest_action_proposal("run-robot-1")["proposalId"] == "proposal-robot-1"
+        with pytest.raises(ValueError, match="already exists"):
+            _create_run(repository)
+
+        repository.append_event(
+            run_id="run-robot-1",
+            event_type="rule.evaluation.completed",
+            idempotency_key="same-key",
+            payload={"allowed": True},
+        )
+        with pytest.raises(AegisIdempotencyConflictError, match="different event content"):
+            repository.append_event(
+                run_id="run-robot-1",
+                event_type="rule.evaluation.completed",
+                idempotency_key="same-key",
+                payload={"allowed": False},
+            )
+    finally:
+        db.close()
+
+
+def test_latest_action_proposal_requires_a_proposal():
+    db, repository = _repository()
+    try:
+        db.add(
+            AegisWorkflowRunORM(
+                run_id="run-without-proposal",
+                workflow_id="workflow",
+            )
+        )
+        db.commit()
+
+        with pytest.raises(LookupError, match="action proposal"):
+            repository.get_latest_action_proposal("run-without-proposal")
+    finally:
+        db.close()
+
+
+def test_event_ledger_write_failures_roll_back(monkeypatch):
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter_by.return_value.first.return_value = None
+    mock_db.commit.side_effect = SQLAlchemyError("write failed")
+    repository = AegisEventLedgerRepository(mock_db)
+
+    with pytest.raises(SQLAlchemyError, match="write failed"):
+        repository.create_workflow_run(
+            run_id="run",
+            workflow_id="workflow",
+            workflow_version_id=None,
+            proposal_id="proposal",
+            proposal_payload={},
+        )
+    mock_db.rollback.assert_called_once_with()
+
+    mock_db.reset_mock()
+    mock_db.commit.side_effect = SQLAlchemyError("append failed")
+    run = MagicMock(status="running")
+    monkeypatch.setattr(repository, "_require_run", lambda _run_id: run)
+    monkeypatch.setattr(repository, "_event_by_idempotency", lambda *_args: None)
+    monkeypatch.setattr(repository, "_next_sequence", lambda _run_id: 1)
+    monkeypatch.setattr(repository, "_latest_event_hash", lambda _run_id: "genesis")
+    with pytest.raises(SQLAlchemyError, match="append failed"):
+        repository.append_event(
+            run_id="run",
+            event_type="event",
+            idempotency_key="key",
+        )
+    mock_db.rollback.assert_called_once_with()
+
+
+def test_snapshot_write_failure_rolls_back(monkeypatch):
+    db, repository = _repository()
+    try:
+        _create_run(repository)
+        rollback = MagicMock(wraps=db.rollback)
+        monkeypatch.setattr(db, "rollback", rollback)
+        monkeypatch.setattr(
+            db, "commit", MagicMock(side_effect=SQLAlchemyError("snapshot failed"))
+        )
+
+        with pytest.raises(SQLAlchemyError, match="snapshot failed"):
+            repository.materialize_session_snapshot("run-robot-1")
+
+        rollback.assert_called_once_with()
+    finally:
+        db.close()
+
+
+def test_event_ledger_collection_helpers_are_type_safe():
+    source = {"nested": {"value": 1}}
+    copied = _dict_value(source)
+    copied["nested"]["value"] = 2
+    assert source["nested"]["value"] == 1
+    assert _dict_value([("not", "a dict")]) == {}
+    assert _string_list("not a list") == []
+    assert _string_list([1, "two"]) == ["1", "two"]

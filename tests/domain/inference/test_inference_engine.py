@@ -1356,7 +1356,7 @@ incapacity preliminary met
         )
 
     def test_mrca_target_scoped_virtual_one_questions_do_not_leak_chapter_flow(self):
-        rule_path = Path("docs/reference/examples/mrca_chapter_1.txt")
+        rule_path = Path("docs/reference/examples/mrca/mrca_chapter_1.txt")
         node_set = _parse_node_set(
             rule_path.read_text(),
             "mrca_chapter_1_target_scope",
@@ -2862,6 +2862,43 @@ class TestCanEvaluate:
         node.get_tokens.return_value = Token(["AND"], [], "")
         result = engine._can_evaluate(node)
         assert result is False
+
+
+class TestEvaluateKnownLeafNode:
+    def test_symbolic_comparison_waits_for_rhs_input(self):
+        engine = InferenceEngine()
+        comparison = _make_node(
+            line_type=LineType.COMPARISON,
+            variable_name="normal weekly earnings",
+            node_name="normal weekly earnings >= actual earnings",
+        )
+        comparison.get_lhs.return_value = "normal weekly earnings"
+        comparison.get_rhs.return_value = FactValue(
+            "actual earnings",
+            FactValueType.STRING,
+        )
+        comparison.self_evaluate.return_value = FactValue(
+            True,
+            FactValueType.BOOLEAN,
+        )
+        node_set = _make_node_set(
+            nodes={comparison.get_node_name(): comparison},
+            edges=[],
+        )
+        engine.set_node_set(node_set)
+        state = engine.get_assessment_state()
+        state.set_fact("normal weekly earnings", FactValue(1000))
+
+        engine._evaluate_known_leaf_node(comparison.get_node_name())
+
+        comparison.self_evaluate.assert_not_called()
+        assert comparison.get_node_name() not in state.get_working_memory()
+
+        state.set_fact("actual earnings", FactValue(500))
+        engine._evaluate_known_leaf_node(comparison.get_node_name())
+
+        comparison.self_evaluate.assert_called_once()
+        assert state.get_working_memory()[comparison.get_node_name()].get_value() is True
 
 
 class TestAddChildRuleIntoInclusiveList:

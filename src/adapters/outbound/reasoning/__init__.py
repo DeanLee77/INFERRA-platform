@@ -1,5 +1,9 @@
 from src.adapters.outbound.reasoning.celery_induction_adapter import CeleryInductionAdapter
-from src.adapters.outbound.reasoning.factory import create_abduction_adapter, create_induction_adapter
+from src.adapters.outbound.reasoning.factory import (
+    create_abduction_adapter,
+    create_induction_adapter,
+    create_reasoning_router,
+)
 from src.adapters.outbound.reasoning.llm_abduction_adapter import LLMAbductionAdapter
 from src.adapters.outbound.reasoning.mock_abduction_adapter import MockAbductionAdapter
 from src.adapters.outbound.reasoning.mock_induction_adapter import MockInductionAdapter
@@ -17,4 +21,5 @@ __all__ = [
     "Z3AbductionAdapter",
     "create_abduction_adapter",
     "create_induction_adapter",
+    "create_reasoning_router",
 ]

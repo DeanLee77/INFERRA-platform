@@ -339,7 +339,7 @@ def _configuration_payload(
 
 def _allow_product_credential_write(product_id: str, request: Request) -> bool:
     return (
-        product_id.strip().lower() in ("aegis", "axiom")
+        product_id.strip().lower() == "aegis"
         and request.headers.get("x-inferra-secret-write") == "write-only"
     )
 

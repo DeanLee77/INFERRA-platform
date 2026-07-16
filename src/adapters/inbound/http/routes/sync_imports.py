@@ -22,7 +22,7 @@ from src.domain.imports.import_resolver import (
     ImportDepthExceededError,
     RuleSetImportResolver,
 )
-from src.domain.state.feature_flags import FeatureFlags
+from src.domain.state.feature_flags import FeatureFlags, get_feature_flags
 from src.services.rule_validation_service import RuleValidationService
 from src.tasks.rule_sync import _inflight_tasks
 
@@ -138,7 +138,7 @@ def _build_import_entry(module_name: str, origin) -> ImportEntry:
 
 @router.get("/sync/status", response_model=SyncStatusResponse)
 async def get_sync_status(rule_name: str = Query(..., description="Rule name to check")) -> SyncStatusResponse:
-    if not FeatureFlags().async_sync_enabled:
+    if not get_feature_flags().async_sync_enabled:
         return SyncStatusResponse(rule_name=rule_name, status="disabled")
 
     try:

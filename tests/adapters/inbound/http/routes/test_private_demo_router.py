@@ -79,9 +79,9 @@ def test_reasoning_run_review_fixture_route_returns_ui_contract():
         "receipt",
     ]
     assert {source["path"] for source in data["source_rule_examples"]} == {
-        "docs/reference/examples/mrca_ultimate_master_convergence_met.txt",
-        "docs/reference/examples/drca_ultimate_master_convergence_met.txt",
-        "docs/reference/examples/vea_part_ii_sections_5_to_6.txt",
+        "docs/reference/examples/mrca/mrca_ultimate_master_convergence_met.txt",
+        "docs/reference/examples/drca/drca_ultimate_master_convergence_met.txt",
+        "docs/reference/examples/vea/vea_part_ii_sections_5_to_6.txt",
     }
 
 

@@ -1,0 +1,59 @@
+# ==========================================
+# INPUT DECLARATIONS
+# ==========================================
+# These inputs are populated by Ahpra, ABN Lookup, HPOS/Medicare,
+# controlled manual verification, or advisory LLM evidence collection.
+
+INPUT provider ahpra registration is current AS BOOLEAN
+INPUT provider ahpra profession matches claimed service AS BOOLEAN
+INPUT provider has incompatible practice restriction AS BOOLEAN
+INPUT provider medicare provider number active on service date AS BOOLEAN
+INPUT provider number matches mbs service AS BOOLEAN
+INPUT provider number matches service location AS BOOLEAN
+INPUT provider abn is active AS BOOLEAN
+INPUT provider official evidence unavailable AS BOOLEAN
+INPUT provider evidence package requires human review AS BOOLEAN
+
+# ==========================================
+# RULE BLOCKS
+# ==========================================
+
+# Reference: AU provider legitimacy controls using Ahpra, Medicare/HPOS, and ABN evidence.
+# Original: Provider legitimacy is verified when registration, profession, provider-number authority, service location, and ABN evidence all align and no manual-review flag exists.
+provider legitimacy is verified
+    AND provider official registration evidence is acceptable
+    AND provider medicare claiming authority is verified
+    AND provider business identity is verified
+    AND NOT provider legitimacy investigation flag raised
+
+# Reference: Ahpra registration and scope controls.
+# Original: Official registration evidence is acceptable when current Ahpra registration and profession alignment exist and there is no incompatible restriction.
+provider official registration evidence is acceptable
+    AND provider ahpra registration is current
+    AND provider ahpra profession matches claimed service
+    AND NOT provider has incompatible practice restriction
+
+# Reference: Medicare claiming authority controls.
+# Original: Medicare claiming authority is verified when the provider number is active for the service date, item, and service location.
+provider medicare claiming authority is verified
+    AND provider medicare provider number active on service date
+    AND provider number matches mbs service
+    AND provider number matches service location
+
+# Reference: Australian business identity controls.
+# Original: Provider business identity is verified when the provider ABN is active.
+provider business identity is verified
+    AND provider abn is active
+
+# Reference: Provider legitimacy investigation triggers.
+# Original: A legitimacy investigation flag is raised when official evidence is unavailable, review is required, registration or profession checks fail, restrictions exist, provider-number authority fails, or the ABN is inactive.
+provider legitimacy investigation flag raised
+    OR provider official evidence unavailable
+    OR provider evidence package requires human review
+    OR NOT provider ahpra registration is current
+    OR NOT provider ahpra profession matches claimed service
+    OR provider has incompatible practice restriction
+    OR NOT provider medicare provider number active on service date
+    OR NOT provider number matches mbs service
+    OR NOT provider number matches service location
+    OR NOT provider abn is active

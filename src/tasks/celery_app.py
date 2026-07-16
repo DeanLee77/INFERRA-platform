@@ -9,7 +9,24 @@ Rate limiting: per-task rate limit of 10/m prevents overwhelming Fuseki
 on bulk rule saves. Submission-level idempotency skips duplicate tasks.
 """
 
+from src.infrastructure.environment import load_process_environment
+
+load_process_environment()
+
+from src.domain.state.feature_flags import (
+    build_effective_feature_flag_report,
+    get_feature_flags,
+    validate_runtime_feature_flags,
+)
 from src.infrastructure.secrets import redis_url_from_env
+
+import structlog
+
+_worker_flags = validate_runtime_feature_flags(get_feature_flags())
+structlog.get_logger("inferra.celery").info(
+    "feature_flag_snapshot",
+    **build_effective_feature_flag_report("worker", flags=_worker_flags),
+)
 
 TASK_MODULES = (
     "src.tasks.rule_sync",

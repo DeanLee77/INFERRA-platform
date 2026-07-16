@@ -34,7 +34,7 @@ from src.domain.nodes.value_conclusion_line import ValueConclusionLine
 from src.domain.rule_parser.iterate_syntax import parse_iterate
 from src.domain.state.feature_flags import FeatureFlags
 from src.domain.tokens import Token, Tokenizer
-
+from src.domain.graph.dependency_type import DependencyType
 # Protected Module-Level Logger (Access Level: Protected)
 _logger = get_logger(__name__)
 

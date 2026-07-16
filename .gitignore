@@ -32,6 +32,7 @@ ENV/
 # Testing
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 *,cover
 
@@ -39,6 +40,7 @@ htmlcov/
 Nadia-logging/
 *.log
 demo_artifacts/
+artifacts/
 
 # Paperclip release/IP-gate work products must not be committed to product repos.
 INFA-*.md
@@ -59,6 +61,59 @@ Pipfile*
 
 # docs
 docs/
+!docs/
+docs/*
+!docs/IMPLEMENTATION_STATUS.md
+!docs/OPERATIONS.md
+!docs/ROADMAP.md
+!docs/INFERRA - Assessment & Recommendations.md
+!docs/README.md
+!docs/archive/
+docs/archive/*
+!docs/archive/README.md
+!docs/archive/phase-plans/
+docs/archive/phase-plans/*
+!docs/archive/phase-plans/FEATURE_FLAG_ALIGNMENT_PLAN.md
+!docs/archive/phase-plans/SNOMED_MBS_INTEGRATION_PLAN.md
+!docs/archive/future-and-enhancements/
+docs/archive/future-and-enhancements/*
+!docs/archive/future-and-enhancements/INFERRA_visions_V_1.md
+!docs/archive/future-and-enhancements/INFERRA_Strategic_Plan_and_Innovation_Roadmap.md
+!docs/archive/operations-notes/
+docs/archive/operations-notes/*
+!docs/archive/operations-notes/fuseki_connection_root_legacy.md
+!docs/archive/status-audits/
+docs/archive/status-audits/*
+!docs/archive/status-audits/GAPS_ANALYSIS_SNOMED_MBS_2026-07-04.md
+!docs/archive/status-audits/SNOMED_MBS_INTEGRATION_GUIDE_ENHANCEMENT_SUMMARY_2026-07-04.md
+!docs/reference/
+docs/reference/*
+!docs/reference/examples/
+docs/reference/examples/*
+!docs/reference/examples/drca/
+docs/reference/examples/drca/*
+!docs/reference/examples/drca/drca_part_i_sections_1_to_13a.txt
+!docs/reference/examples/drca/drca_part_ii_sections_14_to_33.txt
+!docs/reference/examples/drca/drca_ultimate_master_convergence_met.txt
+!docs/reference/examples/mrca/
+docs/reference/examples/mrca/*
+!docs/reference/examples/mrca/mrca_chapter_1.txt
+!docs/reference/examples/mrca/mrca_chapter_11_sections_404_to_440.txt
+!docs/reference/examples/mrca/mrca_ultimate_master_convergence_met.txt
+!docs/reference/examples/vea/
+docs/reference/examples/vea/*
+!docs/reference/examples/vea/vea_part_ii_sections_5_to_6.txt
+!docs/reference/examples/fraud/
+docs/reference/examples/fraud/*
+!docs/reference/examples/fraud/insurance_fraud_common_definitions.txt
+!docs/reference/examples/fraud/provider_billing_investigation_hold_amount.txt
+!docs/reference/examples/fraud/provider_billing_investigation_signals.txt
+!docs/reference/examples/fraud/provider_evidence_collection_policy.json
+!docs/reference/examples/fraud/provider_legitimacy_validator.txt
+!docs/reference/examples/fraud/provider_payment_hold_action_policy.json
+!docs/reference/examples/fraud/provider_payment_hold_controller.txt
+!docs/reference/examples/fraud/provider_payment_hold_trigger_request.json
+!docs/reference/examples/fraud/provider_trust_risk_detector.txt
 AGENTS.md
 
 # legacy frontend

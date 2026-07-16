@@ -970,9 +970,9 @@ class RuleValidationService:
             return False
         if candidate[0] in {"'", '"'}:
             return False
-        if candidate.upper() in self._KEYWORDS:
-            return False
         if candidate.lower() in {"true", "false"}:
+            return False
+        if candidate.upper() in self._KEYWORDS:
             return False
         if re.fullmatch(r"-?\d+(?:\.\d+)?", candidate):
             return False
@@ -1570,13 +1570,13 @@ class RuleValidationService:
         if visited_count != len(all_nodes):
             cycle_nodes = [n for n in all_nodes if in_degree[n] > 0]
             var_names = []
+            # Declaration nodes have no dependencies, so only rule nodes can
+            # remain after Kahn's algorithm detects a cycle.
+            # Every remaining node therefore uses the ``rule:`` prefix.
             for cn in cycle_nodes:
-                if cn.startswith("decl:"):
-                    var_names.append(cn[5:])
-                elif cn.startswith("rule:"):
-                    line = cn[5:]
-                    matching = [r for r in rules if str(r["line"]) == line]
-                    var_names.append(matching[0]["variable_name"] if matching else cn)
+                line = cn[5:]
+                matching = [r for r in rules if str(r["line"]) == line]
+                var_names.append(matching[0]["variable_name"] if matching else cn)
             errors.append(ValidationError(
                 code="CYCLIC_DEPENDENCY",
                 message=f"Cyclic dependency detected involving: {', '.join(sorted(set(var_names))[:5])}",

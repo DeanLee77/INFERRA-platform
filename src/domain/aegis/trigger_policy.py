@@ -5,9 +5,9 @@ from copy import deepcopy
 from typing import Any
 from uuid import uuid4
 
-from src.adapters.outbound.persistence.aegis_trigger_policy_repository import (
+from src.ports.aegis_repository_ports import (
     AegisTriggerIdempotencyConflictError,
-    AegisTriggerPolicyRepository,
+    AegisTriggerPolicyPort,
 )
 from src.domain.aegis.phase3_runtime import AegisPhase3RuntimeService
 from src.domain.aegis.rule_store import stable_hash
@@ -44,7 +44,7 @@ class AegisTriggerPolicyService:
 
     def __init__(
         self,
-        repository: AegisTriggerPolicyRepository,
+        repository: AegisTriggerPolicyPort,
         rule_service: RuleService,
         session_service: InferenceSessionService,
         phase3_service: AegisPhase3RuntimeService,

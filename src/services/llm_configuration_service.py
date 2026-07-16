@@ -102,7 +102,7 @@ class LLMConfigurationService:
         if credential_requested and not allow_credential_write:
             raise LLMProductConfigurationError(SETTINGS_CREDENTIAL_ERROR)
         endpoint_requested = any(field in payload for field in RUNTIME_ENDPOINT_FIELDS)
-        if endpoint_requested and normalized not in ("aegis", "axiom"):
+        if endpoint_requested and normalized != "aegis":
             raise LLMProductConfigurationError(
                 "Runtime endpoint changes are not supported; provider endpoints are deployment-managed"
             )

@@ -23,6 +23,7 @@ from src.domain.inference.assessment_state import AssessmentState
 from src.domain.inference.session import InferenceSession
 from src.domain.nodes.line_type import LineType
 from src.domain.state.fact_source import FactSource
+from src.domain.state.feature_flags import FeatureFlags
 from src.main import app
 
 
@@ -154,6 +155,7 @@ class TestE2EInferenceSession:
     def test_step4_summary_with_fact_source(self, mock_init, mock_get):
         """E2E Step 4: Get summary showing fact_source provenance."""
         session = self._build_session()
+        session.feature_flags = FeatureFlags(enriched_api=True)
         # Populate working memory with both ASSERTED and INFERRED facts
         session.inference_engine.get_assessment_state().set_fact(
             "age", FactValue(25, FactValueType.INTEGER), source=FactSource.ASSERTED

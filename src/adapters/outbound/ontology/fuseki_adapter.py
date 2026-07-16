@@ -273,9 +273,9 @@ class FusekiAdapter:
                 last_error = exc
                 if attempt + 1 >= attempts:
                     break
-        if last_error is not None:
-            raise last_error
-        return []
+        assert last_error is not None
+        raise last_error
+        # The bounded loop always returns or records an error before this point.
 
     @staticmethod
     def query_deltas(since_timestamp: float) -> List[Tuple]:

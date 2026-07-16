@@ -4,6 +4,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from src.infrastructure.logging_config import get_logger
+from src.ports.aegis_repository_ports import AegisWorkflowRepositoryPort
 
 from .models import AegisWorkflowDefinitionORM, AegisWorkflowVersionORM
 
@@ -14,7 +15,7 @@ class AegisWorkflowConcurrencyError(ValueError):
     """Raised when a workflow update is based on a stale version hash."""
 
 
-class AegisWorkflowRepository:
+class AegisWorkflowRepository(AegisWorkflowRepositoryPort):
     """Persistence adapter for AEGIS workflow authoring definitions and versions."""
 
     def __init__(self, db: Session):

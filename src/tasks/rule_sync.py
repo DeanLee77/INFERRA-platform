@@ -22,7 +22,11 @@ from src.adapters.outbound.ontology.inferra_to_rdf_compiler import (
     COMPILER_VERSION,
     InferraToRdfCompiler,
 )
-from src.domain.state.feature_flags import FeatureFlags
+from src.domain.state.feature_flags import (
+    FeatureFlags,
+    assert_feature_flag_snapshot_match,
+    get_effective_feature_flag_snapshot_hash,
+)
 from src.infrastructure.secrets import redis_client_from_env
 from src.tasks.celery_app import CELERY_AVAILABLE, app
 
@@ -148,7 +152,12 @@ def publish_rule_updated_event(
         )
         return None
 
-    result = compile_and_push_to_fuseki.delay(rule_name, rule_text, source_hash)
+    result = compile_and_push_to_fuseki.delay(
+        rule_name,
+        rule_text,
+        source_hash,
+        get_effective_feature_flag_snapshot_hash(),
+    )
     _inflight_tasks[source_hash] = result.id
     record_projection_metadata(
         rule_name,
@@ -238,7 +247,11 @@ if CELERY_AVAILABLE:
 
     @app.task(bind=True, max_retries=3, default_retry_delay=60, rate_limit="10/m")
     def compile_and_push_to_fuseki(
-        self, rule_name: str, rule_text: str, source_hash: str
+        self,
+        rule_name: str,
+        rule_text: str,
+        source_hash: str,
+        publisher_snapshot_hash: Optional[str] = None,
     ) -> dict:
         """
         Celery task: compile rule to RDF and push to Fuseki.
@@ -265,6 +278,7 @@ if CELERY_AVAILABLE:
             source_hash=source_hash,
         )
         task_log = structlog.get_logger()
+        assert_feature_flag_snapshot_match(publisher_snapshot_hash)
 
         try:
             task_log.info("fuseki_sync_start", rule_name=rule_name)

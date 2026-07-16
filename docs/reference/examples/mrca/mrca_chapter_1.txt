@@ -1,0 +1,215 @@
+FIXED Military Rehabilitation and Compensation Act IS "Military Rehabilitation and Compensation Act 2004"
+FIXED DVA policy update requirement IS "Update manually when DVA operational policy or indexation changes"
+FIXED MRCA commencement date IS 1/7/2004
+FIXED DVA member status AS LIST
+    ITEM permanent forces
+    ITEM reserves
+    ITEM continuous full time service
+    ITEM cadet
+FIXED DVA dependency status AS LIST
+    ITEM wholly dependent
+    ITEM partly dependent
+    ITEM not dependent
+FIXED DVA family tax benefit status AS LIST
+    ITEM receiving FTB Part A
+    ITEM receiving FTB Part B
+    ITEM not receiving FTB
+
+INPUT the person is a member of the Defence Force AS BOOLEAN
+INPUT the person is a former member AS BOOLEAN
+INPUT member status AS LIST
+    ITEM permanent forces
+    ITEM reserves
+    ITEM continuous full time service
+    ITEM cadet
+INPUT the person is a dependant AS BOOLEAN
+INPUT dependency status AS LIST
+    ITEM wholly dependent
+    ITEM partly dependent
+    ITEM not dependent
+INPUT the person is a part time Reservist AS BOOLEAN
+INPUT the person is a cadet AS BOOLEAN
+INPUT unlikely to return to defence service AS BOOLEAN
+INPUT pay related allowance received AS BOOLEAN
+INPUT the person is a deceased member AS BOOLEAN
+INPUT death resulted from service AS BOOLEAN
+INPUT normal weekly earnings calculated AS BOOLEAN
+INPUT actual earnings calculated AS BOOLEAN
+INPUT the person is a partner AS BOOLEAN
+INPUT the person is an eligible young person AS BOOLEAN
+INPUT child born or adopted after death AS BOOLEAN
+INPUT receiving family tax benefit AS BOOLEAN
+INPUT family tax benefit status AS LIST
+    ITEM receiving FTB Part A
+    ITEM receiving FTB Part B
+    ITEM not receiving FTB
+INPUT commission determination required AS BOOLEAN
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 1 - Short Title
+# Original: This Act may be cited as the Military Rehabilitation and Compensation Act 2004.
+MRCA short title met
+    AND MANDATORY commission determination required
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 2 - Commencement
+# Original: This Act commences on 1 July 2004, establishing the temporal boundary for all subsequent liability and compensation assessments.
+MRCA commencement met
+    AND KNOWN MRCA commencement date
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 3 - Objects of this Act
+# Original: The object of this Act is to establish a comprehensive rehabilitation and compensation scheme for current and former members of the Australian Defence Force.
+MRCA objects met
+    AND MRCA commencement met
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 4 - Simplified Outline
+# Original: This section provides a simplified outline of the structure and operation of the Act.
+MRCA simplified outline met
+    AND MRCA objects met
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 5 - Dictionary
+# Original: The Dictionary at the end of this Act defines terms used throughout this Act.
+MRCA dictionary met
+    AND MRCA simplified outline met
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 6 - Meaning of member
+# Original: A member is a person who is currently serving in the permanent forces, reserves, or undertaking approved continuous full-time service or cadet duties.
+member status defined
+    AND the person is a member of the Defence Force
+    AND member status IS IN LIST: DVA member status
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 7 - Meaning of former member
+# Original: A former member is a person who was a member but has since been discharged from the Australian Defence Force.
+former member status defined
+    AND the person is a former member
+    AND NOT the person is a member of the Defence Force
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 8 - Meaning of dependant
+# Original: A dependant includes the spouse, partner, or eligible child of a deceased member or former member whose death was service-related.
+dependant status defined
+    AND the person is a dependant
+    AND dependency status IS IN LIST: DVA dependency status
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 9 - Meaning of service injury, service disease and service death
+# Original: Defines the foundational triggers for compensation, requiring the injury, disease, or death to be connected to the member's defence service.
+service connection defined
+    AND dependant status defined
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 10 - Determinations for part-time Reservists and cadets
+# Original: The Commission may make specific determinations regarding the earnings and compensation pathways for part-time Reservists and cadets who are unlikely to return to defence service.
+reservist and cadet determinations met
+    AND reservist pathway virtual ONE
+        OR part time reservist path
+            AND the person is a part time Reservist
+            AND unlikely to return to defence service
+        OR cadet path
+            AND the person is a cadet
+            AND unlikely to return to defence service
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 11 - Pay-related allowances
+# Original: Defines pay-related allowances as those specified in relevant Defence determinations, which are factored into normal weekly earnings calculations.
+pay related allowances defined
+    AND pay related allowance received
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 12 - Deceased members whose deaths are service-related
+# Original: Establishes the interpretive rules for identifying deceased members whose deaths are accepted as service-related for the purposes of dependant compensation.
+deceased member status defined
+    AND the person is a deceased member
+    AND death resulted from service
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 13 - Interpretive rules for dependants
+# Original: Sets out specific interpretive rules for determining the legal status of dependants in complex family or guardianship arrangements.
+dependant interpretive rules met
+    AND deceased member status defined
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 14 - Working out normal and actual earnings
+# Original: Section 14 is applicable for the purposes of section 116 of the Act, stating that it applies to working out normal and actual earnings for compensation calculations.
+normal and actual earnings rules met
+    AND normal weekly earnings calculated
+    AND actual earnings calculated
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 15 - Earnings calculation adjustments
+# Original: Provides for adjustments to earnings calculations to account for promotions, rank changes, or specific allowance variations prior to the injury.
+earnings calculation adjustments met
+    AND normal and actual earnings rules met
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 16 - Application of definitions to compensation Parts
+# Original: Ensures that the definitions established in this Chapter apply consistently to the compensation calculations in Parts 3 and 4 of Chapter 4.
+definitions applied to compensation met
+    AND earnings calculation adjustments met
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 17 - When partners and eligible young persons are wholly dependent
+# Original: For the purposes of this Act, a partner or eligible young person is taken to be wholly dependent on a member if specific statutory criteria regarding financial support are met.
+partner and youth wholly dependent defined
+    AND dependency pathway virtual ONE
+        OR partner dependency path
+            AND the person is a partner
+            AND dependency status = "wholly dependent"
+        OR youth dependency path
+            AND the person is an eligible young person
+            AND dependency status = "wholly dependent"
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 18 - Child of a member born or adopted after the member's death
+# Original: A child of a member who is born or adopted after the member's death is treated as a dependant for the purposes of death benefit compensation.
+posthumous child dependency defined
+    AND child born or adopted after death
+    AND the person is a deceased member
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 19 - Ascertaining whether persons receiving family tax benefits etc. are dependent
+# Original: For the purposes of ascertaining dependency, the receipt of Family Tax Benefit (Part A or B) is a primary indicator of legal and financial dependency.
+family tax benefit dependency ascertained
+    AND receiving family tax benefit
+    AND family tax benefit status IS IN LIST: DVA family tax benefit status
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: Section 20 - Some references to members include references to former members
+# Original: Unless the contrary intention appears, a reference in this Act to a member includes a reference to a former member, ensuring continuous coverage post-discharge.
+member references include former members met
+    AND interpretive inclusion virtual ONE
+        OR current member reference
+            AND the person is a member of the Defence Force
+        OR former member reference
+            AND the person is a former member
+    AND MANDATORY commission determination required
+
+# Reference: https://legislation.gov.au/Series/C2004A01285
+# Section: MRCA Chapter 1 Convergence [ENGINE CONSTRUCT - NOT LEGISLATIVE]
+# Original: Structural checkpoint to ensure preliminary definitions, dependency rules, earnings calculations, and interpretive inclusions are evaluated deterministically before proceeding to Chapter 2 Liability assessments.
+MRCA chapter 1 convergence met
+    AND status and definitions gateway met
+        AND member evaluation virtual ONE
+            OR current member path
+                AND member status defined
+            OR former member path
+                AND former member status defined
+        AND service connection defined
+    AND dependency and earnings gateway met
+        AND deceased member status defined
+        AND normal and actual earnings rules met
+        AND dependency evaluation virtual ONE
+            OR standard dependency path
+                AND partner and youth wholly dependent defined
+            OR posthumous dependency path
+                AND posthumous child dependency defined
+            OR FTB dependency path
+                AND family tax benefit dependency ascertained
+    AND final statutory lock gateway met
+        AND member references include former members met
+    AND MANDATORY commission determination required

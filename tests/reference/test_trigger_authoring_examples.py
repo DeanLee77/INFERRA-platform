@@ -1,10 +1,13 @@
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
+from src.domain.models.rule import RuleFileEntity
 from src.domain.rule_parser.rule_set_parser import RuleSetParser
 from src.domain.rule_parser.rule_set_reader import RuleSetReader
 from src.domain.rule_parser.rule_set_scanner import RuleSetScanner
-from src.services.rule_validation_service import RuleValidationService
+from src.ports.rule_repository_port import RuleRepositoryPort
+from src.services.rule_service import RuleService
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,6 +47,23 @@ def _parse_rule_text(rule_text: str, source_name: str):
     return scanner.establish_node_set()
 
 
+def _catalog_rule_service() -> RuleService:
+    rule_text_by_name = {
+        path.stem: path.read_text(encoding="utf-8")
+        for path in EXAMPLE_ROOT.rglob("*.txt")
+    }
+    repository = MagicMock(spec=RuleRepositoryPort)
+
+    def find_rule_text(rule_name: str):
+        text = rule_text_by_name.get(rule_name)
+        if text is None:
+            return None
+        return RuleFileEntity(files=text.encode("utf-8"))
+
+    repository.find_rule_text_by_rule_name.side_effect = find_rule_text
+    return RuleService(repository)
+
+
 def test_authoring_catalog_exposes_trigger_examples() -> None:
     examples = _catalog_examples()
     by_id = {example["id"]: example for example in examples}
@@ -69,16 +89,17 @@ def test_trigger_rule_set_examples_validate_and_parse() -> None:
         for path in _entrypoint_paths(example)
         if path.endswith(".txt")
     }
+    service = _catalog_rule_service()
 
     assert rule_paths
     for catalog_path in sorted(rule_paths):
         path = _repo_path(catalog_path)
         rule_text = path.read_text(encoding="utf-8")
 
-        report = RuleValidationService(cache_ttl_seconds=0).validate(rule_text, path.stem)
+        report = service.validate_draft_rule(rule_text, path.stem)
         assert report.valid, [error.message for error in report.errors]
 
-        node_set = _parse_rule_text(rule_text, path.stem)
+        node_set = service.build_rule_set_parser(path.stem).get_node_set()
         assert node_set.get_input_dictionary()
         assert node_set.get_node_dictionary()
         assert tuple(node_set.get_graph().all_node_names())

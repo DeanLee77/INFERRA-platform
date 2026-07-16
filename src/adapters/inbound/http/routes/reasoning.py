@@ -15,10 +15,17 @@ from src.adapters.inbound.http.routes.metrics import (
     llm_response_length,
     reasoning_route_total,
 )
-from src.domain.state.feature_flags import FeatureFlags
+from src.domain.state.feature_flags import FeatureFlags, get_feature_flags
 from src.infrastructure.reasoning_tracing import reasoning_span
 
 router = APIRouter(prefix="/api/v1/reasoning", tags=["reasoning"])
+
+
+def _request_scoped_flags(key: str, requested_enabled: bool) -> FeatureFlags:
+    """Allow request-level opt-out without bypassing the process feature gate."""
+    snapshot = get_feature_flags().snapshot()
+    snapshot[key] = bool(snapshot[key] and requested_enabled)
+    return FeatureFlags(**snapshot)
 
 
 class AbductionRequest(BaseModel):
@@ -93,7 +100,7 @@ class ExplanationResponse(BaseModel):
 @router.post("/abduct", response_model=AbductionResponse)
 async def abduct(request: AbductionRequest) -> AbductionResponse:
     adapter = create_abduction_adapter(
-        FeatureFlags(abduction_enabled=request.enabled)
+        _request_scoped_flags("abduction_enabled", request.enabled)
     )
     try:
         with reasoning_span(
@@ -123,7 +130,8 @@ async def abduct(request: AbductionRequest) -> AbductionResponse:
 
 @router.post("/goal", response_model=GoalMappingResponse)
 async def map_goal(request: GoalMappingRequest) -> GoalMappingResponse:
-    if not request.enabled:
+    flags = _request_scoped_flags("llm_enhancements", request.enabled)
+    if not flags.llm_enhancements:
         llm_call_total.labels(operation="goal_mapping", status="fallback").inc()
         llm_confidence_score.observe(0.0)
         return GoalMappingResponse(
@@ -131,9 +139,7 @@ async def map_goal(request: GoalMappingRequest) -> GoalMappingResponse:
             message="LLM enhancements are disabled",
         )
 
-    orchestrator = create_llm_orchestrator(
-        FeatureFlags(llm_enhancements=request.enabled)
-    )
+    orchestrator = create_llm_orchestrator(flags)
     try:
         with reasoning_span(
             "llm.goal_mapping",
@@ -152,7 +158,7 @@ async def map_goal(request: GoalMappingRequest) -> GoalMappingResponse:
 @router.post("/question-prompt", response_model=QuestionPromptResponse)
 async def enhance_question_prompt(request: QuestionPromptRequest) -> QuestionPromptResponse:
     orchestrator = create_llm_orchestrator(
-        FeatureFlags(llm_enhancements=request.enabled)
+        _request_scoped_flags("llm_enhancements", request.enabled)
     )
     try:
         with reasoning_span(
@@ -175,7 +181,7 @@ async def enhance_question_prompt(request: QuestionPromptRequest) -> QuestionPro
 @router.post("/explain", response_model=ExplanationResponse)
 async def explain_trace(request: ExplanationRequest) -> ExplanationResponse:
     orchestrator = create_llm_orchestrator(
-        FeatureFlags(llm_enhancements=request.enabled)
+        _request_scoped_flags("llm_enhancements", request.enabled)
     )
     try:
         with reasoning_span(
@@ -204,7 +210,7 @@ async def explain_trace(request: ExplanationRequest) -> ExplanationResponse:
 @router.post("/induce/start", response_model=InductionStatusResponse)
 async def start_induction(request: InductionStartRequest) -> InductionStatusResponse:
     adapter = create_induction_adapter(
-        FeatureFlags(induction_pipeline=request.enabled)
+        _request_scoped_flags("induction_pipeline", request.enabled)
     )
     try:
         with reasoning_span(
@@ -226,6 +232,8 @@ async def start_induction(request: InductionStartRequest) -> InductionStatusResp
 
 @router.get("/induce/status/{job_id}", response_model=InductionStatusResponse)
 async def induction_status(job_id: str) -> InductionStatusResponse:
+    if not get_feature_flags().induction_pipeline:
+        return InductionStatusResponse(job_id=job_id, status="disabled")
     with reasoning_span("induction.status", {"induction.job_id": job_id}):
         result = CeleryInductionAdapter().get_status(job_id)
     induction_total.labels(operation="status", status=result.get("status", "unknown")).inc()
@@ -234,6 +242,8 @@ async def induction_status(job_id: str) -> InductionStatusResponse:
 
 @router.post("/induce/promote", response_model=InductionStatusResponse)
 async def promote_induction_candidate(request: PromotionRequest) -> InductionStatusResponse:
+    if not get_feature_flags().induction_pipeline:
+        return InductionStatusResponse(job_id=request.job_id, status="disabled")
     with reasoning_span("induction.promote", {"induction.job_id": request.job_id}):
         result = CeleryInductionAdapter().promote(
             request.job_id,

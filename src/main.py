@@ -1,6 +1,10 @@
 from contextlib import asynccontextmanager
 import os
 
+from src.infrastructure.environment import load_process_environment
+
+load_process_environment()
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +12,11 @@ from fastapi.responses import JSONResponse
 
 from src.adapters.inbound.http import api_router
 from src.config import settings
+from src.domain.state.feature_flags import (
+    build_effective_feature_flag_report,
+    get_feature_flags,
+    validate_runtime_feature_flags,
+)
 from src.domain.exceptions import RuleValidationError
 from src.infrastructure.auth_middleware import ApiKeyAuthMiddleware, assert_production_auth_config
 from src.infrastructure.correlation_middleware import CorrelationIdMiddleware
@@ -25,6 +34,11 @@ logger = structlog.get_logger("inferra.fastapi")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    flag_report = build_effective_feature_flag_report(
+        "api",
+        flags=get_feature_flags(),
+    )
+    logger.info("feature_flag_snapshot", **flag_report)
     logger.info("starting_inferra_app", database_uri=redact_url(settings.SQLALCHEMY_DATABASE_URI))
     yield
     logger.info("stopping_inferra_app")
@@ -101,6 +115,7 @@ def _cors_config() -> tuple[list[str], bool]:
 
 
 def create_app() -> FastAPI:
+    validate_runtime_feature_flags(get_feature_flags())
     assert_production_auth_config()
     cors_origins, cors_allow_credentials = _cors_config()
 

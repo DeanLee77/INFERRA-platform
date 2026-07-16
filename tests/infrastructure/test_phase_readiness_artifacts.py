@@ -49,7 +49,8 @@ def test_docs_index_and_reference_comparison_capture_current_truth():
     assert "graph-first runtime" in report
     assert "not the architectural north star" in report
     assert "CI `load-gate`" in report
-    assert "2447 passed, 66 skipped" in implementation
+    assert "Functional regression suite" in implementation
+    assert "Coverage policy" in implementation
     assert "Benchmark gate" in implementation
     assert "OpenAPI release artifact" in implementation
     assert "Generate `openapi.json` in CI" in roadmap

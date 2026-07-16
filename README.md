@@ -182,8 +182,14 @@ pip install -e ".[dev,async,semantic,reasoning,observability]"
 Run the API locally:
 
 ```powershell
+$env:INFERRA_ENV_FILE = ".env"
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+`src.main` loads that file at the API process boundary before constructing the
+effective feature-flag snapshot. Exported environment variables take
+precedence. The Celery entry point applies the same policy; tests disable root
+`.env` loading and use isolated temporary files.
 
 ### Option 2: Docker Compose
 
@@ -252,6 +258,22 @@ persisted.
 INFERRA uses environment variables for runtime behavior. Important settings
 include:
 
+The API and worker entry points call
+`src.infrastructure.environment.load_process_environment()` before importing
+application modules. It reads `.env` by default, or the file selected by
+`INFERRA_ENV_FILE`, without overriding exported variables. Set
+`INFERRA_LOAD_DOTENV=false` for a launcher that already supplies the complete
+environment. Domain modules never read dotenv files directly.
+
+Invalid numeric feature settings fail process startup: confidence thresholds
+must be within `0.0..1.0`, hierarchy depths cannot be negative, and maximum
+closure depth cannot be below minimum hierarchy depth.
+
+The graph-first runtime also fails fast unless `INFERRA_USE_HYPERGRAPH`,
+`INFERRA_LAYERED_MEMORY`, and `INFERRA_STRICT_PORT_CONTRACTS` are `true`.
+Those names remain in the compatibility snapshot while their obsolete off
+ramps are retired. The two post-reasoning gates must have the same value.
+
 | Variable | Purpose | Typical Local Value |
 | --- | --- | --- |
 | `SQLALCHEMY_DATABASE_URI` | PostgreSQL connection string | `postgresql://inferra:inferra@localhost:5432/inferra` |
@@ -277,21 +299,42 @@ include:
 | `INFERRA_OBSERVABILITY_ENABLED` | Enable observability integrations | `true` in compose |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTel collector endpoint | `http://localhost:4317` |
 
-Feature flags use the `INFERRA_` prefix. Examples:
+Feature flags use the `INFERRA_` prefix. The table below is a concise subset;
+the [complete canonical inventory and code defaults](IMPLEMENTATION_GUIDE.md#2-phases--feature-flags)
+are defined by `src/domain/state/feature_flags.py`. Compose and environment
+values are deployment overrides, not changes to those code defaults.
+
+The base Compose stack is a feature-rich, loopback-only local profile. A single
+28-entry mapping is injected into both API and worker so cross-process
+workflows use the same effective snapshot. In that profile both
+`INFERRA_ASYNC_POST_REASONING` and
+`INFERRA_GENERATE_POST_REASONING_TTL` are enabled; override them together.
+Compose uses the root `.env` for host-side interpolation and exports the
+resolved values into each container; container-side dotenv loading is disabled.
 
 | Flag | Purpose |
 | --- | --- |
 | `INFERRA_USE_HYPERGRAPH` | Use graph-native dependency runtime; defaults to `true` |
 | `INFERRA_LEGACY_ITERATE` | Keep legacy iterate behavior enabled |
 | `INFERRA_LAYERED_MEMORY` | Use layered fact store |
-| `INFERRA_ML_OPTIMIZED_DFS` | Enable history-aware DFS ordering; normal sessions use stored history for topological ordering when available |
+| `INFERRA_ML_OPTIMIZED_DFS` | Enable history-aware DFS ordering; stored history is passed to the parser only when this flag is enabled |
 | `INFERRA_ASYNC_SYNC_ENABLED` | Enable async rule sync pipeline |
 | `INFERRA_MODULAR_IMPORTS` | Enable modular import resolution |
+| `INFERRA_HYBRID_ORCHESTRATOR` | Run stalled sessions through the convergence orchestrator selected from the frozen session snapshot |
+| `INFERRA_PROV_O_TRACE` | Permit explicit PROV-O trace generation for the session |
+| `INFERRA_ENRICHED_API` | Include provenance sources, semantic suggestions, and reasoning metadata in inference responses |
 | `INFERRA_REDIS_SESSION_STORE` | Use Redis-backed sessions |
 | `INFERRA_LLM_ENHANCEMENTS` | Enable LLM-assisted goal/explanation paths |
+| `INFERRA_STRICT_PORT_CONTRACTS` | Required compatibility invariant while port checks remain unconditional in CI |
 | `INFERRA_ABDUCTION_ENABLED` | Enable abduction adapters |
 | `INFERRA_INDUCTION_PIPELINE` | Enable induction pipeline |
 | `INFERRA_REASONING_ROUTER` | Enable hybrid reasoning router |
+| `INFERRA_CONFIDENCE_THRESHOLDS` | Apply configured confidence pruning in the reasoning router |
+
+Reasoning API `enabled` fields are opt-out controls only: a request can disable
+an enabled capability, but cannot turn on a process-level flag that is off.
+Hybrid orchestration, routing, abduction, induction, and confidence decisions
+use the frozen flag snapshot belonging to the inference session.
 
 ## How To Use INFERRA
 
@@ -306,6 +349,7 @@ docker compose up -d --build
 Or locally:
 
 ```powershell
+$env:INFERRA_ENV_FILE = ".env"
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 

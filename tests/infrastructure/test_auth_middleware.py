@@ -226,6 +226,55 @@ def test_production_llm_endpoint_requires_llm_scope():
     assert response.status_code == 403
 
 
+def test_feature_flag_report_requires_system_read_scope():
+    flags = FeatureFlags(auth_enabled=True)
+    with patch.dict(
+        "os.environ",
+        {
+            "INFERRA_API_KEY": "secret",
+            "INFERRA_API_KEY_SCOPES": "read",
+        },
+        clear=True,
+    ), patch(
+        "src.infrastructure.auth_middleware.get_feature_flags",
+        return_value=flags,
+    ), patch(
+        "src.adapters.inbound.http.dependencies.get_feature_flags",
+        return_value=flags,
+    ):
+        response = TestClient(create_app()).get(
+            "/api/v1/system/feature-flags",
+            headers={"x-api-key": "secret"},
+        )
+
+    assert response.status_code == 403
+
+
+def test_feature_flag_report_accepts_system_read_scope():
+    flags = FeatureFlags(auth_enabled=True)
+    with patch.dict(
+        "os.environ",
+        {
+            "INFERRA_API_KEY": "secret",
+            "INFERRA_API_KEY_SCOPES": "system:read",
+        },
+        clear=True,
+    ), patch(
+        "src.infrastructure.auth_middleware.get_feature_flags",
+        return_value=flags,
+    ), patch(
+        "src.adapters.inbound.http.dependencies.get_feature_flags",
+        return_value=flags,
+    ):
+        response = TestClient(create_app()).get(
+            "/api/v1/system/feature-flags",
+            headers={"x-api-key": "secret"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["flag_count"] == 28
+
+
 def test_cors_rejects_wildcard_credentials():
     with patch.dict(
         "os.environ",

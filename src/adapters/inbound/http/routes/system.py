@@ -17,7 +17,11 @@ from sqlalchemy.orm import Session
 
 import structlog
 
-from src.adapters.inbound.http.dependencies import get_db_session
+from src.adapters.inbound.http.dependencies import get_db_session, require_scope
+from src.domain.state.feature_flags import (
+    build_effective_feature_flag_report,
+    get_feature_flags,
+)
 from src.infrastructure.secrets import redis_client_from_env
 
 router = APIRouter(tags=["system"])
@@ -147,6 +151,18 @@ async def live_check() -> LivenessResponse:
 async def live_check_v1() -> LivenessResponse:
     """API v1 liveness probe."""
     return await live_check()
+
+
+@router.get(
+    "/api/v1/system/feature-flags",
+    dependencies=[Depends(require_scope("system:read"))],
+)
+async def effective_feature_flags() -> dict:
+    """Return the redaction-safe effective API process flag report."""
+    return build_effective_feature_flag_report(
+        "api",
+        flags=get_feature_flags(),
+    )
 
 
 @router.get("/health", response_model=HealthResponse)

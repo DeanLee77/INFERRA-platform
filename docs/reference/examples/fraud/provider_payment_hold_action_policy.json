@@ -1,0 +1,34 @@
+{
+  "policyId": "fraud-provider-payment-hold-clinical-review-continue",
+  "version": "v1",
+  "status": "active",
+  "mode": "automatic",
+  "description": "When AU provider legitimacy, trust, or billing-hold rules raise a payment-hold flag, hold payment while allowing clinical review to continue.",
+  "source": {
+    "type": "rule_set",
+    "ruleName": "provider_payment_hold_controller"
+  },
+  "target": {
+    "type": "action",
+    "workflowId": "provider-fraud-investigation",
+    "action": {
+      "kind": "claim.payment.hold",
+      "target": "provider-payment",
+      "parameters": {
+        "holdPayment": true,
+        "allowClinicalReviewToContinue": true,
+        "createInvestigationCase": true
+      }
+    }
+  },
+  "when": {
+    "outcome": true
+  },
+  "constraints": {
+    "maxDepth": 3,
+    "confidenceThreshold": 0.8,
+    "factSourceFilter": ["ASSERTED", "INFERRED"],
+    "requiredEvidenceRefs": ["ev-provider-verification"],
+    "approvalRole": "fraud investigation reviewer"
+  }
+}

@@ -1,0 +1,147 @@
+FIXED Veterans Entitlements Act IS "Veterans' Entitlements Act 1986"
+FIXED DVA policy update requirement IS "Update manually when DVA operational policy or indexation changes"
+FIXED qualifying service start date IS 1/7/1951
+FIXED operational service start date IS 22/5/1986
+FIXED modern operational service date IS 1/7/1994
+FIXED DVA policy continuous full time service threshold IS 365
+FIXED DVA policy minimum operational period IS 30
+
+FIXED DVA qualifying service type AS LIST
+    ITEM warlike service
+    ITEM non-warlike service
+
+FIXED DVA operational service type AS LIST
+    ITEM warlike service
+    ITEM non-warlike service
+    ITEM peacekeeping service
+    ITEM hazardous service
+
+FIXED DVA service type options AS LIST
+    ITEM warlike service
+    ITEM non-warlike service
+    ITEM peacekeeping service
+    ITEM hazardous service
+    ITEM non-qualifying service
+
+TYPE service period
+    FIELD service type AS LIST OF DVA service type options
+    FIELD period of service in days AS NUMBER
+    FIELD enlistment date AS DATE
+    FIELD discharge date AS DATE
+
+INPUT the person has served in the naval military or air forces AS BOOLEAN
+INPUT the person has been discharged from those forces AS BOOLEAN
+INPUT the person has rendered warlike service AS BOOLEAN
+INPUT the person has rendered non-warlike service AS BOOLEAN
+INPUT the person has rendered continuous full-time service AS BOOLEAN
+INPUT service type AS LIST
+    ITEM warlike service
+    ITEM non-warlike service
+    ITEM peacekeeping service
+    ITEM hazardous service
+INPUT enlistment date AS DATE
+INPUT discharge date AS DATE
+INPUT period of service in days AS NUMBER
+INPUT number of qualifying service periods AS NUMBER
+INPUT service history AS COLLECTION OF service period
+    SIZE FROM number of qualifying service periods
+
+# Reference: https://legislation.gov.au/Details/C2004A01321
+# Section: Section 5 - Interpretation
+# Original: veteran means a person who has served in the naval, military or air forces of the Commonwealth and has been discharged from those forces
+the person is a veteran
+    AND the person has served in the naval military or air forces
+    AND the person has been discharged from those forces
+
+# Reference: https://legislation.gov.au/Details/C2004A01321
+# Section: Section 5A - Qualifying service
+# Original: A person has qualifying service if the person has rendered warlike service or non-warlike service
+the person has qualifying service
+    OR the person has rendered warlike service
+    OR the person has rendered non-warlike service
+
+# Reference: https://legislation.gov.au/Details/C2004A01321
+# Section: Section 5B - Operational service
+# Original: A person has operational service if the person has rendered continuous full-time service on or after 22 May 1986
+the person has operational service
+    AND the person has rendered continuous full-time service
+    AND enlistment date >= operational service start date
+
+# Reference: https://www.dva.gov.au/operational-policy/service-types
+# Section: DVA Operational Policy - Service Classifications
+# Original: DVA policy defines service types for eligibility assessment based on operational context
+the service type matches DVA classification
+    AND service type IS IN LIST: DVA operational service type
+
+# Reference: https://www.dva.gov.au/operational-policy/service-types
+# Section: DVA Operational Policy - Qualifying Service Thresholds
+# Original: DVA policy requires a minimum period of continuous full-time service for certain operational classifications
+the service meets DVA qualifying period
+    AND period of service in days >= DVA policy continuous full time service threshold
+    AND service type IS IN LIST: DVA qualifying service type
+
+# Reference: https://legislation.gov.au/Details/C2004A01321
+# Section: Section 5A(2) - Qualifying service periods
+# Original: For the purposes of this Act, service is qualifying if rendered during specified operational periods or under specific declarations
+the person has qualifying service under DVA policy
+    AND qualifying service policy pathway virtual ONE
+        OR DVA policy qualifying service path
+            AND service type IS IN LIST: DVA qualifying service type
+            AND enlistment date >= qualifying service start date
+        OR operational service path
+            AND the person has operational service
+
+# Reference: https://www.dva.gov.au/operational-policy/service-history-assessment
+# Section: DVA Operational Policy - Service History Evaluation
+# Original: Each period of service in a veteran's history must be evaluated against operational and qualifying criteria
+the service history meets DVA criteria
+    AND ALL period IN service history
+        AND period evaluation virtual ONE
+            OR operational period path
+                AND period.service type IS IN LIST: DVA operational service type
+            OR qualifying period path
+                AND period.service type IS IN LIST: DVA qualifying service type
+                AND period.period of service in days >= DVA policy minimum operational period
+
+# Reference: https://legislation.gov.au/Details/C2004A01321
+# Section: Section 5B(1A) - Modern operational service
+# Original: A person has operational service if the person has rendered continuous full-time service on or after 1 July 1994 in an operational area
+the person has modern operational service
+    AND the person has rendered continuous full-time service
+    AND enlistment date >= modern operational service date
+    AND service type IS IN LIST: DVA operational service type
+
+# Reference: https://www.dva.gov.au/operational-policy/service-history-assessment
+# Section: DVA Operational Policy - Exclusion of Non-Operational Service
+# Original: Service that does not meet the operational or qualifying thresholds is excluded from pension eligibility calculations
+the service does not qualify
+    AND exclusion pathway virtual ONE
+        OR DVA policy non-qualifying exclusion
+            AND NOT service type IS IN LIST: DVA operational service type
+        OR DVA policy period exclusion
+            AND period of service in days < DVA policy minimum operational period
+
+# Reference: https://legislation.gov.au/Details/C2004A01321
+# Section: VEA Part II Sections 5 to 6 + DVA Policy Convergence [ENGINE CONSTRUCT - NOT LEGISLATIVE]
+# Original: Structural checkpoint to ensure veteran status, qualifying service, operational service, service history evaluation, and DVA policy thresholds are satisfied before proceeding to specific service classifications.
+VEA Part II sections 5 to 6 convergence met
+    AND veteran status gateway met
+        AND the person is a veteran
+    AND service classification gateway met
+        AND classification pathway virtual ONE
+            OR qualifying service path
+                AND the person has qualifying service
+                AND the service meets DVA qualifying period
+            OR operational service path
+                AND the person has operational service
+                AND the service type matches DVA classification
+            OR modern operational service path
+                AND the person has modern operational service
+    AND service history gateway met
+        AND history evaluation virtual ONE
+            OR history evaluated path
+                AND the service history meets DVA criteria
+            OR no history path
+                AND NOT KNOWN number of qualifying service periods
+    AND exclusions gateway met
+        AND NOT the service does not qualify

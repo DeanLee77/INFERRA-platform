@@ -1,0 +1,208 @@
+FIXED Defence Related Claims Act IS "Safety, Rehabilitation and Compensation (Defence-related Claims) Act 1988"
+FIXED DVA policy update requirement IS "Update manually when DVA operational policy or indexation changes"
+FIXED DRCA commencement date IS 1/12/1988
+FIXED MRCA commencement date IS 1/7/2004
+FIXED DVA injury type AS LIST
+    ITEM physical injury
+    ITEM mental injury
+FIXED DVA disease contribution type AS LIST
+    ITEM primary disease
+    ITEM aggravation of disease
+FIXED DVA indexation type AS LIST
+    ITEM Consumer Price Index
+    ITEM Wage Price Index
+
+INPUT the person is a defence member AS BOOLEAN
+INPUT date of injury or onset AS DATE
+INPUT computer program decision authorised AS BOOLEAN
+INPUT injury type AS LIST
+    ITEM physical injury
+    ITEM mental injury
+INPUT voluntary abnormal risk submitted AS BOOLEAN
+INPUT extended operational circumstances met AS BOOLEAN
+INPUT disease materially contributed to by employment AS BOOLEAN
+INPUT aggravation of disease materially contributed to by employment AS BOOLEAN
+INPUT firefighter presumption met AS BOOLEAN
+INPUT false representation of health made AS BOOLEAN
+INPUT normal weekly earnings calculated AS BOOLEAN
+INPUT relevant period determined AS BOOLEAN
+INPUT damages recovered AS BOOLEAN
+INPUT liability of relevant authority accepted AS BOOLEAN
+INPUT compensation amounts prescribed AS BOOLEAN
+INPUT current CPI index value AS NUMBER
+INPUT current WPI index value AS NUMBER
+INPUT criminal code applied AS BOOLEAN
+INPUT commission determination required AS BOOLEAN
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 1 - Short title
+# Original: This Act may be cited as the Safety, Rehabilitation and Compensation (Defence-related Claims) Act 1988.
+DRCA short title met
+    AND MANDATORY commission determination required
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 2 - Commencement
+# Original: This Act commences on 1 December 1988, establishing the lower temporal boundary for DRCA liability.
+DRCA commencement met
+    AND KNOWN DRCA commencement date
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 3 - Application of Act
+# Original: This Act applies to defence members and specific Commonwealth authorities in relation to defence-related claims.
+DRCA application of act met
+    AND DRCA commencement met
+    AND the person is a defence member
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 3A - Secretary may arrange for use of computer programs
+# Original: The Secretary or Commission may arrange for the use of computer programs to make decisions or determinations under this Act.
+DRCA computer program decisions authorised
+    AND DRCA application of act met
+    AND computer program decision authorised
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 4 - Interpretation
+# Original: Establishes the foundational dictionary and interpretive framework for the terms used throughout this Act.
+DRCA interpretation met
+    AND DRCA computer program decisions authorised
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 4AA - Application of this Act
+# Original: This Act applies strictly to injuries and diseases occurring before the commencement of the MRCA on 1 July 2004.
+DRCA temporal application met
+    AND DRCA interpretation met
+    AND date of injury or onset >= DRCA commencement date
+    AND date of injury or onset < MRCA commencement date
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 5 - Employees
+# Original: Defines the scope of an 'employee' for the purposes of the DRCA, specifically encompassing members of the Defence Force.
+DRCA employee status defined
+    AND DRCA temporal application met
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 5A - Definition of injury
+# Original: Injury means a physical or mental injury arising out of, or in the course of, the employee's employment, but does not include a disease.
+DRCA injury defined
+    AND DRCA employee status defined
+    AND injury type IS IN LIST: DVA injury type
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 5B - Definition of disease
+# Original: Disease means an ailment, disorder, defect or morbid condition that was contributed to, in a material degree, by the employee's employment.
+DRCA disease defined
+    AND DRCA employee status defined
+    AND disease contribution pathway virtual ONE
+        OR primary disease path
+            AND disease materially contributed to by employment
+        OR aggravation path
+            AND aggravation of disease materially contributed to by employment
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 6 - Injury arising out of or in the course of employment
+# Original: An injury is deemed to have arisen out of employment if sustained during specific travel, recesses, or at the direction of the Commonwealth, EXCEPT where the employee voluntarily and unreasonably submitted to an abnormal risk of injury.
+DRCA injury arising out of employment met
+    AND DRCA injury defined
+    AND NOT voluntary abnormal risk submitted
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 6A - Injury arising out of or in the course of employment--extended operation
+# Original: Extends the definition of injury arising out of employment to specific operational, deployment, and extended service circumstances for defence members.
+DRCA extended operation injury met
+    AND DRCA injury defined
+    AND extended operational circumstances met
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 7 - Provisions relating to diseases
+# Original: Sets out presumptions for occupational diseases (including specific firefighter cancers) and strictly excludes liability if the employee made a wilful and false representation that they did not suffer from the disease prior to employment.
+DRCA disease provisions met
+    AND DRCA disease defined
+    AND disease exclusion pathway virtual ONE
+        OR false representation excluded path
+            AND NOT false representation of health made
+        OR firefighter presumption path
+            AND firefighter presumption met
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 8 - Normal weekly earnings
+# Original: Establishes the statutory formula and framework for calculating the Normal Weekly Earnings (NWE) of the employee prior to the injury.
+DRCA normal weekly earnings defined
+    AND DRCA disease provisions met
+    AND normal weekly earnings calculated
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 9 - Relevant period
+# Original: Defines the 'relevant period' used to calculate the employee's earnings baseline for incapacity compensation purposes.
+DRCA relevant period defined
+    AND DRCA normal weekly earnings defined
+    AND relevant period determined
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 10 - Recovery of damages
+# Original: For the purposes of this Act, damages are taken to have been recovered by an employee or dependant when the amount is actually paid to or for their benefit.
+DRCA recovery of damages preliminary met
+    AND DRCA relevant period defined
+    AND damages recovered
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 11 - Liability of relevant authority
+# Original: Confirms that the relevant authority (Comcare or the Military Rehabilitation and Compensation Commission) is formally liable to pay compensation under this Act.
+DRCA liability of relevant authority met
+    AND DRCA recovery of damages preliminary met
+    AND liability of relevant authority accepted
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 12 - Amounts of compensation
+# Original: Specifies that compensation is payable at the rates and amounts strictly set out in Part II of this Act.
+DRCA amounts of compensation defined
+    AND DRCA liability of relevant authority met
+    AND compensation amounts prescribed
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 13 - Indexation--Consumer Price Index
+# Original: Mandates that specific statutory thresholds, maximum rates, and compensation caps are indexed annually or biannually in accordance with the Consumer Price Index (CPI).
+DRCA CPI indexation met
+    AND DRCA amounts of compensation defined
+    AND KNOWN current CPI index value
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 13AA - Indexation--Wage Price Index
+# Original: Mandates that specific statutory rates (such as incapacity payment maximums) are indexed in accordance with the Wage Price Index (WPI).
+DRCA WPI indexation met
+    AND DRCA CPI indexation met
+    AND KNOWN current WPI index value
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: Section 13A - Application of Criminal Code
+# Original: Applies Chapter 2 of the Criminal Code to all offences against this Act, concluding the preliminary framework.
+DRCA criminal code application met
+    AND DRCA WPI indexation met
+    AND criminal code applied
+    AND MANDATORY commission determination required
+
+# Reference: https://www.legislation.gov.au/C2025C00670/latest/text
+# Section: DRCA Part I Sections 1 to 13A Convergence [ENGINE CONSTRUCT - NOT LEGISLATIVE]
+# Original: Structural checkpoint to ensure temporal boundaries, injury and disease definitions, extended operational provisions, statutory exclusions, earnings calculations, and indexation rules are evaluated deterministically before proceeding to DRCA Part II (Compensation).
+DRCA part I sections 1 to 13A convergence met
+    AND temporal and definitions gateway met
+        AND DRCA temporal application met
+        AND DRCA employee status defined
+        AND condition evaluation virtual ONE
+            OR injury path
+                AND DRCA injury defined
+                AND DRCA injury arising out of employment met
+                AND DRCA extended operation injury met
+            OR disease path
+                AND DRCA disease defined
+                AND DRCA disease provisions met
+    AND earnings and damages gateway met
+        AND DRCA normal weekly earnings defined
+        AND DRCA relevant period defined
+        AND DRCA recovery of damages preliminary met
+    AND authority and indexation gateway met
+        AND DRCA liability of relevant authority met
+        AND DRCA amounts of compensation defined
+        AND DRCA CPI indexation met
+        AND DRCA WPI indexation met
+        AND DRCA criminal code application met
+    AND MANDATORY commission determination required

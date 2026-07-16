@@ -31,7 +31,7 @@ def _setup_client():
 
 
 class TestSyncStatus:
-    @patch("src.adapters.inbound.http.routes.sync_imports.FeatureFlags")
+    @patch("src.adapters.inbound.http.routes.sync_imports.get_feature_flags")
     def test_sync_status_disabled(self, mock_flags_cls, _setup_client):
         mock_flags = MagicMock()
         mock_flags.async_sync_enabled = False
@@ -43,7 +43,7 @@ class TestSyncStatus:
         assert data["rule_name"] == "test_rule"
 
     @patch("src.adapters.inbound.http.routes.sync_imports._inflight_tasks", {})
-    @patch("src.adapters.inbound.http.routes.sync_imports.FeatureFlags")
+    @patch("src.adapters.inbound.http.routes.sync_imports.get_feature_flags")
     def test_sync_status_unknown_when_no_tasks(self, mock_flags_cls, _setup_client):
         mock_flags = MagicMock()
         mock_flags.async_sync_enabled = True
@@ -55,7 +55,7 @@ class TestSyncStatus:
         assert data["status"] == "unknown"
 
     @patch("src.adapters.inbound.http.routes.sync_imports._inflight_tasks", {})
-    @patch("src.adapters.inbound.http.routes.sync_imports.FeatureFlags")
+    @patch("src.adapters.inbound.http.routes.sync_imports.get_feature_flags")
     def test_sync_status_missing_rule_name(self, mock_flags_cls, _setup_client):
         mock_flags = MagicMock()
         mock_flags.async_sync_enabled = True
@@ -65,7 +65,7 @@ class TestSyncStatus:
         assert response.status_code == 422
 
     @patch("src.adapters.inbound.http.routes.sync_imports._inflight_tasks", {"hash1": "task-1"})
-    @patch("src.adapters.inbound.http.routes.sync_imports.FeatureFlags")
+    @patch("src.adapters.inbound.http.routes.sync_imports.get_feature_flags")
     def test_sync_status_pending_from_inflight_task(self, mock_flags_cls, _setup_client):
         mock_flags = MagicMock(async_sync_enabled=True)
         mock_flags_cls.return_value = mock_flags
@@ -79,7 +79,7 @@ class TestSyncStatus:
         assert response.json()["status"] == "pending"
 
     @patch("src.adapters.inbound.http.routes.sync_imports._inflight_tasks", {"hash1": "task-1"})
-    @patch("src.adapters.inbound.http.routes.sync_imports.FeatureFlags")
+    @patch("src.adapters.inbound.http.routes.sync_imports.get_feature_flags")
     def test_sync_status_completed_includes_hash(self, mock_flags_cls, _setup_client):
         rule_text = "text"
         source_hash = hashlib.sha256(rule_text.encode()).hexdigest()
@@ -102,7 +102,7 @@ class TestSyncStatus:
         assert data["source_hash"] == source_hash
 
     @patch("src.adapters.inbound.http.routes.sync_imports._inflight_tasks", {"hash1": "task-1"})
-    @patch("src.adapters.inbound.http.routes.sync_imports.FeatureFlags")
+    @patch("src.adapters.inbound.http.routes.sync_imports.get_feature_flags")
     def test_sync_status_failed_includes_error(self, mock_flags_cls, _setup_client):
         rule_text = "text"
         source_hash = hashlib.sha256(rule_text.encode()).hexdigest()
@@ -124,7 +124,7 @@ class TestSyncStatus:
         assert data["status"] == "failed"
         assert "boom" in data["error"]
 
-    @patch("src.adapters.inbound.http.routes.sync_imports.FeatureFlags")
+    @patch("src.adapters.inbound.http.routes.sync_imports.get_feature_flags")
     def test_sync_status_matches_by_rule_text_hash(self, mock_flags_cls, _setup_client):
         rule_text = "INPUT x AS BOOLEAN"
         source_hash = hashlib.sha256(rule_text.encode()).hexdigest()
@@ -142,7 +142,7 @@ class TestSyncStatus:
         assert response.json()["status"] == "completed"
 
     @patch("src.adapters.inbound.http.routes.sync_imports._inflight_tasks", {"hash1": "task-1"})
-    @patch("src.adapters.inbound.http.routes.sync_imports.FeatureFlags")
+    @patch("src.adapters.inbound.http.routes.sync_imports.get_feature_flags")
     def test_sync_status_unknown_when_async_result_import_unavailable(self, mock_flags_cls, _setup_client):
         mock_flags = MagicMock(async_sync_enabled=True)
         mock_flags_cls.return_value = mock_flags
@@ -154,7 +154,7 @@ class TestSyncStatus:
         assert response.json()["status"] == "unknown"
 
     @patch("src.adapters.inbound.http.routes.sync_imports._inflight_tasks", {"hash1": "task-1"})
-    @patch("src.adapters.inbound.http.routes.sync_imports.FeatureFlags")
+    @patch("src.adapters.inbound.http.routes.sync_imports.get_feature_flags")
     def test_sync_status_unknown_when_final_status_check_fails(self, mock_flags_cls, _setup_client):
         rule_text = "text"
         source_hash = hashlib.sha256(rule_text.encode()).hexdigest()

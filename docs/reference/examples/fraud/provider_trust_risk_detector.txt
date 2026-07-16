@@ -1,0 +1,40 @@
+# ==========================================
+# INPUT DECLARATIONS
+# ==========================================
+# These inputs are populated by official-source checks, internal risk systems,
+# adverse-media review, supplied documents, or governed LLM evidence collection.
+
+INPUT provider has public warning AS BOOLEAN
+INPUT provider adverse public source signal found AS BOOLEAN
+INPUT provider sanctioned or excluded from scheme AS BOOLEAN
+INPUT provider complaints pattern is high risk AS BOOLEAN
+INPUT provider identity evidence requires manual review AS BOOLEAN
+INPUT provider public evidence confidence below threshold AS BOOLEAN
+INPUT provider bank account changed recently AS BOOLEAN
+INPUT provider bank account change independently verified AS BOOLEAN
+
+# ==========================================
+# RULE BLOCKS
+# ==========================================
+
+# Reference: AU provider trust and adverse-evidence controls.
+# Original: Provider trust risk is low when no public warning, adverse source, sanctions, complaints, identity-review, confidence, or bank-account change risk signal exists.
+provider trust risk is low
+    AND NOT provider trust investigation flag raised
+
+# Reference: Provider trust investigation triggers.
+# Original: A trust investigation flag is raised by public warnings, adverse public-source signals, sanctions/exclusions, high-risk complaint patterns, manual-review identity signals, low-confidence public evidence, or unverified bank-account changes.
+provider trust investigation flag raised
+    OR provider has public warning
+    OR provider adverse public source signal found
+    OR provider sanctioned or excluded from scheme
+    OR provider complaints pattern is high risk
+    OR provider identity evidence requires manual review
+    OR provider public evidence confidence below threshold
+    OR provider bank account change risk detected
+
+# Reference: Provider bank-account change controls.
+# Original: Bank-account change risk is detected when a provider account changed recently and the change has not been independently verified.
+provider bank account change risk detected
+    AND provider bank account changed recently
+    AND NOT provider bank account change independently verified

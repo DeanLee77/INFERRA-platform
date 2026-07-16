@@ -53,11 +53,13 @@ from src.domain.aegis.trigger_policy import (
 )
 from src.domain.aegis.workflow_authoring import AegisWorkflowActivationError, AegisWorkflowAuthoringService
 from src.domain.inference.session_service import InferenceSessionService
+from src.infrastructure.logging_config import get_logger
 from src.ports.session_store_port import SessionStorePort
 from src.services.rule_service import RuleService
 
 
 router = APIRouter(prefix="/api/v1/aegis", tags=["aegis-workflow-runtime"])
+_logger = get_logger(__name__)
 
 
 def _runtime():
@@ -102,11 +104,27 @@ def _trigger_policy_service(
         session_service,
         _phase3_service(db),
         (
-            (lambda: _llm_configuration_snapshot("aegis", platform_db))
+            (lambda: _optional_llm_configuration_snapshot("aegis", platform_db))
             if platform_db is not None
             else None
         ),
     )
+
+
+def _optional_llm_configuration_snapshot(
+    product_id: str,
+    db: Session,
+) -> dict[str, Any]:
+    """Keep deterministic AEGIS workflows available if optional LLM state is unavailable."""
+    try:
+        return _llm_configuration_snapshot(product_id, db)
+    except Exception as exc:
+        _logger.warning(
+            "aegis_llm_configuration_unavailable",
+            product_id=product_id,
+            error_type=type(exc).__name__,
+        )
+        return {}
 
 
 def _utc_now() -> str:
@@ -1255,7 +1273,7 @@ async def create_aegis_inference_session(
             _request_user_id(fastapi_request),
             request.ontology_profile,
             request.ontology_flags,
-            _llm_configuration_snapshot("aegis", platform_db),
+            _optional_llm_configuration_snapshot("aegis", platform_db),
         )
     except Exception as exc:
         raise _map_error(exc) from exc

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from src.adapters.outbound.persistence.aegis_workflow_repository import AegisWorkflowRepository
+from src.ports.aegis_repository_ports import AegisWorkflowRepositoryPort
 from src.domain.aegis.rule_store import AEGIS_PRODUCT, AEGIS_RULE_STORE, build_policy_integrity, stable_hash
 from src.services.rule_service import RuleService
 
@@ -173,7 +173,7 @@ class AegisWorkflowAuthoringService:
 
     def __init__(
         self,
-        repository: AegisWorkflowRepository,
+        repository: AegisWorkflowRepositoryPort,
         rule_service: RuleService | None = None,
     ):
         self._repository = repository

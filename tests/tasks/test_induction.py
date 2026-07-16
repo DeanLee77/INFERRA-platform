@@ -12,6 +12,7 @@ from src.tasks.induction import (
     publish_induction_dead_letter,
     run_induction_batch,
 )
+from src.domain.state.feature_flags import FeatureFlagSnapshotMismatchError
 from src.tasks.event_publisher import on_rule_updated
 
 
@@ -104,6 +105,14 @@ def test_publish_induction_dead_letter_handles_redis_failure():
 
 @pytest.mark.skipif(not hasattr(run_induction_batch, "run"), reason="Celery task is unavailable")
 class TestRunInductionBatch:
+    def test_run_induction_batch_rejects_flag_mismatch(self):
+        with pytest.raises(FeatureFlagSnapshotMismatchError):
+            run_induction_batch.run(
+                ["s1"],
+                "rule1",
+                "publisher-mismatch",
+            )
+
     def test_run_induction_batch_filters_candidates(self):
         run_induction_batch.push_request(id="job1", retries=0)
         try:

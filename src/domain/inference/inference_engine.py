@@ -1909,6 +1909,8 @@ class InferenceEngine:
 
         line_type = node.get_line_type()
         if LineType.COMPARISON == line_type:
+            if not self._can_evaluate_without_mutation(node):
+                return
             fact_value = node.self_evaluate(self._get_deterministic_working_memory())
             if fact_value is None:
                 return

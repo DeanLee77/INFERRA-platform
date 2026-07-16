@@ -25,6 +25,7 @@ from src.domain.state.feature_flags import (
     feature_flags_from_snapshot,
     get_feature_flags,
     ontology_flags_snapshot,
+    validate_runtime_feature_flags,
 )
 from src.ports.session_store_port import SessionStorePort
 from src.infrastructure.logging_config import get_logger
@@ -88,6 +89,7 @@ class InferenceSessionService:
             ontology_profile=ontology_profile,
             ontology_flags=ontology_flags,
         )
+        validate_runtime_feature_flags(session_flags)
         session_flags.freeze()
         return session_flags, selected_profile
     
@@ -312,7 +314,9 @@ class InferenceSessionService:
             history_dict = rule_service.get_history_for_ml_inference(rule_name)
         
         # Build the node set
-        parser = rule_service.build_rule_set_parser(rule_name, history_dict)
+        flags = get_feature_flags()
+        parser_history = history_dict if flags.ml_optimized_dfs else None
+        parser = rule_service.build_rule_set_parser(rule_name, parser_history)
         node_set = parser.get_node_set()
         
         # Create the session
