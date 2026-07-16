@@ -259,6 +259,10 @@ def test_container_hardening_artifacts_are_enforced():
 
     assert "FROM python:3.10-slim@sha256:" in dockerfile
     assert "AS builder" in dockerfile
+    assert "ARG UV_VERSION=0.11.18" in dockerfile
+    assert "COPY pyproject.toml uv.lock ./" in dockerfile
+    assert "python -m uv export --frozen" in dockerfile
+    assert "pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock" in dockerfile
     assert "USER inferra" in dockerfile
     assert "HEALTHCHECK" in dockerfile
     assert "read_only: true" in compose

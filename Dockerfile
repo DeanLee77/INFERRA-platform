@@ -1,15 +1,26 @@
 FROM python:3.10-slim@sha256:70f65c721aaddfb22b20ed6ec12606c59d9592493c5fcb6639f3d0e8ba3fbc10 AS builder
 
+ARG UV_VERSION=0.11.18
+
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-COPY pyproject.toml ./
+COPY pyproject.toml uv.lock ./
 COPY src ./src
 COPY docs/inferra_prompt.md ./inferra_prompt.md
 
-RUN pip install --no-cache-dir ".[async,semantic,reasoning,observability]" \
+RUN pip install --no-cache-dir "uv==${UV_VERSION}" \
+    && python -m uv export --frozen \
+        --extra async \
+        --extra semantic \
+        --extra reasoning \
+        --extra observability \
+        --format requirements.txt \
+        --no-emit-project \
+        --output-file /tmp/requirements.lock \
+    && pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock \
     && find /usr/local -type d -name __pycache__ -prune -exec rm -rf {} +
 
 FROM python:3.10-slim@sha256:70f65c721aaddfb22b20ed6ec12606c59d9592493c5fcb6639f3d0e8ba3fbc10
@@ -30,6 +41,7 @@ COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder --chown=inferra:inferra /app/src ./src
 COPY --from=builder --chown=inferra:inferra /app/pyproject.toml ./
+COPY --from=builder --chown=inferra:inferra /app/uv.lock ./
 COPY --from=builder --chown=inferra:inferra /app/inferra_prompt.md ./inferra_prompt.md
 
 USER inferra
