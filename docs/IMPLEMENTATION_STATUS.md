@@ -14,12 +14,13 @@ gate also meets the unchanged 97% coverage policy. Remaining work is external
 release evidence and policy rather than foundational implementation: frontend
 build inputs, live smoke/load/chaos runs, staging repetition, complete release
 artifacts, external secret management, tenant auth decisions, LLM provider
-policy, and final legacy retirement.
+policy, final legacy retirement, and activation of the prepared GitHub branch
+protection checks.
 
 ## Verification Snapshot
 | Gate | Latest local result |
 | --- | --- |
-| Functional regression suite | Clean integrated run: 3,437 passed, 73 skipped |
+| Functional regression suite | Clean integrated run: 3,438 passed, 73 skipped |
 | Benchmark gate | 22 passed, 3 skipped |
 | Phase 5 acceptance | 7 passed with the integration gate enabled |
 | Infrastructure release gates | 39 passed, 3 skipped |
@@ -30,6 +31,8 @@ policy, and final legacy retirement.
 | Feature-flag evidence | API and worker each captured 28 entries with matching snapshot hash `789dc53d...b215b` |
 | Local release-candidate script | Pass with unavailable frontend, live-smoke, load, and chaos inputs explicitly skipped |
 | Load gate | Main-branch CI includes Dockerized k6 production profile |
+| OpenAPI release contract | Canonical `openapi.json` generated deterministically; local drift check passes |
+| Required-check design | Six independently requireable CI jobs prepared: dependency audit, coverage, import contracts, Docker build, OpenAPI drift, and candidate evidence |
 
 ## Phase Status
 | Area | Current state | Production caveat |
@@ -70,12 +73,15 @@ policy, and final legacy retirement.
 | Observability dashboards/metrics/logging | Implemented locally; staging tuning needed |
 | Feature-flag runtime visibility | Implemented for API/worker startup, protected system API, release evidence, and cross-process hash checks |
 | k6 and chaos gates | Implemented locally; staging repetition needed |
-| OpenAPI release artifact | Still missing |
+| OpenAPI release artifact | Implemented locally as committed `openapi.json`; CI retention and drift enforcement activate after push |
 
 ## Release Blockers
 1. Restore/locate the two frontend workspaces referenced by the release script
    and execute their build/test stage.
-2. Generate and publish `openapi.json` in CI, with drift detection.
+2. Push the candidate and make `Python dependency audit`, `Backend tests and
+   coverage`, `Import contracts`, `Docker build`, `OpenAPI drift`, and
+   `Candidate evidence` required branch-protection checks. Confirm the OpenAPI
+   and evidence-summary artifacts are retained by the first workflow run.
 3. Run readiness, k6 production gate, and chaos suite in staging, not only local Compose.
 4. Move real secrets to the target platform secret manager.
 5. Decide first-release auth policy: API key/JWT only, or OIDC/RBAC.

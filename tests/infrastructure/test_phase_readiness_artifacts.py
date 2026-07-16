@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 
@@ -53,7 +54,7 @@ def test_docs_index_and_reference_comparison_capture_current_truth():
     assert "Coverage policy" in implementation
     assert "Benchmark gate" in implementation
     assert "OpenAPI release artifact" in implementation
-    assert "Generate `openapi.json` in CI" in roadmap
+    assert "require the six named release checks in branch protection" in roadmap
     assert "production overlay requires non-default secret material" in operations
     assert "not the current implementation backlog" in archive
 
@@ -150,12 +151,38 @@ def test_ci_workflow_keeps_backend_supply_chain_and_docker_gates():
     assert "actions/checkout@" in content
     assert "actions/setup-python@" in content
     assert "pytest --cov=src --cov-fail-under=97" in content
+    assert "import-contracts:" in content
+    assert "name: Import contracts" in content
     assert "lint-imports --config .importlinter" in content
+    assert "openapi-contract:" in content
+    assert "name: OpenAPI drift" in content
+    assert "python scripts/generate_openapi.py --check" in content
+    assert "inferra-openapi-${{ github.sha }}" in content
     assert "docker compose build api worker" in content
+    assert "candidate-evidence:" in content
+    assert "name: Candidate evidence" in content
+    assert "ci-release-gate-summary.json" in content
+    assert "needs: [python-supply-chain, backend, import-contracts, openapi-contract, docker-build]" in content
+    assert "actions/upload-artifact@" in content
     assert "load-gate:" in content
+    assert "needs: [candidate-evidence]" in content
     assert "grafana/k6:0.51.0" in content
     assert "k6_production_gate.js" in content
     assert "--network inferra_default" in content
+
+
+def test_openapi_release_generator_and_artifact_are_governed():
+    generator = read_text("scripts/generate_openapi.py")
+    openapi = json.loads(read_text("openapi.json"))
+
+    assert 'DEFAULT_OUTPUT = REPOSITORY_ROOT / "openapi.json"' in generator
+    assert '"INFERRA_LOAD_DOTENV": "false"' in generator
+    assert "sort_keys=True" in generator
+    assert "--check" in generator
+    assert openapi["openapi"].startswith("3.")
+    assert openapi["info"]["title"] == "INFERRA Platform API"
+    assert openapi["info"]["version"] == "2.0.0"
+    assert "/api/v1/health" in openapi["paths"]
 
 
 def test_chaos_script_is_reversible_and_compose_scoped():

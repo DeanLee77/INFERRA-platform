@@ -4,19 +4,19 @@
 
 > Prepared during the VERIDA re-platforming effort and revalidated on 2026-07-16
 
-> against the latest uncommitted `feature/enhancement` working tree. The committed
+> against the local `feature/enhancement` release-candidate lineage. The reviewed
 
-> local tree at `e32ddca` is content-identical to `development` at `99f40b2`, but
+> source, tests, governed documents, and authorised reference examples were first
 
-> the candidate working tree contains substantial additional changes. The initial
+> frozen in local candidate `742f591`; clean-checkout reproducibility and locked
 
-> inventory contained 69 tracked
+> image builds were then corrected through `e37fac3`. R0.5 now adds the committed
 
-> files differing from `development` and 110 untracked files. After repository
+> OpenAPI contract and CI release-gate design. The pre-candidate working-tree
 
-> hygiene, `.coverage.*` is ignored and this assessment is explicitly unignored,
+> inventory is retained later in this document as audit history, not as the
 
-> leaving 52 visible untracked files. Inspection covered
+> current repository state. Inspection covered
 
 > `models.py`, the
 
@@ -42,7 +42,9 @@
 
 > without failure before the review timebox expired; the repository's retained
 
-> release evidence reports 3,437 passed, 73 skipped, and 97.016% coverage.
+> final clean-checkout release evidence reports 3,438 passed, 73 skipped, and
+
+> 97.016% coverage.
 
 
 
@@ -54,11 +56,11 @@
 
 
 
-INFERRA is **a genuinely thoughtful reasoning platform whose current working tree
+INFERRA is **a genuinely thoughtful reasoning platform with a reproducible local
 
-is close to a backend release candidate, but is not yet a reproducible or
+backend candidate lineage, but it is not yet an operationally approved production
 
-operationally approved production release.**
+release.**
 
 
 
@@ -72,11 +74,11 @@ signs of a team that understands neuro-symbolic AI and has real-world scar tissu
 
 The immediate weaknesses are release discipline and unresolved production
 
-decisions: the intended candidate is spread across a dirty working tree, schema
+decisions: GitHub release gates are prepared but not yet enforced, schema migration
 
-migration is performed at runtime, Redis sessions deserialize pickle, frontend
+is performed at runtime, Redis sessions deserialize pickle, frontend release
 
-and OpenAPI release inputs are incomplete, ontology needs live end-to-end proof,
+inputs are incomplete, ontology needs live end-to-end proof,
 
 and auth/secret/deployment policy is not signed off. The relational schema, broad
 
@@ -692,11 +694,13 @@ tenancy, incident, or cost evidence to conclude that it is over-provisioned.
 
 ## 5. Recommendation assessment
 
-The current working tree should be treated as a candidate under construction,
+The local branch should be treated as a release-candidate lineage, not as a
 
-not as a releasable artifact. Backend correctness evidence is strong: the retained
+releasable artifact until external gates and sign-off close. Backend correctness
 
-report records 3,437 passed tests at 97.016% coverage; the focused auth, Redis
+evidence is strong: the retained clean-checkout report records 3,438 passed tests
+
+at 97.016% coverage; the focused auth, Redis
 
 session, feature-flag, rule-sync, ontology post-reasoning, and metrics slice passed
 
@@ -805,15 +809,35 @@ expiry date, and the P1 item that removes the exception.
    lock hash, container image digests, feature-flag snapshot hashes, test/coverage
 
    output, benchmark output, and import-linter report to one evidence bundle.
+
+   **Completed locally for `e37fac3`:** the clean-checkout evidence ZIP and
+
+   checksum manifest were produced; external environment, signing, and registry
+
+   evidence remain explicitly pending.
 5. Generate `openapi.json` in CI and fail on drift. Make the dependency audit,
 
    backend coverage, import contracts, Docker build, OpenAPI drift, and candidate
 
    evidence jobs required branch-protection checks.
 
+   **Local implementation completed 2026-07-16:** `openapi.json` is generated
+
+   deterministically from the real FastAPI application; CI has independently
+
+   requireable jobs named `Python dependency audit`, `Backend tests and coverage`,
+
+   `Import contracts`, `Docker build`, `OpenAPI drift`, and `Candidate evidence`.
+
+   The OpenAPI and candidate-summary artifacts are retained for 30 days. **Still
+
+   external and release-blocking:** push this branch, observe one successful run,
+
+   and configure all six names as required checks in GitHub branch protection.
 
 
-**Candidate inventory refreshed 2026-07-16 after documentation archival**
+
+**Closed pre-candidate inventory, retained for audit history**
 
 
 
@@ -869,9 +893,9 @@ the candidate incomplete.
 - The full local release-candidate command was started but reached its ten-minute
   execution ceiling at 6% of the 3,510-test backend suite with no reported test
   failure. This interrupted run is not counted as a new full-suite pass.
-- The last completed full candidate result remains 3,437 passed, 73 skipped, and
-  97.016% coverage; the subsequent repository changes are documentation archival
-  and governance updates.
+- The completed clean-checkout candidate result is 3,438 passed, 73 skipped, and
+  97.016% coverage. R0.5 changes only release tooling, CI policy, generated
+  OpenAPI evidence, tests for those artifacts, and active documentation.
 - Focused feature-flag, environment, evidence, orchestration, and reference-example
   validation passed 338 tests.
 - Phase 5 acceptance passed 7 tests; benchmarks passed 22 with 3 skipped;
@@ -881,7 +905,9 @@ the candidate incomplete.
 
 `git diff --check` reports no whitespace errors for the current candidate.
 Documentation archival moves and reference-example approval have been applied.
-This inventory defines the boundary of the immutable local candidate commit.
+This historical inventory defined the boundary of the first immutable local
+candidate commit. The current candidate lineage includes the subsequent
+clean-checkout, locked-image, and R0.5 release-gate corrections described above.
 
 
 

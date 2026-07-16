@@ -8,13 +8,16 @@ This roadmap consolidates the old phase/future/enhancement documents. Archived p
 ## Release Candidate Track
 
 Local milestone completed 2026-07-16: the clean backend release-candidate gate
-passed 3,437 tests with 73 skips at 97.016% coverage, captured matching API and
+passed 3,438 tests with 73 skips at 97.016% coverage, captured matching API and
 worker flag snapshots, and passed acceptance, benchmark, infrastructure, and
-import-boundary checks. Frontend and live-environment gates remain below.
+import-boundary checks. A deterministic, committed `openapi.json`, CI drift
+gate, retained schema artifact, and aggregate candidate-evidence job are now
+implemented locally. GitHub enforcement, frontend, and live-environment gates
+remain below.
 
 | Priority | Work | Outcome |
 | --- | --- | --- |
-| P0 | Generate `openapi.json` in CI and fail on drift | API/schema changes become visible release artifacts |
+| P0 | Push the candidate and require the six named release checks in branch protection | The local OpenAPI/evidence design becomes enforced repository policy |
 | P0 | Move production secrets to the selected platform secret manager | No real production secrets live in files, `.env`, or CI logs |
 | P0 | Repeat k6 production gate and chaos suite in staging | Local evidence becomes environment evidence |
 | P0 | Decide first-release auth posture | API key/JWT-only release or OIDC/RBAC scope is explicit |

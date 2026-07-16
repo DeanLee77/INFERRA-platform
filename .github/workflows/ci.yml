@@ -47,8 +47,41 @@ jobs:
         run: pytest tests/domain/state/test_feature_flag_metadata.py -q
       - name: Run backend test suite
         run: pytest --cov=src --cov-fail-under=97
+
+  import-contracts:
+    name: Import contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.10"
+          cache: "pip"
+      - name: Install import-contract tooling and project
+        run: python -m pip install -e ".[dev,async,semantic,reasoning,observability]"
       - name: Enforce import boundaries
         run: lint-imports --config .importlinter
+
+  openapi-contract:
+    name: OpenAPI drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.10"
+          cache: "pip"
+      - name: Install backend dependencies
+        run: python -m pip install -e ".[dev,async,semantic,reasoning,observability]"
+      - name: Verify committed OpenAPI schema
+        run: python scripts/generate_openapi.py --check
+      - name: Retain OpenAPI release artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: inferra-openapi-${{ github.sha }}
+          path: openapi.json
+          if-no-files-found: error
+          retention-days: 30
 
   docker-build:
     name: Docker build
@@ -58,10 +91,47 @@ jobs:
       - name: Build API and worker images
         run: docker compose build api worker
 
+  candidate-evidence:
+    name: Candidate evidence
+    runs-on: ubuntu-latest
+    needs: [python-supply-chain, backend, import-contracts, openapi-contract, docker-build]
+    if: always()
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Write release-gate summary
+        env:
+          DEPENDENCY_AUDIT_RESULT: ${{ needs.python-supply-chain.result }}
+          BACKEND_COVERAGE_RESULT: ${{ needs.backend.result }}
+          IMPORT_CONTRACTS_RESULT: ${{ needs.import-contracts.result }}
+          OPENAPI_DRIFT_RESULT: ${{ needs.openapi-contract.result }}
+          DOCKER_BUILD_RESULT: ${{ needs.docker-build.result }}
+        run: |
+          mkdir -p artifacts/release
+          python -c 'import json, os; results={"python_dependency_audit": os.environ["DEPENDENCY_AUDIT_RESULT"], "backend_tests_and_coverage": os.environ["BACKEND_COVERAGE_RESULT"], "import_contracts": os.environ["IMPORT_CONTRACTS_RESULT"], "openapi_drift": os.environ["OPENAPI_DRIFT_RESULT"], "docker_build": os.environ["DOCKER_BUILD_RESULT"]}; payload={"schema_version": 1, "repository": os.environ["GITHUB_REPOSITORY"], "commit_sha": os.environ["GITHUB_SHA"], "workflow_run_id": os.environ["GITHUB_RUN_ID"], "workflow_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"], "results": results, "all_required_gates_passed": all(value == "success" for value in results.values())}; open("artifacts/release/ci-release-gate-summary.json", "w", encoding="utf-8", newline="\n").write(json.dumps(payload, indent=2, sort_keys=True) + "\n")'
+      - name: Retain candidate evidence summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: inferra-candidate-evidence-${{ github.sha }}
+          path: artifacts/release/ci-release-gate-summary.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Enforce required candidate gates
+        env:
+          DEPENDENCY_AUDIT_RESULT: ${{ needs.python-supply-chain.result }}
+          BACKEND_COVERAGE_RESULT: ${{ needs.backend.result }}
+          IMPORT_CONTRACTS_RESULT: ${{ needs.import-contracts.result }}
+          OPENAPI_DRIFT_RESULT: ${{ needs.openapi-contract.result }}
+          DOCKER_BUILD_RESULT: ${{ needs.docker-build.result }}
+        run: |
+          for result in "$DEPENDENCY_AUDIT_RESULT" "$BACKEND_COVERAGE_RESULT" "$IMPORT_CONTRACTS_RESULT" "$OPENAPI_DRIFT_RESULT" "$DOCKER_BUILD_RESULT"; do
+            test "$result" = "success"
+          done
+
   load-gate:
     name: Dockerized k6 production gate
     runs-on: ubuntu-latest
-    needs: [python-supply-chain, backend, docker-build]
+    needs: [candidate-evidence]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
