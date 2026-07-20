@@ -1,4 +1,10 @@
 
+> **Superseded architecture notice — 2026-07-17.** This point-in-time blueprint
+> is retained for history. It does not control current package, service, product,
+> SDK, frontend, persistence, or release boundaries. See
+> `../../INFERRA_Core_Package_and_Runtime_Architecture.md` and
+> `../../INFERRA_Cross_Project_Technical_Direction.md`.
+
 # INFERRA: Consolidated Architecture & Implementation Plan
 ## Hybrid Reasoning Platform — *"From rules to reasoning."*
 

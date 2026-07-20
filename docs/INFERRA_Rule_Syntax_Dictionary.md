@@ -1,9 +1,14 @@
 ﻿# INFERRA Rule Syntax Dictionary
-## Version 0.3 — Current Implemented Reference
+## Version 0.3.1 — Current Implemented Reference
 
 **Purpose:** This dictionary describes the current implemented INFERRA rule grammar: every supported keyword, operator, line type, and structural convention. It is written for rule engineers, engine developers, and non-technical stakeholders alike. Each entry explains what a keyword does in plain English, how it works technically, when to use it, when not to use it, and illustrates with real Australian legislative examples.
 
 **Scope:** This document is the current grammar reference, not a future-language proposal. Intended future grammar should be recorded separately until the parser, validator, inference engine, and tests support it.
+
+> **Canonical ownership — 2026-07-17.** Platform owns this syntax reference. The
+> parser/validator being moved into the internal `inferra-core` distribution is
+> the behavioral authority, and its syntax version/hash must appear in release
+> manifests. AXIOM and AEGIS copies should be generated or CI drift-checked.
 
 **How to Read This Dictionary:**
 - Each keyword entry follows this structure:
@@ -914,14 +919,25 @@ Dean is not eligible
 
 **Technical Detail:**
 - Creates an Expression Conclusion Line node in the dependency graph
-- The expression inside `()` is evaluated using the values of referenced variables
+- The expression inside `()` is parsed as INFERRA syntax and interpreted using only the explicit working-memory values of referenced variables
 - Supports arithmetic operators: `+`, `-`, `*`, `/`
-- Supports conditional ternary operator: `condition ? value_if_true : value_if_false`
-- Supports functions: `ROUND()`, `MAX()`, `MIN()`
+- Supports unary numeric operators: `+value`, `-value`
+- Supports one comparison at a time with `=`, `>`, `>=`, `<`, or `<=`; comparisons are intended as ternary conditions and chained comparisons are rejected
+- Numeric-looking relational operands preserve integer/decimal precision; they are not rounded through binary floating point before comparison
+- Supports a right-associative conditional ternary operator: `condition ? value_if_true : value_if_false`, including nested ternaries
+- Supports uppercase allowlisted functions only: `ROUND(value)` or `ROUND(value, decimal_places)`, and exactly two arguments for `MAX(left, right)` or `MIN(left, right)`
+- Supports numeric literals and quoted text literals; the final result must not be a bare boolean comparison
 - All variables used in the expression must be declared with NEEDS (mandatory) or WANTS (optional)
-- IS CALC can be a parent or a child rule
-- NEVER use IS CALC inside a child dependency — IS CALC must be the top-level statement of an Expression Conclusion Line
+- A missing WANTS value is exposed to the expression as falsey zero so a documented ternary fallback can be selected
+- Other rules may depend on the calculated conclusion, but its `IS CALC` declaration must itself be the top-level statement of an Expression Conclusion Line
 - Date arithmetic is NOT supported — model date logic externally and pass results as INPUTs
+
+**Security and resource boundary:**
+- Rule text is never executed as Python and is never delegated to SymPy or another general-purpose expression evaluator
+- Attribute access, imports, comprehensions, indexing, arbitrary function calls, and operators such as `**`, `%`, `!=`, `&&`, and `||` are unsupported and cause validation to fail
+- The current interpreter limits an expression to 4,096 characters, 512 tokens, 512 AST nodes, 32 nesting levels, and 1,024 evaluation steps; it also bounds integer size, strings, collections, and rounding precision
+- Division errors, non-finite numeric results, missing mandatory values, unsupported value types, invalid syntax, and limit violations fail evaluation; they are not converted into a guessed result
+- Rule validation parses IS CALC expressions before save or activation and reports `INVALID_CALC_EXPRESSION` for unsupported or unsafe syntax
 
 **When to Use:**
 - When the legislation specifies a calculation: "the allowance is the rate multiplied by the number of days"
@@ -968,6 +984,9 @@ travel allowance IS CALC (distance to treatment * rate per kilometre)
 2. Using IS CALC inside a child dependency — IS CALC must always be the top-level statement
 3. Forgetting NEEDS/WANTS declarations for variables used in the expression
 4. Attempting date arithmetic — model date logic externally and pass results as INPUTs
+5. Using lowercase or arbitrary functions such as `round()`, `abs()`, `eval()`, or `__import__()` — only uppercase `ROUND`, `MAX`, and `MIN` are valid
+6. Using Python operators such as `**`, `%`, `!=`, `and`, or `or` — they are not part of the INFERRA expression language
+7. Treating a comparison as the final calculated value — use it as the condition in `condition ? value_if_true : value_if_false`
 
 ---
 

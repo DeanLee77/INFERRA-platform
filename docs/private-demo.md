@@ -1,5 +1,11 @@
 # AXIOM/AEGIS Private Demo Runbook And Smoke Evidence
 
+> **Historical/private development evidence — reviewed 2026-07-17.** This
+> synthetic runbook is not release evidence for the separately maintained AXIOM
+> or AEGIS repositories and does not demonstrate the accepted `inferra-core`
+> package, authenticated BFFs, durable product backends, signatures, or Core API
+> profile. It remains excluded from production routes and claims.
+
 Internal-only runbook for [INFA-61](/INFA/issues/INFA-61), under the private-readiness gate in [INFA-40](/INFA/issues/INFA-40#document-plan).
 
 This path uses sanitized synthetic fixture data only. It does not use PHI, customer data, production integrations, real payer policy, external infrastructure, public URLs, sales claims, compliance claims, or autonomous workflow execution.

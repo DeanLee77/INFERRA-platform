@@ -67,12 +67,23 @@ docs/*
 !docs/OPERATIONS.md
 !docs/ROADMAP.md
 !docs/INFERRA - Assessment & Recommendations.md
+!docs/INFERRA_Cross_Project_Technical_Direction.md
+!docs/INFERRA_Core_Package_and_Runtime_Architecture.md
+!docs/INFERRA_Account_Case_Ontology_and_Provenance_Architecture.md
+!docs/INFERRA_Core_Extraction_P0_1_Baseline.md
+!docs/INFERRA_Core_Extraction_P0_2_Distribution.md
 !docs/README.md
 !docs/INFERRA_Production_Decision_Register.md
 !docs/INFERRA_Legacy_Retirement_Register.md
 !docs/INFERRA_vs_PALOS_PyRest_Comparison_Report.md
+!docs/Business docs/
+docs/Business docs/*
+!docs/Business docs/INFERRA user story.md
 !docs/archive/
 !docs/archive/**
+!docs/evaluation/
+docs/evaluation/*
+!docs/evaluation/core_boundary_inventory.json
 !docs/reference/
 docs/reference/*
 !docs/reference/examples/

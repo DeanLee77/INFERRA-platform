@@ -54,7 +54,7 @@ def test_docs_index_and_reference_comparison_capture_current_truth():
     assert "Coverage policy" in implementation
     assert "Benchmark gate" in implementation
     assert "OpenAPI release artifact" in implementation
-    assert "require the six named release checks in branch protection" in roadmap
+    assert "require the seven named release checks in branch protection" in roadmap
     assert "production overlay requires non-default secret material" in operations
     assert "not the current implementation backlog" in archive
 
@@ -145,6 +145,10 @@ def test_production_decision_and_legacy_registers_exist():
 def test_ci_workflow_keeps_backend_supply_chain_and_docker_gates():
     content = read_text(".github/workflows/ci.yml")
 
+    assert "core-distribution:" in content
+    assert "name: Core package and isolated wheel" in content
+    assert "verify_inferra_core_distribution.py --output-dir dist/core" in content
+    assert "python -m pip install -e packages/inferra-core" in content
     assert "python-supply-chain:" in content
     assert "uv lock --check" in content
     assert "pip_audit" in content
@@ -162,7 +166,7 @@ def test_ci_workflow_keeps_backend_supply_chain_and_docker_gates():
     assert "candidate-evidence:" in content
     assert "name: Candidate evidence" in content
     assert "ci-release-gate-summary.json" in content
-    assert "needs: [python-supply-chain, backend, import-contracts, openapi-contract, docker-build]" in content
+    assert "needs: [core-distribution, python-supply-chain, backend, import-contracts, openapi-contract, docker-build]" in content
     assert "actions/upload-artifact@" in content
     assert "load-gate:" in content
     assert "needs: [candidate-evidence]" in content

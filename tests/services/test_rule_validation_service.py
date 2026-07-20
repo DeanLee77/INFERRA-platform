@@ -15,6 +15,11 @@ import time
 import pytest
 
 from src.domain.fact_values import FactValueType
+from src.services.declaration_validator import (
+    DECLARATION_VALIDATION_INTERNAL_ERROR,
+    DeclarationFinding,
+    DeclarationValidationResult,
+)
 from src.services.rule_validation_service import (
     RuleValidationService,
     ValidationError,
@@ -925,3 +930,31 @@ class TestIntegration:
         )
         result = service.validate(rule_text)
         assert not any(e.code == "UNDECLARED_REFERENCE" for e in result.errors)
+
+
+def test_validation_rejects_unsupported_calc_source(service):
+    result = service.validate(
+        "result IS CALC __import__('builtins').sum((20, 22))\n",
+        "unsafe_expression",
+    )
+
+    assert result.valid is False
+    assert any(error.code == "INVALID_CALC_EXPRESSION" for error in result.errors)
+
+
+def test_declaration_validation_internal_error_blocks_rule(service):
+    finding = DeclarationFinding(
+        code=DECLARATION_VALIDATION_INTERNAL_ERROR,
+        message="declaration parser failed",
+    )
+    service._declaration_validator.validate_rule_text = lambda *_args: (
+        DeclarationValidationResult(valid=False, errors=(finding,))
+    )
+
+    result = service.validate("claim\n", "fail_closed")
+
+    assert result.valid is False
+    assert any(
+        error.code == DECLARATION_VALIDATION_INTERNAL_ERROR
+        for error in result.errors
+    )

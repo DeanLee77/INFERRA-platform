@@ -5,6 +5,7 @@ This harness is the first local regression suite for INFERRA's neuro-symbolic be
 ## Command
 
 ```powershell
+python -m pytest tests/evaluation/test_core_behavior_golden_vectors.py
 python -m pytest tests/evaluation/test_neuro_symbolic_golden_cases.py
 python -m pytest tests/evaluation/test_graphrag_retrieval_provenance.py
 ```
@@ -25,6 +26,10 @@ The retrieval provenance harness can also emit its JSON report directly:
 
 ## Coverage
 
+- Core extraction compatibility: frozen parser graph/stable IDs, deterministic
+  validation diagnostics, backward-chain question/fact/pruning behavior,
+  transitive import origins and hashes, iteration quantifiers, and equivalent
+  Turtle/JSON-LD provenance graph digests.
 - Symbolic consistency: synthetic decision receipt outcomes stay aligned with fixture expectations, source labels, rule version, missing-evidence prompts, and sanitization flags.
 - Retrieval provenance: in-memory ontology enrichment produces advisory `SEMANTIC` tags with subject/predicate/object provenance and does not override asserted facts.
 - GraphRAG retrieval provenance: offline lexical golden cases over `docs/reference/examples/` and active docs report precision, recall, freshness, and provenance coverage from `retrieval_source_manifest.json`.

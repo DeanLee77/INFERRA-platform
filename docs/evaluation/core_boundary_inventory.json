@@ -1,0 +1,367 @@
+{
+  "schema_version": 2,
+  "captured_on": "2026-07-17",
+  "working_tree_policy": "The latest uncommitted local working tree is the intended future release candidate.",
+  "extraction_progress": {
+    "updated_on": "2026-07-17",
+    "phase": "P0.2",
+    "status": "in_progress",
+    "core_distribution": "inferra-core==0.1.1",
+    "completed_slice": "P0.2a leaf values/ports/diagnostics, P0.2b private executable graph/node/token/parser/validation, and the bounded-expression/fail-closed-validation/typed-cycle security correction are present in inferra_core.",
+    "remaining_slice_order": "public compile/validation facade and installed-artifact Platform integration first; then fact store/iteration/import resolution, inference/provenance, complete rewiring, and whole-engine proof"
+  },
+  "baseline": {
+    "branch": "feature/enhancement",
+    "git_commit": "49be15db253e2e6d5ced52bab2b770ba0707945e",
+    "git_src_tree": "627c8e068fb4835f9958396d6aa8af9c0fc57c07",
+    "source_tree_sha256": "9105df7d7e0875a98e8f1dfae8cbfe738dc26d814ec29e76d84a7a2c8fb2f404",
+    "python_module_count": 243,
+    "src_worktree_was_clean": true,
+    "behavioral_baseline": "769 passed, 39 warnings in 19.81s",
+    "platform_version": "2.0.0",
+    "rule_syntax_version": "0.3",
+    "rule_syntax_dictionary": "docs/INFERRA_Rule_Syntax_Dictionary.md",
+    "rule_syntax_dictionary_sha256": "388919ff8f36ac198ab92d04e8279e2b19c948754e86eb649e557bf05cf2c9c7"
+  },
+  "current_contract": {
+    "core_distribution": "inferra-core==0.1.1",
+    "rule_syntax_version": "0.3.1",
+    "rule_syntax_dictionary": "docs/INFERRA_Rule_Syntax_Dictionary.md",
+    "rule_syntax_dictionary_sha256": "f90974cf3f35bfcb32920ea0ad5485260e87052506016f18317260a8a816ed34",
+    "core_runtime_dependencies": [],
+    "resolved_extraction_blockers": [
+      "B07"
+    ],
+    "security_correction": "Bounded INFERRA expression interpreter; fail-closed declaration validation; typed graph-cycle failure."
+  },
+  "classifications": {
+    "core_initial": "Move or replace with an equivalent inferra_core module during the first extraction slice.",
+    "platform_runtime": "Keep in inferra-platform because it owns transport, persistence, identity, configuration, jobs, sessions, or operations.",
+    "platform_compatibility": "Keep temporarily in Platform as a legacy compatibility or migration adapter; do not expose from the Core facade.",
+    "extension": "Keep outside Core because it belongs to AEGIS, LLM, provider verification, ontology products, demos, or experimental reasoning."
+  },
+  "classification_counts": {
+    "core_initial": 70,
+    "platform_runtime": 123,
+    "platform_compatibility": 7,
+    "extension": 43
+  },
+  "exact_rules": {
+    "src/__init__.py": "platform_runtime",
+    "src/config.py": "platform_runtime",
+    "src/main.py": "platform_runtime",
+    "src/domain/__init__.py": "platform_runtime",
+    "src/domain/exceptions.py": "platform_runtime",
+    "src/domain/graph/dependency_matrix.py": "platform_compatibility",
+    "src/domain/graph/graph_to_matrix_adapter.py": "platform_compatibility",
+    "src/domain/graph/matrix_to_hyper_adapter.py": "platform_compatibility",
+    "src/domain/inference/backward_chain_orchestrator.py": "extension",
+    "src/domain/inference/legacy_orchestrator.py": "platform_compatibility",
+    "src/domain/inference/semantic_question_strategy.py": "extension",
+    "src/domain/inference/session.py": "platform_runtime",
+    "src/domain/inference/session_service.py": "platform_runtime",
+    "src/domain/nodes/dependency.py": "platform_compatibility",
+    "src/domain/nodes/dependency_matrix.py": "platform_compatibility",
+    "src/domain/nodes/dependency_type.py": "platform_compatibility",
+    "src/domain/session/__init__.py": "platform_runtime",
+    "src/domain/session/session_manager.py": "platform_runtime",
+    "src/domain/state/session_schema.py": "platform_runtime",
+    "src/ports/__init__.py": "platform_runtime",
+    "src/ports/abduction_port.py": "extension",
+    "src/ports/aegis_repository_ports.py": "extension",
+    "src/ports/dependency_graph_port.py": "core_initial",
+    "src/ports/fact_store_port.py": "core_initial",
+    "src/ports/history_record_store_port.py": "core_initial",
+    "src/ports/induction_port.py": "extension",
+    "src/ports/iteration_port.py": "core_initial",
+    "src/ports/llm_client_port.py": "extension",
+    "src/ports/llm_orchestrator_port.py": "extension",
+    "src/ports/provider_verification_port.py": "extension",
+    "src/ports/question_strategy_port.py": "core_initial",
+    "src/ports/rule_repository_port.py": "platform_runtime",
+    "src/ports/session_manager_port.py": "platform_runtime",
+    "src/ports/session_store_port.py": "platform_runtime",
+    "src/services/declaration_validator.py": "core_initial",
+    "src/services/rule_validation_service.py": "core_initial"
+  },
+  "prefix_rules": {
+    "src/adapters/": "platform_runtime",
+    "src/infrastructure/": "platform_runtime",
+    "src/services/": "platform_runtime",
+    "src/tasks/": "platform_runtime",
+    "src/tools/": "extension",
+    "src/domain/aegis/": "extension",
+    "src/domain/demo/": "extension",
+    "src/domain/fact_values/": "core_initial",
+    "src/domain/graph/": "core_initial",
+    "src/domain/imports/": "core_initial",
+    "src/domain/inference/": "core_initial",
+    "src/domain/iterate/": "core_initial",
+    "src/domain/llm/": "extension",
+    "src/domain/models/": "platform_runtime",
+    "src/domain/nodes/": "core_initial",
+    "src/domain/provider_verification/": "extension",
+    "src/domain/reasoning/": "extension",
+    "src/domain/rule_parser/": "core_initial",
+    "src/domain/session/": "core_initial",
+    "src/domain/snomed_mbs/": "extension",
+    "src/domain/state/": "core_initial",
+    "src/domain/tokens/": "core_initial",
+    "src/domain/trace/": "core_initial"
+  },
+  "known_core_boundary_imports": [
+    {
+      "importer": "src/domain/graph/__init__.py",
+      "imported_module": "src.domain.graph.dependency_matrix",
+      "target_classification": "platform_compatibility"
+    },
+    {
+      "importer": "src/domain/graph/__init__.py",
+      "imported_module": "src.domain.graph.matrix_to_hyper_adapter",
+      "target_classification": "platform_compatibility"
+    },
+    {
+      "importer": "src/domain/graph/dependency.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/graph/graph_serialization.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/graph/hyper_adjacency_graph.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/graph/ml_topological_sort_strategy.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/inference/__init__.py",
+      "imported_module": "src.domain.inference.session",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/inference/assessment.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/inference/assessment_state.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/inference/inference_engine.py",
+      "imported_module": "src.domain.reasoning.ontology_reasoner",
+      "target_classification": "extension"
+    },
+    {
+      "importer": "src/domain/inference/inference_engine.py",
+      "imported_module": "src.domain.reasoning.semantic_fact_enricher",
+      "target_classification": "extension"
+    },
+    {
+      "importer": "src/domain/inference/inference_engine.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/inference/topo_sort.py",
+      "imported_module": "src.domain.graph.matrix_to_hyper_adapter",
+      "target_classification": "platform_compatibility"
+    },
+    {
+      "importer": "src/domain/nodes/comparison_line.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/nodes/expression_conclusion_line.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/nodes/iterate_line.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/nodes/meta_data.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/nodes/metadata_line.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/nodes/node.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/nodes/node_set.py",
+      "imported_module": "src.domain.graph.graph_to_matrix_adapter",
+      "target_classification": "platform_compatibility"
+    },
+    {
+      "importer": "src/domain/nodes/node_set.py",
+      "imported_module": "src.domain.graph.matrix_to_hyper_adapter",
+      "target_classification": "platform_compatibility"
+    },
+    {
+      "importer": "src/domain/nodes/node_set.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/nodes/value_conclusion_line.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/rule_parser/rule_set_parser.py",
+      "imported_module": "src.domain.graph.graph_to_matrix_adapter",
+      "target_classification": "platform_compatibility"
+    },
+    {
+      "importer": "src/domain/rule_parser/rule_set_parser.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/rule_parser/rule_set_reader.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/rule_parser/rule_set_scanner.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/tokens/token.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    },
+    {
+      "importer": "src/domain/tokens/tokenizer.py",
+      "imported_module": "src.infrastructure.logging_config",
+      "target_classification": "platform_runtime"
+    }
+  ],
+  "baseline_known_core_third_party_imports": [
+    {
+      "module": "rdflib",
+      "importers": [
+        "src/domain/trace/prov_o_trace_generator.py"
+      ]
+    },
+    {
+      "module": "structlog",
+      "importers": [
+        "src/domain/graph/inference_propagator.py",
+        "src/domain/imports/import_resolver.py",
+        "src/domain/imports/module_registry.py",
+        "src/domain/inference/topo_sort.py",
+        "src/domain/iterate/iteration_engine.py",
+        "src/domain/rule_parser/node_set_merger.py",
+        "src/domain/trace/prov_o_trace_generator.py"
+      ]
+    },
+    {
+      "module": "sympy",
+      "importers": [
+        "src/domain/nodes/expression_conclusion_line.py"
+      ]
+    }
+  ],
+  "known_core_third_party_imports": [
+    {
+      "module": "rdflib",
+      "importers": [
+        "src/domain/trace/prov_o_trace_generator.py"
+      ]
+    },
+    {
+      "module": "structlog",
+      "importers": [
+        "src/domain/graph/inference_propagator.py",
+        "src/domain/imports/import_resolver.py",
+        "src/domain/imports/module_registry.py",
+        "src/domain/inference/topo_sort.py",
+        "src/domain/iterate/iteration_engine.py",
+        "src/domain/rule_parser/node_set_merger.py",
+        "src/domain/trace/prov_o_trace_generator.py"
+      ]
+    }
+  ],
+  "known_extraction_blockers": [
+    {
+      "id": "B01",
+      "category": "platform_logging_coupling",
+      "scope": "Core candidates import src.infrastructure.logging_config or structlog directly.",
+      "required_action": "Replace Platform logger imports with a Core-owned neutral event boundary or a dependency-free logging policy before moving the modules."
+    },
+    {
+      "id": "B02",
+      "category": "ontology_extension_coupling",
+      "scope": "src/domain/inference/inference_engine.py imports ontology reasoning extension types.",
+      "required_action": "Move ontology orchestration behind caller-supplied Core types or a narrow Core port; keep the ontology implementation outside the initial package."
+    },
+    {
+      "id": "B03",
+      "category": "implicit_environment_configuration",
+      "scope": "src/domain/state/feature_flags.py reads os.environ and mixes the semantic evaluation profile with deployment configuration.",
+      "required_action": "Split the immutable evaluation profile into Core and keep environment parsing in Platform."
+    },
+    {
+      "id": "B04",
+      "category": "thread_creation",
+      "scope": "src/domain/imports/import_resolver.py creates a ThreadPoolExecutor to enforce loader timeouts.",
+      "required_action": "Make Core import resolution synchronous and deterministic over a supplied source loader; enforce deadlines in Platform."
+    },
+    {
+      "id": "B05",
+      "category": "implicit_time_and_identity",
+      "scope": "Import registry, fact store, inference context and parse/session helpers use default clocks, timestamps, UUIDs, or process-global state.",
+      "required_action": "Require explicit clocks, timestamps and identifiers wherever they affect results; keep operational defaults in Platform adapters."
+    },
+    {
+      "id": "B06",
+      "category": "filesystem_reader",
+      "scope": "src/domain/rule_parser/rule_set_reader.py accepts a filesystem path and opens it directly.",
+      "required_action": "Keep text/bytes parsing in Core and move path ownership and file I/O to Platform."
+    },
+    {
+      "id": "B07",
+      "category": "symbolic_math_dependency",
+      "scope": "src/domain/nodes/expression_conclusion_line.py imports SymPy for expression handling.",
+      "required_action": "Review and pin SymPy for reproducibility, licensing, supported-Python compatibility, and necessity before declaring the Core dependency set."
+    },
+    {
+      "id": "B08",
+      "category": "provenance_serialization_dependency",
+      "scope": "src/domain/trace/prov_o_trace_generator.py imports rdflib at execution time.",
+      "required_action": "Keep neutral provenance models in Core and decide whether RDF serialization is a reviewed optional Core extra or a Platform adapter."
+    },
+    {
+      "id": "B09",
+      "category": "legacy_compatibility",
+      "scope": "Legacy DependencyMatrix shims and adapters remain reachable from current domain package exports.",
+      "required_action": "Keep matrix compatibility in Platform and exclude it from the inferra_core public facade and wheel dependency graph."
+    },
+    {
+      "id": "B10",
+      "category": "validation_service_concern_mixing",
+      "scope": "src/services/rule_validation_service.py and declaration_validator.py contain deterministic diagnostics alongside TTL caching, logging, and ontology-review behavior.",
+      "required_action": "Move immutable diagnostic types and deterministic syntax/declaration checks into Core; retain cache policy, operational logging, and ontology review orchestration in Platform or extensions."
+    }
+  ]
+}

@@ -2,7 +2,8 @@
 
 Status: implementation advisory and executable readiness plan
 Date: 2026-05-06
-Last execution audit: 2026-05-13
+Last architecture update: 2026-07-20
+Last execution audit: 2026-07-17
 
 This document records the recommended production stack for INFERRA and the
 non-LLM work that remains after the current phase implementation pass. It is
@@ -14,6 +15,29 @@ The old phase plans are archived under `archive/phase-plans/`.
 as an implementation reference, but adopted features must be adapted to the
 current ABC-port, graph-first, layered-fact-store, and feature-flag contracts.
 
+The accepted target architecture now creates an internal, independently
+buildable `inferra-core` Python distribution for the deterministic kernel while
+retaining `inferra-platform` as the official authoritative runtime. This target
+is partially implemented: P0.1 inventory/behavior freezing and P0.2a-P0.2b's
+internal 0.1.1 distribution, leaf contracts, private executable
+graph/node/token/parser/validation layer, compatibility re-exports, and
+installed-wheel parser proof are complete. The 0.1.1 bounded evaluator,
+fail-closed validation, typed cycles, zero runtime dependencies, and adversarial
+security gates are also complete. The public compile/validation facade and
+Platform vertical integration are next; state/import/inference/provenance
+extraction and complete application-service rewiring remain. Evidence is in
+`INFERRA_Core_Extraction_P0_1_Baseline.md` and
+`INFERRA_Core_Extraction_P0_2_Distribution.md`.
+`INFERRA_Core_Package_and_Runtime_Architecture.md` controls that boundary and
+supersedes earlier library-versus-service and frontend-framework
+recommendations in this document.
+
+`INFERRA_Account_Case_Ontology_and_Provenance_Architecture.md` controls the
+minimum tenant/account/case/execution identity, immutable rule and case graph
+versions, fact source-versus-authority policy, AXIOM/AEGIS semantic boundaries,
+and indefinite-default configurable retention. The current implementation does
+not yet satisfy that contract.
+
 ## Executive Recommendation
 
 INFERRA should be treated as a hybrid reasoning platform, not a simple REST
@@ -24,28 +48,32 @@ repeatable verification.
 
 | Area | Recommendation | Why this is the best fit | Current repo alignment | Remaining action |
 | --- | --- | --- | --- | --- |
+| Deterministic package | Internal `inferra-core` Python wheel/source distribution with a small facade | Makes the engine embeddable and enforces infrastructure/product independence without duplicating production authority | P0.1 and P0.2a-P0.2b complete; internal 0.1.1 adds a bounded expression interpreter, fail-closed validation, typed cycles, zero runtime dependencies, package/adversarial tests, exact leaf re-exports, and isolated installed-wheel proof | Define the public compile/validation facade and rewire the completed Platform slice first; then move fact-store/iteration/imports and inference/provenance and complete whole-engine/reproducible-artifact proof |
 | Backend API | FastAPI, Pydantic v2, Uvicorn in Docker | Strong async API ergonomics, typed request models, OpenAPI by default | Already implemented | Add production worker/process sizing per deployment target |
 | Domain architecture | ABCMeta ports with explicit adapters | Enforces implementation contracts at instantiation and matches project convention | Already implemented | Keep Protocol out of ports |
 | Graph runtime | HyperAdjacencyGraph as canonical graph, DependencyMatrix only as compatibility format | Graph-native traversal scales better than dense N x N scans for sparse rule graphs | Implemented as default runtime path; graph package now owns DependencyMatrix, Dependency, and DependencyType | Keep guardrails until legacy node-level graph shims are fully retired |
-| Dependency type model | Canonical `src.domain.graph.DependencyType` using IntFlag-style bitmask composition | Preserves existing AND, OR, NOT, KNOWN, MANDATORY combinations without brittle enum coercion | Implemented; `src.domain.nodes.dependency_type` is only a compatibility shim | Keep mixed-mask regression coverage active, especially around ML sort paths |
+| Dependency type model | Canonical `inferra_core.DependencyType` using IntFlag-style bitmask composition | Preserves existing AND, OR, NOT, KNOWN, MANDATORY combinations without brittle enum coercion | Implemented since Core 0.1.0 and present in 0.1.1; both `src.domain.graph.dependency_type` and `src.domain.nodes.dependency_type` are compatibility paths | Keep mixed-mask regression coverage active, especially around ML sort paths |
 | Node identity | Use stable node names/IDs as graph keys | Avoids non-portable numeric IDs and makes persistence, RDF, and trace lookup stable | Current graph is name-keyed | Do not reintroduce numeric node_id in new code |
 | Async jobs | Celery + Redis broker/result backend | Good fit for induction, RDF sync, ontology post-reasoning, background promotion workflows | Docker compose includes worker and Redis; induction has retry, DLQ, source-hash idempotency, post-reasoning has Redis delta events, and circuit/retry proof exists | Run live candidate-quality and Fuseki-read/post-reasoning drills in local-prod Compose and staging |
-| Semantic store | Apache Jena Fuseki for RDF/SPARQL plus rdflib in Python | Separates RDF truth/audit graph from request-time rule execution | Docker compose includes Fuseki | Add dataset backup/restore and namespace governance |
+| Semantic store | PostgreSQL-authoritative audit/outbox and graph catalogue plus Apache Jena Fuseki derived RDF/PROV-O projection | Separates durable governed events from critical rebuildable semantic query views | Fuseki and projection code exist; account/case ownership, immutable normal-path case graphs, retention policy, durable audit contract, and reconciliation remain incomplete | Add append-only audit events, ownership-scoped graph catalogue, outbox, immutable rule/case versions, authorization, rebuild/reconciliation, indefinite-default versioned retention, backup/restore and namespace governance |
+| Account/case decision identity | Tenant/workspace scope plus opaque Account, Case, and Execution identifiers on every governed decision | Gives authorization, audit, retention, and graph projection a real domain boundary without making Core a CRM | Not implemented end to end; current sessions/runs are insufficient | Add migrations, constraints, services, OpenAPI/generated-client fields, negative cross-account tests, and product ownership mappings before Core release |
+| Fact authority | Store source, verification, eligibility, scope, validity, derivation, and supersession separately | Preserves all provenance without treating every historical conclusion or assertion as present truth | Layered fact source exists; authority behavior is inconsistent across product modes | Enforce the accepted AXIOM deterministic and AEGIS typed semantic-gate policies server-side |
 | Persistence | PostgreSQL for durable sessions, rules, audit index; Redis for hot session/cache | PostgreSQL is the durable source; Redis is operationally fast but ephemeral by default | Docker compose includes both | Avoid pickle for untrusted state; prefer JSON/msgpack schemas |
 | Observability | OpenTelemetry traces, Prometheus metrics, Grafana dashboards, Loki logs | Hybrid reasoning needs explainability at system and domain levels | Grafana, Prometheus, Loki, Promtail, OTel collector, dashboards, and Prometheus alert rules exist | Tune alert thresholds against staging traffic |
-| Frontend | Vite + TypeScript + React for graph-heavy tools, TanStack Query, React Flow, Zod, Playwright | Rule Studio and harness need graph editing, typed API state, and e2e confidence | Current static frontends are useful prototypes | Convert prototypes to typed production apps when UX scope is fixed |
+| Frontends | Existing Svelte 5/SvelteKit AXIOM and AEGIS repositories with hardened Express BFFs and generated TypeScript clients | Preserves substantial product work while keeping browsers and hand-written contracts outside the authority boundary | Separate candidate repositories exist; AXIOM and AEGIS have independent blockers | Remove obsolete embedded prototypes from release assumptions; harden BFFs and pass each product's quality/security gates |
 | Load and chaos | k6 load smoke, multi-profile k6 runs, Docker compose service interruption drills | Prevents confidence based only on unit tests | Smoke, production gate, and smoke/load/stress/spike/soak runner artifacts are present | Run in CI/staging with threshold history |
 | CI quality gate | GitHub Actions for backend coverage, frontend checks, Docker build | Makes phase plan acceptance repeatable | Added by this readiness package | Add protected-branch enforcement |
 
-## Latest Execution Evidence - 2026-05-13
+## Latest Execution Evidence - 2026-07-17
 
 These results supersede older "previous run" language and should be used with
 `IMPLEMENTATION_STATUS.md` as the current implementation baseline.
 
 | Gate | Result | Evidence |
 | --- | --- | --- |
-| Backend regression | Pass | `pytest -q`: 2450 passed, 69 skipped |
-| Backend coverage | Pass | `pytest --cov=src --cov-fail-under=97 -q`: 2441 passed, 72 skipped, 97.01% total coverage |
+| Backend regression | Pass | `pytest -q`: 3,471 passed, 70 skipped, 146 warnings in 309.00 seconds after the Core 0.1.1 security and numeric-precision corrections |
+| Backend coverage | Pass | Current combined instrumented run plus the targeted new adapter-branch test covers 20,932/21,579 statements (97.0017%) against the unchanged 97% threshold; no exclusions were added |
+| Core 0.1.1 security correction | Pass | 33 package tests; 221 focused Platform compatibility/security tests; 99-package lock without SymPy/mpmath; clean external wheel with no runtime requirements or forbidden modules; adversarial Python expression rejected; typed cycle/fail-closed guards active |
 | Benchmarks | Pass | `pytest tests/benchmarks/ -q`: 22 passed, 3 skipped |
 | Reference examples | Pass | 30 `vea*` / `mrca*` examples validate and parse under the stricter declaration/reference validator |
 | Topology bridge | Pass | `pytest tests/domain/graph/test_ws3_ws4_persistence_topology.py tests/domain/inference/test_topo_sort.py tests/domain/inference/test_topo_sort_with_record.py -q`: 67 passed; legacy `TopologicalSort` matrix entry points now emit deprecation warnings |
@@ -76,9 +104,9 @@ The 500-VU production-load gate is now closed for the local Docker Compose produ
 | Option | Strengths | Weaknesses | INFERRA fit | Recommendation |
 | --- | --- | --- | --- | --- |
 | Static JavaScript | Very low dependency cost, easy to serve | Weak typing, limited graph-editor ecosystem, harder to scale UI state | Good prototype layer | Keep only for demos and smoke tools |
-| React + TypeScript + Vite | Strong graph/editor ecosystem, React Flow, mature testing and query tooling | More dependencies than static JS | Best for Rule Studio and AI Harness | Recommended production frontend |
+| React + TypeScript + Vite | Strong graph/editor ecosystem, React Flow, mature testing and query tooling | A rewrite would discard substantial current Svelte product work | Viable for a future product only if evidence justifies migration | Not the accepted AXIOM/AEGIS direction |
 | Vue + TypeScript + Vite | Excellent ergonomics, good state patterns, smaller-feeling app code | Graph editor ecosystem is thinner than React Flow | Good alternative for operational dashboards | Viable, but second choice for graph drawing |
-| SvelteKit | Fast, concise, pleasant for custom UI | Smaller enterprise/test ecosystem for complex graph editors | Useful for experimental tools | Not first production choice |
+| SvelteKit | Fast, concise, and already used by both first-party products | Requires disciplined server/auth, generated contracts, testing and graph-performance work | Accepted AXIOM/AEGIS implementation | Keep; harden existing products rather than migrate frameworks before release |
 
 ### Graph Storage and Reasoning Runtime
 
@@ -102,7 +130,7 @@ The 500-VU production-load gate is now closed for the local Docker Compose produ
 
 | Option | Strengths | Weaknesses | INFERRA fit | Recommendation |
 | --- | --- | --- | --- | --- |
-| Fuseki only | Standards-based RDF/SPARQL, PROV-O friendly | Not ideal for vector similarity | Good audit and ontology source | Keep as semantic source of truth |
+| Fuseki derived projection | Standards-based RDF/SPARQL, PROV-O friendly and rebuildable | Cannot atomically own the relational decision transaction | Good semantic query/visualization projection | Keep as a versioned projection; PostgreSQL audit/outbox remains authoritative |
 | PostgreSQL + pgvector | One database for relational and vector search | Less RDF-native | Good retrieval adjunct | Add when GraphRAG moves beyond blueprint |
 | Qdrant | Strong vector search and filtering | Additional service to operate | Good for AI harness context retrieval | Consider for production GraphRAG |
 | Neo4j | Great property graph UX | Different model from RDF and current stack | Could confuse source-of-truth boundaries | Not recommended unless product pivots |
@@ -115,17 +143,20 @@ provider readiness.
 
 | Work item | Type | Status after this package | Non-LLM blocker | Recommended next action |
 | --- | --- | --- | --- | --- |
+| Internal Core distribution | Architecture/release | P0.1 and P0.2a-P0.2b plus the 0.1.1 security correction complete: independent wheel/source, leaf contracts, private parser/graph/validation, bounded expression interpreter, fail-closed validation and typed cycles pass package and installed-wheel gates; public facade integration and state/import/inference/provenance remain | P0 before Core 1.0 | Prove the narrow public compile/validation facade and Platform vertical slice first; then finish remaining extraction, rewiring and whole-engine equivalence/reproducibility/hash proof |
 | Backend unit, integration, regression coverage | Code verification | Green in latest full coverage run: 2441 passed, 72 skipped, 97.01% coverage | None known | Keep 97% coverage gate in CI |
-| Frontend prototype tests | Code verification | Green in current run for both frontends | None known | Keep checks in CI |
+| AXIOM release gates | Separate product verification | Build/audit pass, but type-check, unit, lint and formatting gates fail in the inspected candidate | Blocks AXIOM 1.0, not API-only Core | Fix current Svelte product and test against generated Core client; do not substitute old Platform prototypes |
+| AEGIS release gates | Separate product verification | Type-check, unit, main/embed build and audit pass; lint/format plus security, persistence, synthetic-state and licensing blockers remain | Blocks AEGIS 1.0, not Core | Establish authenticated application backend/BFF and AEGIS-owned persistence consuming Core APIs/events |
 | Live Docker smoke | Runtime verification | Green in current run against Redis, Fuseki, Postgres, worker, OTel, Prometheus, Grafana, API health, metrics, and reasoning smoke | Local Docker must be running | Keep `scripts/verify_phase_readiness.ps1` in CI/staging smoke |
 | Load smoke | Runtime verification | 20-VU Dockerized k6 smoke passes; 500-VU Dockerized production gate passes in the local compose profile; multi-profile smoke/load/stress/spike/soak runner is available | Staging/CI must preserve equivalent worker, network, and threshold policy | Keep smoke, profile, and production-gate threshold history in CI/staging |
 | Redis session handoff | Runtime verification | Cross-store handoff preserves mutated session state and rejects stale saves; HTTP question/answer/reset paths now persist session mutations | Live multi-worker staging repetition still recommended | Keep Redis handoff tests in CI and repeat against staging |
 | Chaos smoke | Runtime verification | Compose-scoped reversible drill plus Phase 4 restart-suite wrapper are present, artifact-tested, and passed locally for Redis, Fuseki, and worker restarts | Staging repetition still required | Run `tests/chaos/run_phase4_chaos_suite.ps1` in staging on a scheduled basis |
-| Ontology post-reasoning | Runtime verification | Local code and unit tests exist for Fuseki projection, Redis delta events, DLQ, and convergence delta metrics | Live local-prod Compose workflow proof still required | Add the post-reasoning path to the phase readiness smoke before marking Phase 3 complete |
+| Core ontology audit projection | Runtime verification | Rule/case artifact and Fuseki code exist, but the normal path is not a PostgreSQL-outbox-backed immutable account/case graph contract | P0 before Core 1.0 | Prove decision commit -> outbox -> versioned Fuseki graph -> authorized read -> reconciliation/rebuild in local-prod and staging |
+| Ontology post-reasoning/materialization | Runtime verification | Local code and unit tests exist for Fuseki projection, Redis delta events, DLQ, and convergence delta metrics | P0 only before a product profile may let semantic facts affect decisions; otherwise disabled | Add the product authority, fact eligibility, stale/failure, and live workflow gates before activation |
 | CI gate | Automation | GitHub workflow includes backend coverage, import-linter, frontend checks, and Docker build | Repository must enable Actions and branch protection | Make CI required before merge |
 | Production auth | Security | API key, HS256 JWT, owner scoping, session-owner enforcement, rate limiting, and opt-in CSRF are implemented and tested | OIDC/RBAC/tenant policy still require product decision | Use API key or HS256 JWT for protected environments; defer OIDC to enterprise auth work |
 | Secrets management | Security | `.env.example`, `docker-compose.prod.yml`, `secrets/init-secrets.sh`, `secrets/init-secrets.ps1`, and local Docker secret files support a local production rehearsal path | Need target platform: local, cloud, Kubernetes, or managed PaaS | Move real secrets to platform secret manager before production traffic |
-| Production frontend rewrite | Product engineering | Prototype frontends exist and test | Need UX scope and API contract freeze | Use React + TypeScript + Vite + React Flow |
+| Production frontend integration | Product engineering | AXIOM and AEGIS Svelte candidates exist in separate repositories | Package-backed API profiles, generated clients, BFF security and product-specific quality gates | Keep Svelte; generate contracts and harden the existing repositories |
 | GraphRAG production | Future plan | Blueprint exists, partial semantic foundation exists | Need corpus, ontology governance, vector-store choice, evaluation set | Start as separate Phase 7 project |
 | LLM reasoning | Future/optional | Null/fallback flows implemented; real adapter has timeout, retry, circuit-open fallback, half-open recovery proof, cost/metrics/tracing, and optional LLM abduction behind feature flags | Provider/model/key/evaluation policy | Keep disabled until model gate is approved |
 
@@ -133,7 +164,9 @@ provider readiness.
 
 | Rule | Keep doing | Avoid | Reason |
 | --- | --- | --- | --- |
-| Port contracts | ABCMeta ports in `src/ports` | `typing.Protocol` for domain ports | Explicit inheritance and instantiation-time enforcement are valuable here |
+| Package boundary | Keep pure deterministic logic in `inferra-core`; inject time, IDs, settings and source ports | FastAPI, SQLAlchemy, Redis, Celery, Fuseki, LLM, env/secret or extension imports in Core | Makes local embedding reproducible without turning every consumer into a second Platform |
+| Runtime authority | Keep migrations, transactions, identity, rule revisions, sessions, durable audit/outbox and ontology projection in Platform | Treating an in-process library result as a durable governed service record | A library computes; the runtime establishes authority and operations |
+| Port contracts | ABCMeta ports; the five deterministic ports are canonical in `inferra_core` with temporary `src/ports` re-exports | `typing.Protocol` for domain ports | Explicit inheritance and instantiation-time enforcement are valuable here |
 | Graph traversal | Use `DependencyGraphPort`, `HyperAdjacencyGraph`, or graph strategy objects | Direct matrix scans in new runtime code | Keeps Phase 2.5 migration direction intact |
 | Matrix compatibility | Treat `DependencyMatrix` APIs as deprecated compatibility only | New runtime code constructing or setting matrices directly | Warnings plus guardrails keep legacy loading available while making accidental use visible |
 | ML topological sort | Standalone strategy taking graph + history store | Embedding history ordering into graph core | Keeps the graph deterministic and testable |
@@ -147,6 +180,7 @@ provider readiness.
 
 | Gate | Required evidence | Local command |
 | --- | --- | --- |
+| Core package | Reproducible wheel/sdist, installed-artifact tests, forbidden-import checks, package-content audit and golden-vector equivalence | `python scripts/verify_inferra_core_distribution.py`; package build/isolation passes, while reproducibility and whole-engine equivalence remain P0.4 |
 | Backend correctness | Unit, integration, regression tests pass with coverage | `pytest --cov=src --cov-fail-under=97` |
 | Frontend correctness | Both frontend checks and tests pass | `npm.cmd test`; `npm.cmd run check` in each frontend |
 | Docker readiness | Compose stack is healthy | `docker compose up -d --build`; `docker compose ps` |
@@ -161,6 +195,8 @@ provider readiness.
 
 | Priority | Recommendation | Why |
 | --- | --- | --- |
+| P0 | Extract and prove the internal `inferra-core` package before freezing the service release | This is the accepted reusable-kernel boundary and must not be retrofitted after clients depend on broad internals |
+| P0 | Implement the package-backed Core API profile and generated clients immediately after extraction | Separates local Python embedding from the official service contract |
 | P0 | Keep `HyperAdjacencyGraph` canonical and keep matrix guardrails active | This protects the largest migration decision already made |
 | P0 | Add CI branch protection around the coverage and frontend checks | Prevents the phase plans from becoming aspirational documents |
 | P0 | Use the production decision and legacy-retirement registers as release blockers | Keeps external decisions and compatibility debt visible instead of hiding them in phase-plan prose |

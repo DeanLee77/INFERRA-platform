@@ -7,14 +7,17 @@ Implements access levels and strong typing where appropriate.
 import json
 import re
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
+from inferra_core._internal.domain.expression_evaluator import (
+    SafeExpressionError,
+    evaluate_expression,
+)
 from src.infrastructure.logging_config import get_logger
 from src.domain.nodes.node import Node
 from src.domain.nodes.line_type import LineType
 from src.domain.fact_values import FactValue, FactValueType
 from src.domain.tokens import Token, Tokenizer
 from src.domain.nodes.meta_data import MetaData
-import sympy as sp
 
 # Protected Module-Level Logger (Access Level: Protected)
 _logger = get_logger(__name__)
@@ -90,7 +93,9 @@ class ExprConclusionLine(Node):
     def self_evaluate(self, working_memory: Dict[str, Any]) -> FactValue:
         """
         Public API: Self-evaluates the expression against working memory.
-        SECURITY FIX: Removed unsafe eval(), uses constrained SymPy parsing.
+
+        Rule source is parsed into an allowlisted INFERRA AST and interpreted
+        without Python, SymPy, or third-party string evaluation.
         
         Args:
             working_memory: Current working memory dictionary
@@ -100,139 +105,44 @@ class ExprConclusionLine(Node):
         """
         if self.__equation is None:
             return FactValue(None, None)
-            
-        equation_in_string = self.__equation.get_value()
-        
+
+        equation_in_string = str(self.__equation.get_value())
         try:
-            substituted = self._substitute_working_memory(equation_in_string, working_memory)
-            outcome = self._evaluate_expression(substituted)
-            return self._fact_value_from_outcome(outcome)
-            
-        except Exception as e:
-            _logger.info(f'Evaluation failed: {e}. Node Name: {self.get_node_name()}')
-            _logger.info(f'Now manually substitute variables in the expression: {equation_in_string}')
-            
-            # Fallback with safe substitution (NO eval())
-            sorted_keys = sorted(working_memory, key=len, reverse=True)
-            pattern_parts = [re.escape(key) for key in sorted_keys]
-            pattern = r'\b(?:' + '|'.join(pattern_parts) + r')\b'
-            compiled_pattern = re.compile(pattern)
-            
-            def replacer(match):
-                key = match.group(0)
-                value = working_memory[key]
-                if value.get_value_type() == FactValueType.LIST:
-                    value_list = {sub_value.get_value() for sub_value in value.get_value()}
-                    return str(value_list)
-                elif value.get_value() is None:
-                    return ''
-                else:
-                    return str(value.get_value())
-            
-            substituted = compiled_pattern.sub(replacer, equation_in_string)
-            substituted = ' '.join(substituted.split())
-            
-            # SECURITY FIX: Use constrained SymPy/ternary evaluation instead of eval()
-            try:
-                outcome = self._evaluate_expression(substituted)
-                return self._fact_value_from_outcome(outcome)
-            except Exception as e2:
-                raise ValueError(f'Evaluation failed: {e2}, Node Name: {self.get_node_name()}')
-
-    def _substitute_working_memory(self, expression: str, working_memory: Dict[str, Any]) -> str:
-        substituted = expression
-        for var in sorted(working_memory, key=len, reverse=True):
-            value = working_memory[var]
-            literal = self._fact_value_to_expression_literal(value)
-            substituted = re.sub(
-                r"(?<!\w)" + re.escape(var) + r"(?!\w)",
-                literal,
-                substituted,
+            outcome = evaluate_expression(
+                equation_in_string,
+                {
+                    name: self._expression_value(value)
+                    for name, value in working_memory.items()
+                },
             )
-        return ' '.join(substituted.split())
+            return self._fact_value_from_outcome(outcome)
+        except (SafeExpressionError, ArithmeticError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Evaluation failed: {exc}, Node Name: {self.get_node_name()}"
+            ) from exc
 
-    def _fact_value_to_expression_literal(self, value: Any) -> str:
+    def _expression_value(self, value: Any) -> Any:
         if isinstance(value, FactValue):
             if value.get_value_type() == FactValueType.LIST:
-                items = []
-                for sub_value in value.get_value():
-                    item = sub_value.get_value() if isinstance(sub_value, FactValue) else sub_value
-                    items.append(item)
-                return repr(items)
-            raw_value = value.get_value()
-        else:
-            raw_value = value
+                return [self._expression_value(item) for item in value.get_value()]
+            value = value.get_value()
+        if value is None:
+            # WANTS dependencies use a missing/unknown value as a falsey zero so
+            # the documented ternary fallback can be selected deterministically.
+            return 0
+        if isinstance(value, tuple):
+            return tuple(self._expression_value(item) for item in value)
+        if isinstance(value, list):
+            return [self._expression_value(item) for item in value]
+        return value
 
-        if raw_value is None:
-            return "0"
-        if isinstance(raw_value, str):
-            return repr(raw_value)
-        if isinstance(raw_value, bool):
-            return "True" if raw_value else "False"
-        return str(raw_value)
-
-    def _evaluate_expression(self, expression: str) -> Any:
-        expression = self._strip_wrapping_parentheses(expression.strip())
-        ternary = self._split_ternary(expression)
-        if ternary is not None:
-            condition, true_expr, false_expr = ternary
-            selected = true_expr if self._evaluate_condition(condition) else false_expr
-            return self._evaluate_expression(selected)
-
-        if self._is_string_literal(expression):
-            return expression[1:-1]
-
-        local_dict = {
-            "MAX": sp.Max,
-            "MIN": sp.Min,
-            "ROUND": round,
-            "True": True,
-            "False": False,
-        }
-        parsed = sp.parse_expr(expression, local_dict=local_dict)
-        if parsed in (sp.S.true, sp.S.false):
-            raise ValueError("Boolean IS CALC expressions are only supported inside ternary conditions")
-        if hasattr(parsed, "evalf"):
-            return parsed.evalf()
-        return parsed
-
-    def _evaluate_condition(self, expression: str) -> bool:
-        expression = self._strip_wrapping_parentheses(expression.strip())
-        split = self._split_top_level_comparison(expression)
-        if split is None:
-            return bool(self._evaluate_expression(expression))
-
-        left_text, operator, right_text = split
-        left = self._evaluate_condition_operand(left_text)
-        right = self._evaluate_condition_operand(right_text)
-
-        if operator == "=":
-            return left == right
-        try:
-            left_number = float(left)
-            right_number = float(right)
-        except (TypeError, ValueError):
-            left_number = str(left)
-            right_number = str(right)
-
-        if operator == ">":
-            return left_number > right_number
-        if operator == ">=":
-            return left_number >= right_number
-        if operator == "<":
-            return left_number < right_number
-        if operator == "<=":
-            return left_number <= right_number
-        raise ValueError(f"Unsupported ternary condition operator: {operator}")
-
-    def _evaluate_condition_operand(self, expression: str) -> Any:
-        expression = self._strip_wrapping_parentheses(expression.strip())
-        if self._is_string_literal(expression):
-            return expression[1:-1]
-        result = self._evaluate_expression(expression)
-        if hasattr(result, "item"):
-            return result.item()
-        return result
+    def _evaluate_expression(
+        self,
+        expression: str,
+        variables: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        """Compatibility helper backed by the bounded INFERRA interpreter."""
+        return evaluate_expression(expression, variables or {})
 
     def _fact_value_from_outcome(self, outcome: Any) -> FactValue:
         if isinstance(outcome, bool):
@@ -248,116 +158,6 @@ class ExprConclusionLine(Node):
         if check_tokens == 'Da':
             return FactValue(outcome, FactValueType.DATE)
         return FactValue(outcome, FactValueType.BOOLEAN)
-
-    def _split_ternary(self, expression: str) -> Optional[Tuple[str, str, str]]:
-        question_index = self._find_top_level_token(expression, "?")
-        if question_index < 0:
-            return None
-        colon_index = self._find_top_level_token(expression, ":", start=question_index + 1)
-        if colon_index < 0:
-            raise ValueError("Ternary expression is missing ':'")
-        return (
-            expression[:question_index].strip(),
-            expression[question_index + 1:colon_index].strip(),
-            expression[colon_index + 1:].strip(),
-        )
-
-    def _split_top_level_comparison(self, expression: str) -> Optional[Tuple[str, str, str]]:
-        operator_index, operator = self._find_top_level_comparison_operator(expression)
-        if operator_index < 0:
-            return None
-        return (
-            expression[:operator_index].strip(),
-            operator,
-            expression[operator_index + len(operator):].strip(),
-        )
-
-    def _find_top_level_comparison_operator(self, expression: str) -> Tuple[int, str]:
-        quote = ""
-        depth = 0
-        i = 0
-        while i < len(expression):
-            ch = expression[i]
-            if quote:
-                if ch == quote:
-                    quote = ""
-                i += 1
-                continue
-            if ch in {"'", '"'}:
-                quote = ch
-                i += 1
-                continue
-            if ch == "(":
-                depth += 1
-                i += 1
-                continue
-            if ch == ")":
-                depth -= 1
-                i += 1
-                continue
-            if depth == 0:
-                for operator in (">=", "<=", ">", "<", "="):
-                    if expression.startswith(operator, i):
-                        return i, operator
-            i += 1
-        return -1, ""
-
-    def _find_top_level_token(self, expression: str, token: str, start: int = 0) -> int:
-        quote = ""
-        depth = 0
-        for index in range(start, len(expression)):
-            ch = expression[index]
-            if quote:
-                if ch == quote:
-                    quote = ""
-                continue
-            if ch in {"'", '"'}:
-                quote = ch
-                continue
-            if ch == "(":
-                depth += 1
-                continue
-            if ch == ")":
-                depth -= 1
-                continue
-            if depth == 0 and ch == token:
-                return index
-        return -1
-
-    def _strip_wrapping_parentheses(self, expression: str) -> str:
-        stripped = expression.strip()
-        while stripped.startswith("(") and stripped.endswith(")"):
-            if self._matching_outer_parentheses(stripped):
-                stripped = stripped[1:-1].strip()
-            else:
-                break
-        return stripped
-
-    def _matching_outer_parentheses(self, expression: str) -> bool:
-        quote = ""
-        depth = 0
-        for index, ch in enumerate(expression):
-            if quote:
-                if ch == quote:
-                    quote = ""
-                continue
-            if ch in {"'", '"'}:
-                quote = ch
-                continue
-            if ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-                if depth == 0 and index != len(expression) - 1:
-                    return False
-        return depth == 0
-
-    def _is_string_literal(self, expression: str) -> bool:
-        return (
-            len(expression) >= 2
-            and expression[0] == expression[-1]
-            and expression[0] in {"'", '"'}
-        )
 
     # -------------------------------------------------------------------------
     # Special Methods

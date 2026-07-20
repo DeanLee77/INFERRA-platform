@@ -205,6 +205,17 @@ class TestExprConclusionLineSelfEvaluate:
             result = ecl.self_evaluate(working_memory)
         assert result is not None
 
+    def test_compatibility_helpers_preserve_bounded_values(self):
+        ecl = _make_ecl()
+
+        assert ecl._expression_value([(1, None)]) == [(1, 0)]
+        assert ecl._evaluate_expression("1 + 1") == 2
+
+        boolean_result = ecl._fact_value_from_outcome(True)
+        string_result = ecl._fact_value_from_outcome("approved")
+        assert boolean_result.get_value_type() == FactValueType.BOOLEAN
+        assert string_result.get_value_type() == FactValueType.STRING
+
     def test_self_evaluate_with_none_value_substitutes_empty(self):
         ecl = _make_ecl()
         ecl.set_equation(FactValue("x + 1", FactValueType.STRING))
@@ -228,6 +239,37 @@ class TestExprConclusionLineSelfEvaluate:
         }
         with pytest.raises(ValueError, match="Evaluation failed"):
             ecl.self_evaluate(working_memory)
+
+    def test_self_evaluate_rejects_python_call_without_side_effect(self, tmp_path):
+        target = tmp_path / "must-not-exist"
+        ecl = _make_ecl()
+        ecl.set_equation(
+            FactValue(
+                f"open('{target.as_posix()}', 'w')",
+                FactValueType.STRING,
+            )
+        )
+        ecl._variable_name = "result"
+        ecl._node_name = "test_node"
+
+        with pytest.raises(ValueError, match="Unsupported function"):
+            ecl.self_evaluate({})
+
+        assert not target.exists()
+
+    def test_self_evaluate_rejects_unsupported_operator(self):
+        ecl = _make_ecl()
+        ecl.set_equation(FactValue("amount % divisor", FactValueType.STRING))
+        ecl._variable_name = "result"
+        ecl._node_name = "test_node"
+
+        with pytest.raises(ValueError, match="Unsupported identifier"):
+            ecl.self_evaluate(
+                {
+                    "amount": FactValue(5, FactValueType.INTEGER),
+                    "divisor": FactValue(2, FactValueType.INTEGER),
+                }
+            )
 
     def test_self_evaluate_date_result(self):
         ecl = _make_ecl()

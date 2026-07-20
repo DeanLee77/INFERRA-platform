@@ -2,12 +2,30 @@
 
 INFERRA is an explainable, graph-native rule reasoning platform for turning
 policies, regulations, procedures, and domain rules into executable decisions.
-It combines a deterministic inference engine, a FastAPI service layer, typed
-graph dependencies, optional semantic/RDF integration, background reasoning
-workers, and prototype frontend tools for rule authoring and AI harness testing.
+It combines a deterministic inference engine, a FastAPI service runtime, typed
+graph dependencies, a critical versioned semantic/RDF audit projection,
+optional decision-affecting ontology reasoning, background workers, and
+separately released AXIOM and AEGIS user experiences.
 
-The current repository is the Python REST backend plus lightweight frontend
-prototypes for Rule Studio and AI Harness.
+The current repository contains the Python REST runtime plus legacy lightweight
+frontend prototypes. The accepted target extracts the deterministic kernel into
+an internal `inferra-core` Python distribution while retaining this Platform as
+the official authoritative multi-user service. P0.1 and P0.2a-P0.2b are
+complete: an internal `inferra-core==0.1.1` distribution owns its leaf contracts
+and a private executable graph/node/token/parser/validation layer, and its
+parser passes clean installed-wheel proof. State/import/inference/provenance
+extraction and Platform application-service rewiring remain pending, and no
+public package is published. See
+[`docs/INFERRA_Core_Package_and_Runtime_Architecture.md`](docs/INFERRA_Core_Package_and_Runtime_Architecture.md)
+and
+[`docs/INFERRA_Cross_Project_Technical_Direction.md`](docs/INFERRA_Cross_Project_Technical_Direction.md).
+Account/case hierarchy, immutable RDF topology, provenance authority, retention,
+and AXIOM/AEGIS semantic behavior are controlled by
+[`docs/INFERRA_Account_Case_Ontology_and_Provenance_Architecture.md`](docs/INFERRA_Account_Case_Ontology_and_Provenance_Architecture.md).
+The completed freeze is recorded in
+[`docs/INFERRA_Core_Extraction_P0_1_Baseline.md`](docs/INFERRA_Core_Extraction_P0_1_Baseline.md).
+Current extraction evidence is in
+[`docs/INFERRA_Core_Extraction_P0_2_Distribution.md`](docs/INFERRA_Core_Extraction_P0_2_Distribution.md).
 
 ## What INFERRA Is
 
@@ -19,14 +37,14 @@ LLM-assisted goal mapping, and observability.
 
 | Layer | What It Does | Current Implementation |
 | --- | --- | --- |
-| Rule engine | Parses INFERRA rule text and evaluates facts against goals | Python domain engine |
+| Rule engine | Parses INFERRA rule text and evaluates facts against goals | Private Core parser/graph/validation extracted; Platform compatibility parser and inference remain pending facade rewiring/extraction |
 | Graph runtime | Represents rule dependencies and topological execution order | `HyperAdjacencyGraph`, with matrix compatibility paths |
 | API layer | Exposes rule, inference, validation, file, metrics, and reasoning endpoints | FastAPI |
 | Session state | Stores answers, fact layers, overrides, trace state, and history | In-memory or Redis-backed session store |
 | Semantic layer | Publishes or caches rule knowledge as RDF/SPARQL data | rdflib and Apache Jena Fuseki integration |
 | Async layer | Runs slow sync and induction work outside the request path | Celery with Redis |
 | Observability | Reports health, Prometheus metrics, and OpenTelemetry traces | Prometheus client and OTel collector |
-| Frontend prototypes | Provides visual rule graph and AI harness demos | Static HTML/CSS/JavaScript |
+| First-party products | Provides general authoring/audit and specialist autonomous-governance experiences | Separate Svelte repositories: `inferra-axiom` and `inferra-aegis`; independently gated |
 
 ## What INFERRA Is For
 
@@ -81,7 +99,8 @@ risk-sensitive, and audit-sensitive domains.
 | Induction | Run background jobs that suggest candidate rules from sessions |
 | LLM-assisted reasoning | Optional goal mapping, question wording, and trace explanation |
 | Metrics and tracing | Health endpoints, Prometheus metrics, and OpenTelemetry support |
-| Frontend prototypes | Rule Studio and AI Harness demos for UI experimentation |
+| First-party clients | Separate AXIOM and AEGIS Svelte products, independently gated |
+| Legacy frontend prototypes | Embedded Rule Studio and AI Harness demos for local experimentation only |
 
 ## Architecture
 
@@ -94,7 +113,7 @@ queues.
 flowchart LR
     User[User or Frontend] --> API[FastAPI Inbound Routes]
     API --> Services[Application Services]
-    Services --> Domain[Domain Core]
+    Services --> Domain[inferra-core Python package]
     Domain --> Ports[ABCMeta Ports]
     Ports --> Persistence[Persistence Adapters]
     Ports --> SessionStore[Session Store]
@@ -110,6 +129,13 @@ flowchart LR
     API --> OTel[OpenTelemetry]
 ```
 
+The diagram is the accepted target boundary. Core 0.1.1 now owns values,
+diagnostics, evaluation history, five deterministic ports, and a private
+executable graph/node/token/parser/validation layer. Platform still ships
+compatibility parsing/iterate/matrix paths and the remaining state, import,
+inference and provenance layers. Continued extraction must preserve behavior
+through the unchanged golden vectors and installed-wheel tests.
+
 ### Architectural Principles
 
 | Principle | INFERRA Decision |
@@ -122,11 +148,26 @@ flowchart LR
 | Session safety | Feature flags are start-of-session sticky |
 | Slow work | Keep induction and semantic sync outside the request path |
 | Observability | Treat traces and metrics as first-class product features |
+| Package/runtime split | Core computes deterministically; Platform owns identity, persistence, transactions, audit/outbox, ontology publication, and operations |
+| Consumer integration | TypeScript products use generated service clients; Python embedders may use the library under host-owned operational guarantees |
+
+### Package and deployment modes
+
+| Mode | Intended use | Responsibility boundary |
+| --- | --- | --- |
+| Platform service | Official multi-user production | Platform owns authoritative rules, identity, concurrency, durable audit and recovery |
+| Bundled/sidecar Platform service | Single-tenant or edge network deployment | Same service contracts and evidence, deployed close to the consumer |
+| Embedded `inferra-core` | Internal 0.1.1 still exposes only the small supported leaf facade; private parser/graph code is not yet a stable embedding contract | Host owns persistence, security, migrations, audit, concurrency and recovery; not automatically Platform-certified |
+
+AXIOM and AEGIS are TypeScript products and therefore use generated API clients,
+not the Python package. A generated Python service SDK is also different from
+the package: the SDK calls Platform remotely; `inferra-core` computes locally.
 
 ## Main Components
 
 | Path | Component | Purpose |
 | --- | --- | --- |
+| `packages/inferra-core/` | Internal pre-release package, present as 0.1.1 | Independently built leaf plus private parser/graph/validation kernel and bounded IS CALC interpreter; no third-party runtime dependencies; deeper deterministic layers remain |
 | `src/domain/` | Domain core | Inference, graph, nodes, parser, state, reasoning models |
 | `src/ports/` | Port contracts | Abstract interfaces for session stores, graph, LLM, reasoning, repositories |
 | `src/adapters/inbound/http/` | HTTP adapter | FastAPI routers, schemas, and dependency wiring |
@@ -135,14 +176,16 @@ flowchart LR
 | `src/tasks/` | Worker tasks | Celery app, induction tasks, rule sync tasks |
 | `src/infrastructure/` | Cross-cutting infrastructure | Auth, rate limit, correlation IDs, logging, observability |
 | `tests/` | Test suite | Unit, integration, contract, regression, load, and chaos tests |
-| `frontends/inferra-rule-studio/` | Rule Studio prototype | Rule text, graph visualization, validation payloads |
-| `frontends/inferra-ai-harness/` | AI Harness prototype | Prompt risk, gate simulation, PROV-O trace preview |
+| `frontends/` | Legacy Platform prototypes | Development/demo tools only; not the accepted production frontend direction |
+| sibling `inferra-axiom` repository | AXIOM | General rule authoring, execution, and audit UI with a thin BFF |
+| sibling `inferra-aegis` repository | AEGIS | Specialist workflow/autonomy governance UI and eventual application backend/BFF |
 | `docs/` | Active implementation docs and references | `IMPLEMENTATION_STATUS.md`, `ROADMAP.md`, `OPERATIONS.md`, production registers, rule syntax, and archived historical plans |
 
 ## Technology Stack
 
 | Area | Current Stack | Recommended Direction |
 | --- | --- | --- |
+| Deterministic kernel | Internal `inferra-core` first slice plus remaining Python modules inside Platform | Complete the dependency-layer extraction before Core 1.0; publish publicly only after stability/licensing gates |
 | Backend API | FastAPI, Pydantic, Uvicorn | Keep |
 | Domain language | Python 3.10+ | Keep Python core deterministic and highly tested |
 | Persistence | SQLAlchemy, PostgreSQL | Keep PostgreSQL as durable source |
@@ -150,7 +193,7 @@ flowchart LR
 | Semantic graph | rdflib, Apache Jena Fuseki | Keep for RDF, SPARQL, PROV-O, audit graph |
 | Solver support | z3-solver | Keep for formal reasoning extensions |
 | Observability | Prometheus, Grafana, Loki, Promtail, OpenTelemetry | Add alert rules |
-| Frontend prototypes | Static JS and canvas | Move production UI to Vite, TypeScript, React, React Flow |
+| First-party frontends | Svelte 5/SvelteKit AXIOM and AEGIS repositories | Keep Svelte; harden their BFFs, generate clients, and pass independent quality/security gates |
 | Load testing | k6 | Run in staging or CI |
 | Containerization | Docker Compose | Keep for local/staging; consider Kubernetes or managed services later |
 
@@ -176,6 +219,7 @@ Use this when you are editing backend code and running tests locally.
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
+pip install -e "packages/inferra-core"
 pip install -e ".[dev,async,semantic,reasoning,observability]"
 ```
 
@@ -427,7 +471,11 @@ Invoke-RestMethod `
   -Body $payload
 ```
 
-### 5. Run the Frontend Prototypes
+### 5. Run the Legacy Frontend Prototypes
+
+These embedded static tools are development aids, not the accepted production
+frontends. AXIOM and AEGIS live in their own repositories and release against
+generated profile-specific Platform clients.
 
 Rule Studio:
 
@@ -461,6 +509,10 @@ http://127.0.0.1:4174
 
 ## API Surface
 
+The table below describes the current broad development application. Core 1.0
+will expose a configuration-driven `core` profile only after the internal
+package boundary and forbidden-route/OpenAPI gates are implemented.
+
 | Endpoint Group | Base Path | Purpose |
 | --- | --- | --- |
 | System | `/`, `/api/v1/live`, `/api/v1/health` | Root, liveness, readiness |
@@ -472,10 +524,11 @@ http://127.0.0.1:4174
 
 ## Frontend Tools
 
-| Tool | Current Purpose | Production Recommendation |
+| Tool | Current Purpose | Production Direction |
 | --- | --- | --- |
-| Rule Studio | Edit sample INFERRA text, visualize a dependency graph, validate rule payloads | Rebuild with Vite, TypeScript, React, React Flow, TanStack Query, Zod, Playwright |
-| AI Harness | Simulate prompt risk, gate actions, provenance traces, and reasoning API calls | Rebuild as an evaluation console with scenario datasets, model comparisons, and trace review |
+| Platform Rule Studio/AI Harness prototypes | Local static demonstrations | Retain only as development/demo tools or retire after client migration |
+| AXIOM | General rule authoring, execution, simulation, provenance and audit inspection | Keep Svelte 5; use an authenticated thin BFF and generated Core client; never become a second engine |
+| AEGIS | Autonomous-action and workflow governance | Keep Svelte 5; evolve its BFF into a separately released application backend owning AEGIS data and consuming Core APIs/events |
 
 ## Testing and Verification
 
@@ -485,7 +538,7 @@ Run the backend suite with the current quality gate:
 pytest --cov=src --cov-fail-under=97
 ```
 
-Run frontend checks:
+Run legacy embedded frontend checks:
 
 ```powershell
 cd frontends/inferra-rule-studio
@@ -532,15 +585,17 @@ powershell -ExecutionPolicy Bypass -File tests/chaos/run_phase4_chaos_suite.ps1
 
 | Area | Status |
 | --- | --- |
+| Internal `inferra-core` package | P0.1 and P0.2a-P0.2b plus the security correction complete as internal 0.1.1 with clean installed-wheel parser and adversarial-expression proof; public-facade rewiring and remaining state/import/inference/provenance extraction pending; not publicly published |
 | Backend API | Implemented and test-covered |
 | Backend coverage gate | 97 percent line coverage, latest local gate 97.01 percent |
 | Docker Compose stack | API, worker, Redis, Fuseki, PostgreSQL, OTel collector |
 | Monitoring stack | Grafana, Prometheus, Loki, Promtail |
-| Rule Studio frontend | Prototype implemented and checked |
-| AI Harness frontend | Prototype implemented and checked |
+| Platform Rule Studio/AI Harness | Legacy prototypes implemented and checked; excluded from production frontend decisions |
+| AXIOM | Separate candidate repository; build/audit pass but type, unit, lint and formatting gates currently fail |
+| AEGIS | Separate candidate repository; check/test/build pass but security, persistence, synthetic-state, licensing, lint and formatting gates remain |
 | Load smoke | k6 scripts available; local 500-VU compose production gate passes |
 | Chaos smoke | Compose-scoped reversible drill and Phase 4 restart suite available; local restart suite passes for Redis, Fuseki, and worker |
-| Production frontend | Recommended but not yet implemented |
+| Production frontend composition | AXIOM and AEGIS are independently gated Svelte products; neither is automatically included in Core 1.0 |
 | Production auth model | API key, HS256 JWT, session ownership, rate limiting, and opt-in CSRF implemented; OIDC/RBAC remains a future enterprise auth decision |
 | GraphRAG product layer | Future roadmap item |
 
@@ -592,10 +647,14 @@ The active roadmap is maintained in `docs/ROADMAP.md`; the table below is a shor
 | Phase | Roadmap Item | Outcome |
 | --- | --- | --- |
 | Completed | Graph-first runtime default | `HyperAdjacencyGraph` is the default runtime path, with matrix adapters retained for compatibility |
+| Completed | Freeze the `inferra-core` extraction inventory and semantic baseline | 243 modules classified, 29 internal crossings and the third-party dependency set frozen, six golden vectors active |
+| Completed | Establish the internal `inferra-core` distribution, P0.2a-P0.2b slices, and security correction | 0.1.1 wheel/source build, small facade, bounded expression AST, fail-closed validation, typed cycles, exact leaf re-exports, and clean installed-wheel evidence |
+| Near term | Publish the narrow compile/validation facade and rewire Platform; then move fact-store/iteration/imports and inference/provenance | Prove one installed-artifact vertical slice before expanding the extraction boundary |
+| Near term | Implement package-backed Core API profile | Narrow production service contract and generated clients |
 | Near term | Harden production readiness scripts | Repeatable local and CI confidence |
 | Near term | Add Playwright frontend tests | Real browser confidence for prototypes |
 | Completed | Add Grafana dashboards | Operational visibility for API, worker, Redis, Fuseki, logs, and reasoning metrics |
-| Mid term | Rewrite production frontend | Typed Rule Studio and AI Harness with graph editing and e2e tests |
+| Mid term | Harden AXIOM and AEGIS integrations | Authenticated BFFs, generated clients, product-specific e2e and release gates |
 | Mid term | Strengthen semantic sync | Robust RDF publishing, import impact analysis, and namespace governance |
 | Mid term | Build rule versioning workflows | Approval, promotion, rollback, audit history |
 | Mid term | Add GraphRAG evaluation harness | Measure retrieval quality before using retrieved context in decisions |
@@ -616,7 +675,8 @@ system like INFERRA, users need to understand its trust model, not only its API.
 | Document quality gates | High coverage and readiness scripts are part of the value proposition |
 | Document security posture | Rule engines often sit near sensitive policy and applicant data |
 | Document roadmap boundaries | Users should know what is production-ready, prototype, and future-facing |
-| Keep frontend status honest | The prototypes are useful, but the production frontend should be typed and e2e tested |
+| Keep package status honest | Internal 0.1.1 exists only as a partial pre-release package; do not imply the whole engine is extracted or that a public registry package is available |
+| Keep frontend status honest | The embedded prototypes are development aids; AXIOM and AEGIS are separate release units with independent blockers |
 
 ## Troubleshooting
 

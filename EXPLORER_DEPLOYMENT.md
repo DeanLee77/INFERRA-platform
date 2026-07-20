@@ -1,5 +1,13 @@
 # Inferra Explorer + Fuseki Docker Deployment
 
+> **Development-only topology — reviewed 2026-07-17.** This direct Explorer to
+> Fuseki setup is an operator/developer inspection tool, not the AXIOM/AEGIS or
+> Core production trust boundary. In the accepted architecture, PostgreSQL
+> audit/outbox records are authoritative, Fuseki is a rebuildable derived
+> PROV-O/ontology projection, and production UIs use read-only Platform APIs
+> rather than direct SPARQL administration. Default credentials below are never
+> valid for production.
+
 This deployment runs **Graph Explorer** (AWS Neptune/Graph Explorer fork) wired to a local **Apache Jena Fuseki** instance.
 
 ## Architecture

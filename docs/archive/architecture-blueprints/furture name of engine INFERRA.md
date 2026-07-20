@@ -1,3 +1,9 @@
+> **Historical brand/architecture note — 2026-07-17.** Retained for provenance,
+> not as a package or product naming decision. Current technical terminology and
+> boundaries are defined by
+> `../../INFERRA_Core_Package_and_Runtime_Architecture.md` and
+> `../../INFERRA_Cross_Project_Technical_Direction.md`.
+
 # ⭐ INFERRA
 
 *(Inference at the core)*

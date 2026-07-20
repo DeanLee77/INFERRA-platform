@@ -1,9 +1,19 @@
 # INFERRA Operations Runbook
 
 Status: active operations guide
-Last updated: 2026-07-15
+Last updated: 2026-07-20
 
 This runbook replaces the older standalone Redis and Fuseki notes in `docs/archive/operations-notes/`.
+
+This runbook operates the authoritative Platform **service**. The accepted
+internal `inferra-core` package does not replace these operational
+responsibilities. Direct embedded-library hosts own their own persistence,
+identity, concurrency, migrations, durable audit, backup, and recovery and are
+outside this runbook unless a supported embedded operations profile is added.
+Internal `inferra-core==0.1.1` currently exposes only its small leaf facade; its
+executable parser/graph/validation layer is private and state/inference layers
+remain incomplete. It is not a complete supported embedded engine or a
+publicly available package.
 
 ## Local Stack
 Start the integrated local stack:
@@ -84,6 +94,12 @@ post-reasoning, and induction jobs also carry the publisher hash and are
 rejected by a worker whose effective profile differs.
 
 ## Production Rehearsal
+
+Production rehearsal must install/use the exact built `inferra-core` artifact
+selected by the Platform release once whole-engine extraction and Platform
+rewiring are complete. Do not
+mount the repository source tree in a way that masks a missing or incompatible
+wheel. Startup and release evidence must report the Core version and SHA-256.
 Generate local secret files:
 
 ```powershell
@@ -151,6 +167,25 @@ Phase 4 restart suite:
 powershell -ExecutionPolicy Bypass -File tests/chaos/run_phase4_chaos_suite.ps1
 ```
 
+## Data Authority and Graph Lifecycle
+
+PostgreSQL is the authority for rules, decisions, provenance, graph catalogue,
+outbox, reconciliation, and retention policy. Fuseki is a critical rebuildable
+versioned RDF/PROV-O projection; it is not the only copy of a governed record.
+
+The accepted target retains graph versions indefinitely by default and permits
+only versioned, authorized retention-policy overrides. Do not manually overwrite
+or delete a production rule/case named graph as a retention mechanism. A future
+purge operation must coordinate PostgreSQL, outbox/audit, Fuseki, caches,
+backups/exports, and any permitted tombstone.
+
+The current code does not yet implement the complete account/case graph
+catalogue, immutable normal-path case projection, retention engine, or proven
+PostgreSQL-to-Fuseki rebuild. Until the release gates in
+`INFERRA_Account_Case_Ontology_and_Provenance_Architecture.md` pass, operators
+must treat ontology lifecycle/recovery as incomplete and must not certify a
+manual Fuseki graph as the durable audit record.
+
 ## Secrets
 Local `.env` values are for development only. Production traffic must use the deployment platform secret manager.
 
@@ -180,6 +215,9 @@ Secret-aware environment variables currently supported:
 ## Release Evidence
 Attach these to release candidates:
 
+- internal `inferra-core` wheel/source distribution hashes, dependency/SBOM
+  metadata, installed-wheel test result, forbidden-import result, golden-vector
+  comparison, and Platform-reported Core version/hash,
 - backend coverage output,
 - import-linter output,
 - benchmark output,

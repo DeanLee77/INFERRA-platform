@@ -8,6 +8,7 @@ import re
 from collections import deque
 from typing import Dict, Optional
 from src.domain.graph.ml_topological_sort_strategy import MLTopologicalSortStrategy
+from src.domain.graph.hyper_adjacency_graph import CyclicGraphError
 from src.domain.nodes.meta_data import MetaData
 from src.domain.nodes.node_set import NodeSet
 from src.domain.nodes.record import HistoryRecord
@@ -137,16 +138,17 @@ class RuleSetScanner:
 
         graph = node_set.get_graph()
         if graph is not None:
-            if record_node_dictionary is not None:
-                topo_result = MLTopologicalSortStrategy(graph).sort(record_node_dictionary)
-            else:
-                topo_result = graph.topological_sort()
-            if topo_result:
-                node_dict = node_set.get_node_dictionary()
-                sorted_list = [node_dict[name] for name in topo_result if name in node_dict]
-                node_set.set_sorted_node_list(sorted_list)
-            else:
+            try:
+                if record_node_dictionary is not None:
+                    topo_result = MLTopologicalSortStrategy(graph).sort(record_node_dictionary)
+                else:
+                    topo_result = graph.topological_sort()
+            except CyclicGraphError:
                 self.__scan_feeder.handle_warning("RuleSet needs rewriting due to it is cyclic.")
+                return node_set
+            node_dict = node_set.get_node_dictionary()
+            sorted_list = [node_dict[name] for name in topo_result if name in node_dict]
+            node_set.set_sorted_node_list(sorted_list)
             return node_set
 
         sorted_list = []

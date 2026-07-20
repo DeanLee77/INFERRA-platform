@@ -4,6 +4,7 @@ from src.domain.rule_parser.rule_set_parser import RuleSetParser
 from src.domain.rule_parser.rule_set_reader import RuleSetReader
 from src.domain.rule_parser.rule_set_scanner import RuleSetScanner
 from src.services.declaration_validator import (
+    DECLARATION_VALIDATION_INTERNAL_ERROR,
     DUPLICATE_DECLARATION,
     DeclarationFinding,
     DeclarationValidationResult,
@@ -95,10 +96,11 @@ def test_declaration_validator_rejects_null_nodeset():
     assert result.errors[0].code == NULL_NODESET
 
 
-def test_validate_rule_text_skips_when_parser_raises():
+def test_validate_rule_text_fails_closed_when_parser_raises():
     result = DeclarationValidator().validate_rule_text(None)
 
-    assert result.valid is True
+    assert result.valid is False
+    assert result.errors[0].code == DECLARATION_VALIDATION_INTERNAL_ERROR
 
 
 def test_declaration_validator_handles_missing_graph_child_and_safe_helpers():

@@ -1,5 +1,12 @@
 # INFERRA Documentation Archive
 
+All documents below this directory are historical. They do not control the
+accepted 2026-07-17 package-plus-service direction. Current architecture is
+defined by `../INFERRA_Cross_Project_Technical_Direction.md` and
+`../INFERRA_Core_Package_and_Runtime_Architecture.md`: `inferra-core` is the
+target internal deterministic Python package, while `inferra-platform` remains
+the official authoritative production service.
+
 Status: historical archive
 Last updated: 2026-07-16
 

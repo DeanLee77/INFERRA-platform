@@ -46,6 +46,49 @@
 
 > 97.016% coverage.
 
+>
+
+> **Cross-project revalidation.** On 2026-07-16 this assessment was extended to
+
+> the complete local working trees of `inferra-platform`, `inferra-axiom`, and
+
+> `inferra-aegis`, plus all 71 project-authored Markdown artifacts; `.txt` files,
+
+> vendored dependencies, build output, and cache-generated documents were
+
+> excluded. The controlling product ownership, release-profile, browser/BFF,
+
+> database, ontology-audit, repository action, and cross-project priority
+
+> decisions are recorded in
+
+> [`INFERRA_Cross_Project_Technical_Direction.md`](INFERRA_Cross_Project_Technical_Direction.md).
+
+> On 2026-07-17 the package-plus-service architecture was accepted: establish an
+
+> internal, independently buildable `inferra-core` Python distribution before
+
+> release while retaining `inferra-platform` as the official authoritative
+
+> runtime. The detailed boundary, extraction, versioning, embedded-mode, SDK,
+
+> and CI decisions are recorded in
+
+> [`INFERRA_Core_Package_and_Runtime_Architecture.md`](INFERRA_Core_Package_and_Runtime_Architecture.md).
+>
+> On 2026-07-20 the account/case ontology direction was accepted: human-approved
+> rule source remains authoritative; PostgreSQL owns decisions and audit/outbox;
+> Fuseki is a critical versioned projection; every provenance class is audited;
+> retention is indefinite by default but configurable; AXIOM rejects
+> decision-affecting semantic input; and AEGIS accepts ontology outcomes only
+> through typed, rule-governed, fail-closed gates. The detailed contract and
+> resolved owner decisions and implementation requirements are in
+> [`INFERRA_Account_Case_Ontology_and_Provenance_Architecture.md`](INFERRA_Account_Case_Ontology_and_Provenance_Architecture.md).
+
+> Where this older Platform-focused assessment conflicts with that direction,
+
+> the cross-project document controls.
+
 
 
 ---
@@ -88,11 +131,28 @@ architecture concerns, but attempting those redesigns before launch would add
 
 more risk than it removes.
 
+The separate frontend repositories are now known and were inspected. AXIOM is
+
+not a release candidate: its production build masks 32 type/Svelte errors, two
+
+unit-test failures, and extensive lint/tooling failures. AEGIS has stronger
+
+type/test/build evidence, but its current browser boundary is unauthenticated,
+
+its runtime trusts caller-supplied actor roles for privileged actions, and both
+
+backend and frontend can use synthetic state. These findings make frontend and
+
+AEGIS readiness independent release decisions rather than missing Platform
+
+folders.
 
 
-The recommendation is therefore two-horizon: **stabilize and prove a narrow,
 
-deterministic first release**, then improve persistence, provenance, module
+The recommendation is therefore two-horizon: **extract and prove the reusable
+deterministic kernel, then stabilize and prove a narrow,
+
+deterministic service release**, then improve persistence, provenance, module
 
 boundaries, LLM governance, and infrastructure using production evidence.
 
@@ -170,11 +230,71 @@ These are INFERRA's strengths. Preserve them through any refactor.
 
 
 
-These are strategic design recommendations, not the first-production-release
+These are architecture recommendations. Section 5 identifies delivery order.
+Most are post-release themes; A0 is the explicit exception because the accepted
+2026-07-17 package boundary is now P0 before Core 1.0.
 
-sequence. Section 5 identifies the work that should block or explicitly constrain
+### A0 - Package the deterministic kernel without removing the service (high impact, P0 boundary)
 
-the initial release.
+**Finding.** INFERRA's most reusable value is deterministic Python domain logic.
+The new internal distribution now owns its leaf contracts and a private
+executable graph/node/token/parser/validation layer, but state, imports,
+inference and provenance plus Platform's compatibility parser still install
+through the broad `inferra-platform` `src*` namespace together with FastAPI,
+SQLAlchemy, persistence, workers, LLM clients, and product extensions. Python
+embedders still cannot consume the whole supported kernel, and the existing
+Platform import contracts do not yet prove that the complete engine is
+independent of runtime and extension concerns.
+
+**Decision.** Create a real internal `inferra-core` Python distribution before
+Core 1.0. Keep `inferra-platform` as the official multi-user production runtime
+built on that artifact. Do not replace the service with a library and do not
+publish the package publicly until its facade and license are stable.
+
+**Progress, 2026-07-17.** P0.1 is complete. The current candidate has a
+machine-checked inventory of all 243 production Python modules, an initial
+70-module Core extraction set, 29 recorded cross-boundary imports, ten explicit
+extraction blockers, a frozen syntax/source identity, and six golden vectors for
+parser, diagnostics, inference, imports, iteration, hashes, and provenance. See
+[`INFERRA_Core_Extraction_P0_1_Baseline.md`](INFERRA_Core_Extraction_P0_1_Baseline.md).
+P0.2a and P0.2b are also complete: `inferra-core==0.1.1` builds its own
+wheel/source distribution, has a small supported facade, owns the first leaf
+values and all five Core ABC ports, and contains private executable
+graph/node/token/parser and deterministic-validation layers. Node-ID collision
+state and validation time are explicit inputs, legacy matrix/nested-iterate
+behavior stays in Platform, and the parser passes clean external-venv
+installed-wheel and forbidden-import checks. The 0.1.1 security correction
+removes all Core third-party runtime dependencies, replaces string-to-SymPy
+rule evaluation with a bounded INFERRA AST/interpreter, fails internal
+declaration validation closed, and makes graph-cycle failure typed. See
+[`INFERRA_Core_Extraction_P0_2_Distribution.md`](INFERRA_Core_Extraction_P0_2_Distribution.md).
+The immediate blocker is a narrow public compile/validation facade and
+Platform integration for the completed slice. Remaining P0.2
+fact-store/iteration/import and inference/provenance layers, complete Platform
+application-service rewiring, and whole-engine equivalence/reproducibility
+follow.
+
+**Required boundary**
+
+1. Core owns pure parsing, validation, graph, fact-store, inference, imports,
+   trace/provenance construction, deterministic hashes, domain diagnostics, and
+   structured audit-event creation.
+2. Platform retains HTTP, transport schemas, identity/scopes, SQLAlchemy,
+   migrations, transactions, rule revisions, sessions, idempotency, outbox,
+   workers, Fuseki publication, secrets, logging, metrics, and operations.
+3. Core must not read environment/global deployment state or import FastAPI,
+   SQLAlchemy, Redis, Celery, Fuseki, LLM, AEGIS, AXIOM, provider verification,
+   or SNOMED/MBS code.
+4. AXIOM and AEGIS use generated TypeScript service clients. A Python SDK calls
+   Platform remotely and is distinct from the locally executing Core library.
+5. Direct embedded use is supported for offline/single-process contexts only
+   under host-owned persistence, identity, audit, concurrency, and recovery.
+6. Freeze golden behavior before module movement, build an independent wheel,
+   test Platform against the installed artifact, and enforce dependency
+   direction in CI.
+
+The complete accepted design and extraction order are in
+`INFERRA_Core_Package_and_Runtime_Architecture.md`.
 
 
 
@@ -510,6 +630,61 @@ storage dump:
 
 
 
+### A1.1 - Add the missing account/case knowledge axis (P0 minimum, P1 expansion)
+
+The three inspected candidates expose a more fundamental persistence gap than
+rule normalization alone: the product stories are account/case-centric, while
+the implemented authority is rule/session/run-centric. There is no complete
+production Account or Case aggregate, no account-owned graph catalogue, and no
+general immutable case-graph version path. A session ID is an execution detail;
+it is not a durable subject, privacy, retention, or case boundary.
+
+The target relationship is:
+
+```mermaid
+erDiagram
+    TENANT_WORKSPACE ||--o{ ACCOUNT : authorizes
+    ACCOUNT ||--o{ CASE : owns
+    CASE ||--o{ EXECUTION : contains
+    RULE_SET_VERSION ||--o{ EXECUTION : freezes
+    EXECUTION ||--o{ FACT_RECORD : produces
+    EXECUTION ||--o{ GRAPH_PROJECTION : projects
+    CASE ||--o{ GRAPH_PROJECTION : versions
+    ACCOUNT ||--o{ RELATIONSHIP_DECLARATION : participates
+```
+
+Keep Core narrow: its account record should contain opaque identity, ownership,
+status, and policy references needed for authorization and audit, not become a
+general CRM/customer/robot profile. Platform owns AXIOM's governed case record.
+The AEGIS application backend owns AEGIS workflow/case lifecycle and PII, while
+each Core decision stores frozen opaque account/case/execution references.
+
+Every fact, including `ASSERTED`, belongs in the immutable audit record. Do not
+encode evidentiary authority in `FactSource`: an assertion may be unverified,
+while a deterministic inference may legitimately drive downstream rules inside
+the same frozen execution. Store source, verification, decision eligibility,
+scope, validity, derivation, and supersession as separate dimensions.
+
+Historical non-asserted products are audit/discovery material. A later case must
+re-derive `INFERRED`, re-query `SEMANTIC`, governably promote `LEARNED`, and keep
+`HYPOTHETICAL` in simulation; it must not copy them into current truth. Prior
+assertions are candidates only after current subject/scope/source/validity checks.
+
+Before Core 1.0, implement the minimum ownership identifiers, immutable graph
+catalogue, versioned retention-policy identity, transactional audit projection,
+read-only account/case authorization, reconciliation, and rebuild. After release,
+add automated longitudinal discovery/revalidation, Relationship Declaration
+workflows, legal holds/purge automation, semantic diff, and large-scale graph
+lifecycle operations. The controlling detail is
+`INFERRA_Account_Case_Ontology_and_Provenance_Architecture.md`.
+
+**Accepted owner decision, 2026-07-20.** Tenant/Workspace is the authorization
+boundary and KnowledgeSubject/Account is the domain subject. AXIOM uses a durable
+`AssessmentCase`; AEGIS uses a durable `WorkflowCase`; they share only a small
+`CaseEnvelope`, and both may contain multiple immutable executions/attempts.
+AEGIS authoring defaults to `ALL + DENY_OVERRIDES`, requires explicit activation
+confirmation, and blocks/escalates unresolved outcomes.
+
 ### A2 - Contain scope sprawl (medium impact, ongoing discipline)
 
 
@@ -658,9 +833,11 @@ tenancy, incident, or cost evidence to conclude that it is over-provisioned.
 
   and post-write triple-count/content checks are good. The rule projection still
 
-  updates a stable named graph with delete/insert semantics; after launch, consider
+  updates a stable named graph with delete/insert semantics. For any graph used
 
-  immutable versioned graph creation followed by an atomic current-pointer swap:
+  as first-release rule/case audit evidence, replace that contract before launch
+
+  with immutable versioned graph creation followed by an atomic current-pointer swap:
 
   build then swap, never clear then rebuild. A partial or failed replacement must
 
@@ -694,23 +871,64 @@ tenancy, incident, or cost evidence to conclude that it is over-provisioned.
 
 ## 5. Recommendation assessment
 
-The local branch should be treated as a release-candidate lineage, not as a
+The three local working trees should be treated as intended candidate inputs, not
 
-releasable artifact until external gates and sign-off close. Backend correctness
+as releasable artifacts until their repository-specific gates and sign-off close.
 
-evidence is strong: the retained clean-checkout report records 3,438 passed tests
+Platform remains the strongest candidate: OpenAPI drift, feature-flag contracts,
 
-at 97.016% coverage; the focused auth, Redis
+AEGIS database guards, and both import contracts pass. A fresh full local run
 
-session, feature-flag, rule-sync, ontology post-reasoning, and metrics slice passed
+reached 3,436 passes and 70 skips; its nine failures were confined to
 
-162 tests with 2 skips during this review; and both import contracts pass across
+observability tests because the local virtual environment lacks two declared
 
-243 files and 722 dependencies. The remaining risk is concentrated in candidate
+optional OpenTelemetry release packages. AXIOM fails type, unit, lint, and
 
-reproducibility, security/data boundaries, operational proof, and unresolved
+formatting gates. AEGIS passes type-check, 165 unit tests, main/embed builds, and
 
-launch policy.
+the dependency audit, but fails lint/formatting and has production security and
+
+synthetic-state blockers. The remaining suite-wide risk is concentrated in API
+
+surface control, schema/revision safety, verified identity and authority,
+
+ontology audit durability, intentional candidate boundaries, licensing, and
+
+target-like operational proof.
+
+
+
+### Cross-project controlling decision
+
+**Accepted amendment, 2026-07-17.** Before freezing the first production API,
+establish an internal, independently buildable `inferra-core` Python
+distribution for the deterministic kernel. `inferra-platform` imports that
+artifact and remains the official transaction, persistence, identity, audit,
+and operations authority. AXIOM and AEGIS consume generated service clients;
+direct Python embedding is a separate host-owned mode. The package boundary is
+P0, while public registry publication is deferred until after internal API and
+semantic stability. The detailed decision is in
+`INFERRA_Core_Package_and_Runtime_Architecture.md`.
+
+
+
+The first production target is a narrow `core` Platform profile containing
+
+deterministic rule/inference APIs plus PostgreSQL-authoritative ontology
+
+audit/provenance publication and read-only inspection. AXIOM is a separately
+
+gated first-party client of that profile. AEGIS is absent from Core and remains a
+
+preview/optional extension until its own P0 gates pass. After the package
+
+boundary passes, the next implementation item is the configuration-driven
+Platform API profile and its package-backed, frozen Core OpenAPI
+
+artifact. The complete ordered plan is in
+
+`INFERRA_Cross_Project_Technical_Direction.md`.
 
 
 
@@ -718,11 +936,17 @@ launch policy.
 
 
 
-This matrix is the authoritative ordering for the recommendations in this
+This matrix is the authoritative Platform-focused ordering for the recommendations
 
-document. Section 3's `A1`-`A3` identifiers name architecture themes; they are not
+in this document. The suite-wide ordering in
 
-delivery priority levels.
+`INFERRA_Cross_Project_Technical_Direction.md` controls cross-repository work and
+
+places the production API-profile contract before the Platform sequence below.
+
+Section 3's `A1`-`A3` identifiers name architecture themes; they are not delivery
+
+priority levels.
 
 
 
@@ -745,21 +969,24 @@ delivery priority levels.
 
 | Order | Recommendation | Priority | Timing | Depends on | Release effect |
 | ---: | --- | :---: | --- | --- | --- |
-| 1 | R0: Produce one immutable, reproducible candidate | P0 | Before release | None | Blocks the entire release |
-| 2 | R1: Freeze product scope, routes, roles, secrets, and security posture | P0 | Before release | Candidate scope identified | Blocks the entire release |
-| 3 | R2: Add migrations, minimum Rule constraints, revision identity, backfill, restore proof, and decision freezing | P0 | Before release | Schema and launch surface frozen | Blocks release; narrowly defined exceptions require named owner, expiry, and compensating controls |
-| 4 | R2: Remove pickle session deserialization | P0 or P1 | Before release unless a trusted-Redis exception is signed; otherwise first hardening release | Session schema and deployment trust boundary | Blocks release when Redis is not fully trusted; signed exception must expire |
-| 5 | R3: Prove the complete production-profile stack in staging | P0 | Before release | R0-R2 complete | Blocks the entire release |
-| 6 | R4: Complete ontology observability and reconciliation | P0 conditional | Before ontology-derived facts can affect production decisions | Ontology capability enabled and staging stack available | Blocks ontology activation; not the deterministic-only release if ontology reasoning is off |
-| 7 | R5: Close API/client, OpenAPI, frontend, legacy-route, and document gaps | P0 | Before release | R1 launch contract | Blocks release contract/sign-off |
-| 8 | Normalize core Rule persistence and append-only decision provenance | P1 | First post-release persistence milestone | Migration baseline, revision identifiers, client compatibility plan | Does not block the narrow first release after R2 controls pass |
-| 9 | Expand the minimum outbox into durable replay and reconciliation | P1 | First post-release reliability milestone | Minimal pre-release outbox and operational ownership | Does not block release if async projection is disabled; otherwise the minimal outbox is P0 |
-| 10 | Enforce LLM operations, evaluation gates, budgets, model/prompt versions, and durable usage | P1 conditional | Before enabling live LLM capabilities | Provider/model policy and evaluation set | Blocks LLM activation, not deterministic release |
-| 11 | Replace any temporarily accepted pickle envelope with a schema-safe session format | P1 | First hardening release | Session schema/migration design | Required by the exception expiry in row 4 |
-| 12 | Make core, AEGIS, provider verification, and SNOMED/MBS deployable module boundaries | P2 | Subsequent architecture release | Capability owners, schema ownership, dependency rules | Does not block narrow release if unapproved modules are absent from production routes |
-| 13 | Retire legacy iterate, matrix shims, obsolete flags, and `/service/*` | P2 | After client and stored-payload migration | Parity, compatibility, rollback, and client evidence | Does not block release while compatibility paths are controlled |
-| 14 | Build the governance-grade PostgreSQL decision audit and PROV-O audit projection | P2 | Governance/audit release | Normalized decisions and durable outbox | Required when contractual/regulatory audit scope demands it |
-| 15 | Consolidate Celery, Redis, or Fuseki | P3 | Only after production measurement | Queue, SPARQL, recovery, incident, and cost evidence | Never a first-release blocker |
+| 0 | S0: Preserve bounded rule-source evaluation, fail-closed validation, typed graph-cycle failures, and adversarial installed-artifact proof (implemented in Core 0.1.1) | P0 invariant | Before every release | None | Any regression blocks every release |
+| 1 | A0: Extract and prove the internal `inferra-core` distribution (P0.1, P0.2a-P0.2b and the 0.1.1 security correction complete; public-facade integration is next, then remaining extraction/rewiring/proof) | P0 | Before release | Frozen golden behavior | Blocks the entire release under the accepted architecture |
+| 2 | R0: Produce one immutable, reproducible candidate including Core wheel evidence | P0 | Before release | Package boundary identified | Blocks the entire release |
+| 3 | R1: Freeze product scope, routes, roles, secrets, and security posture | P0 | Before release | Candidate scope identified | Blocks the entire release |
+| 4 | R2: Add migrations, minimum Rule constraints, tenant/account/case/execution ownership, revision and graph identity, fact authority fields, backfill, restore proof, and decision freezing | P0 | Before release | Schema and launch surface frozen | Blocks release; decisions and projections otherwise lack enforceable ownership and reproducibility |
+| 5 | R2: Remove pickle session deserialization | P0 or P1 | Before release unless a trusted-Redis exception is signed; otherwise first hardening release | Session schema and deployment trust boundary | Blocks release when Redis is not fully trusted; signed exception must expire |
+| 6 | R3: Prove the complete production-profile stack in staging | P0 | Before release | A0 and R0-R2 complete | Blocks the entire release |
+| 7 | R4: Complete the PostgreSQL-to-versioned-Fuseki audit path, authorization, observability, reconciliation, rebuild, and retention identity; add stricter materialization gates when ontology can affect decisions | P0 for audit projection; P0 conditional for materialization | Audit path before Core release; materialization before any decision-affecting profile | Account/case schema, outbox, Fuseki and staging stack | Blocks Core audit/provenance scope; decision-affecting ontology stays disabled until the additional gates pass |
+| 8 | R5: Close package/API/client, OpenAPI, frontend, legacy-route, and document gaps | P0 | Before release | A0 package and R1 launch contracts | Blocks release contract/sign-off |
+| 9 | Normalize core Rule persistence and append-only decision provenance | P1 | First post-release persistence milestone | Migration baseline, revision identifiers, client compatibility plan | Does not block the narrow first release after R2 controls pass |
+| 10 | Expand the minimum outbox into durable replay and reconciliation | P1 | First post-release reliability milestone | Minimal pre-release outbox and operational ownership | Does not block release if async projection is disabled; otherwise the minimal outbox is P0 |
+| 11 | Stabilize, license, sign, document, and publicly publish `inferra-core` | P1 | After internal API/semantic stability | A0, licensing, SBOM/provenance, registry decision | Public publication is not required for Core 1.0 |
+| 12 | Enforce LLM operations, evaluation gates, budgets, model/prompt versions, and durable usage | P1 conditional | Before enabling live LLM capabilities | Provider/model policy and evaluation set | Blocks LLM activation, not deterministic release |
+| 13 | Replace any temporarily accepted pickle envelope with a schema-safe session format | P1 | First hardening release | Session schema/migration design | Required by the exception expiry in row 5 |
+| 14 | Make AEGIS, provider verification, and SNOMED/MBS deployable module boundaries | P2 | Subsequent architecture release | Capability owners, schema ownership, dependency rules | Does not block narrow release if unapproved modules are absent from production routes |
+| 15 | Retire legacy iterate, matrix shims, obsolete flags, and `/service/*` | P2 | After client and stored-payload migration | Parity, compatibility, rollback, and client evidence | Does not block release while compatibility paths are controlled |
+| 16 | Build the governance-grade PostgreSQL decision audit and PROV-O audit projection | P2 | Governance/audit release | Normalized decisions and durable outbox | Required when contractual/regulatory audit scope demands it |
+| 17 | Consolidate Celery, Redis, or Fuseki | P3 | Only after production measurement | Queue, SPARQL, recovery, incident, and cost evidence | Never a first-release blocker |
 
 
 
@@ -777,7 +1004,62 @@ expiry date, and the P1 item that removes the exception.
 
 
 
+#### S0 - Keep rule source non-executable and structural failure fail-closed (P0 invariant)
+
+**Finding.** The extracted expression-conclusion path previously delegated rule
+text to SymPy parsing, while an internal declaration-validator exception could
+be converted into a successful result and graph cycle detection used an empty
+tuple that was indistinguishable from a genuinely empty graph. Those are not
+ordinary implementation details: together they create an avoidable rule-source
+execution/resource-exhaustion surface, permit unvalidated rules to progress
+after an internal failure, and make callers guess whether topology is valid.
+
+**Decision and local implementation, 2026-07-17.** Core 0.1.1 implements the
+documented `IS CALC` language with a purpose-built lexer, private AST, parser,
+and interpreter. It accepts only numeric literals, explicit variables,
+parentheses, unary `+`/`-`, arithmetic `+`/`-`/`*`/`/`, comparisons, ternary
+`? :`, and the bounded `ROUND`, `MAX`, and `MIN` functions. It does not pass
+rule source to `eval`, `exec`, `compile`, SymPy, Python AST execution, or another
+general-purpose expression engine. Unsupported calls/operators and excessive
+source length, token count, AST nodes/depth, evaluation work, integer size,
+string/collection size, or rounding precision are rejected.
+Numeric-looking relational operands use finite decimal coercion rather than
+binary-float coercion, preventing large integers and high-precision monetary or
+policy thresholds from being silently rounded or compared lexicographically.
+
+Rule validation now parses calculation expressions before save/activation and
+returns `INVALID_CALC_EXPRESSION` for unsupported syntax. An unexpected
+declaration-parser failure returns a typed validation error and must not permit
+save, activation, or promotion. Topological sorting raises `CyclicGraphError`
+for a cycle; an empty tuple now means only an actually empty graph. Both Core
+and temporary Platform compatibility paths use these semantics.
+
+**Permanent release gate.** Keep package boundary tests that reject
+general-purpose evaluator calls, adversarial source tests (including proof that
+filesystem side effects do not occur), expression limit tests, fail-closed
+validator tests, typed-cycle contract tests, and clean installed-wheel checks.
+The Core wheel must declare zero runtime dependencies unless a future dependency
+receives an explicit security/license/reproducibility decision. Any relaxation
+requires a new decision record and security review; compatibility pressure is
+not sufficient justification.
+
+**Current evidence.** Core package tests pass 33/33; the focused Platform
+compatibility/security selection passes 221 tests; the clean installed 0.1.1
+wheel reports no runtime requirements or forbidden loaded modules and rejects
+the adversarial Python-expression probe; `uv lock --check` resolves 99 packages
+without SymPy/mpmath; and the complete Platform suite passes 3,471 tests with
+70 skipped and 146 warnings in 309.00 seconds. The unchanged 97% Platform
+coverage threshold passes at 20,932/21,579 statements (97.0017%).
+
+
+
 #### R0 - Produce one immutable, reproducible candidate (release blocker)
+
+The next candidate must include the built internal `inferra-core` wheel and
+source distribution, their hashes and dependency manifests, and proof that
+Platform tests ran against the installed artifact rather than repository-path
+imports. The earlier candidate evidence remains valid historical evidence for
+the pre-extraction codebase; it does not close the newly accepted package gate.
 
 
 
@@ -949,6 +1231,9 @@ feature snapshot, and release-gate result without using ignored local files.
    the approved launch use case. Treat AEGIS, provider verification, SNOMED/MBS,
 
    LLM-assisted authoring, GraphRAG, and experimental reasoning as extensions.
+   Implement the deterministic portion in `inferra-core`, but retain the
+   service-owned database, identity, transaction, audit, and operational
+   responsibilities in Platform.
 5. Create a launch capability matrix for every module with these required fields:
 
    `ships_in_first_release`, `production_router_enabled`, configuration/feature
@@ -1075,13 +1360,27 @@ optional-feature posture are explicit and tested in the production profile.
 
 
 
+10. Add durable tenant/workspace scope plus opaque account, case, and execution
+    identifiers to every governed decision. Do not use `session_id`, owner name,
+    rule category, or graph URI as a substitute for authorization ownership.
+11. Add a PostgreSQL-authoritative graph catalogue for immutable rule,
+    execution, and case projections: kind, URI, version/content hash, owner,
+    predecessor/supersession, status, outbox event, and retention-policy version.
+12. Store fact source separately from verification and decision eligibility.
+    Persist all source classes, including assertions, and prohibit historical
+    non-asserted products from direct future-case promotion.
+13. Default graph retention to indefinite, while persisting a versioned policy
+    reference now so later legal-hold/purge automation does not require another
+    identity redesign.
+14. Enforce AXIOM's deterministic profile at the application-service/API
+    boundary. Callers must not enable semantic auto-answer or materialization for
+    an AXIOM authoritative execution.
+
 **Exit criterion:** schema upgrades, core Rule revision constraints, legacy-data
-
-backfill, outbox publication, and restores are repeatable; session-state
-
-risk is removed or formally accepted, and decisions can be reproduced from frozen
-
-artefact identifiers.
+backfill, outbox publication, and restores are repeatable; session-state risk is
+removed or formally accepted; decisions and graph projections have enforced
+tenant/account/case ownership, immutable artefact identifiers, independent fact
+authority metadata, and a persisted retention-policy version.
 
 
 
@@ -1125,6 +1424,22 @@ recovery, and ontology-loop gates in the target-like environment.
 
 
 
+The accepted Core scope includes ontology audit/provenance publication and
+
+read-only inspection even while ontology advisory, auto-answer, materialized
+
+reasoning, and browser authoring remain disabled. Therefore the minimum
+
+transactional outbox, durable audit-event contract, projection status,
+
+redaction, and reconciliation controls are P0 for Core. The
+
+materialization-specific requirements below become P0 only when ontology-derived
+
+facts can affect decisions.
+
+
+
 INFERRA already logs projection, post-reasoning, semantic-cache, type-bridge, and
 
 delta activity and carries materialization traces into PROV-O artefacts. Close the
@@ -1163,34 +1478,76 @@ remaining gaps before enabling ontology reasoning in production:
 6. Add contract tests for required fields, redaction, context propagation, metric
 
    increments on success/failure/retry, and reconciliation alarms.
+7. Replace stable-graph delete/insert as the evidence contract with immutable,
+   content-addressed rule and execution/case graph versions plus a separately
+   managed latest pointer/catalogue. Verify publish counts and hashes before a
+   projection is marked complete.
+8. Bind graph read scope server-side to tenant/account/case ownership. Do not let
+   a browser, LLM, or raw graph URI expand the authorized dataset.
+9. Prove rule approval -> outbox -> versioned rule graph and decision commit ->
+   outbox -> immutable case graph -> read-only query -> reconciliation/rebuild in
+   staging. The current manual case sync and semantic-pilot-only versioning are
+   insufficient.
+10. Persist every fact source and its independent authority/validity metadata.
+    Operational logs remain redacted; the protected append-only audit record and
+    graph projection carry the governed lineage.
+11. Persist an indefinite-default versioned retention policy and exercise an
+    authorized lifecycle dry run. Full purge/legal-hold automation may follow the
+    release, but silent expiry or unowned Fuseki deletion is not acceptable.
 
 
 
-**Exit criterion:** an operator can trace one semantic decision end-to-end, detect
-
-staleness or loss, and diagnose failure without exposing protected fact content.
+**Exit criterion:** an operator can trace one rule approval and one case decision
+from the PostgreSQL transaction through an immutable, ownership-scoped Fuseki
+projection and read-only query; detect staleness, loss, or policy expiry; rebuild
+the projection; and diagnose failure without exposing protected fact content.
+If semantic materialization is enabled, the same evidence proves the applicable
+AXIOM or AEGIS authority policy and fail-closed behavior.
 
 
 
 #### R5 - Close API/client and release-document gaps (release blocker)
 
+1. Build `inferra-core` as an internal distribution with its own metadata,
+   dependency boundary, public facade, installed-wheel tests, golden vectors,
+   artifact hashes, and compatibility record. Do not claim public package
+   availability until the separate publication gate passes.
 
 
-1. Decide whether the first release is API-only. The release script references two
 
-   frontend workspaces that are absent from the current tree; either restore and
+2. Treat the three repositories as separate release units. The first production
 
-   test them or remove them from the first-release contract explicitly.
-2. Freeze `/api/v1` request/response shapes against the generated OpenAPI artefact.
+   target is API-only INFERRA Core unless AXIOM completes its own P0 quality,
 
-   Publish a migration/deprecation policy for legacy `/service/*` endpoints.
-3. Reconcile this assessment, `IMPLEMENTATION_STATUS.md`, `ROADMAP.md`,
+   security, modern-API, generated-client, packaging, and end-to-end gates. AEGIS
+
+   is explicitly excluded from the Core profile and does not block Core release.
+3. Freeze `/api/v1` request/response shapes against the generated OpenAPI artefact.
+
+   Generate profile-specific TypeScript clients, migrate AXIOM away from
+
+   `/service/rule/*`, and publish a migration/deprecation policy for legacy
+
+   `/service/*` endpoints.
+4. Reconcile this assessment, `IMPLEMENTATION_STATUS.md`, `ROADMAP.md`,
 
    `OPERATIONS.md`, production readiness, and the decision/retirement registers.
 
    Status numbers and launch claims should be generated from the evidence bundle
 
    where possible, rather than copied into several documents.
+5. Replace both frontend proxies' sibling-repository secret reads with deployment
+
+   environment/secret-manager injection. Require authenticated BFF sessions,
+
+   exact route/method allowlists, CSRF on mutations, and verified identity
+
+   propagation before either UI is called production-ready.
+6. Make Platform the canonical owner of the rule syntax dictionary and OpenAPI.
+
+   Remove or generate the divergent AXIOM/AEGIS copies and fail CI on contract
+
+   drift.
 
 
 
@@ -1230,9 +1587,20 @@ staleness or loss, and diagnose failure without exposing protected fact content.
    version, and incident-disable policy at one gateway; persist usage and decisions
 
    durably instead of relying on a process-local cost singleton.
-5. **Turn product boundaries into deployable boundaries.** Give core INFERRA,
+5. **Stabilize and publish the reusable kernel deliberately.** After the internal
 
-   AEGIS, provider verification, and SNOMED/MBS explicit packages, ownership,
+   package and Platform release prove semantic compatibility, complete the
+
+   `inferra-core` public API reference, licensing, changelog, SBOM, provenance,
+
+   signing, supported-Python matrix, registry-name check, and pre-release cycle.
+
+   Public publication is a separate release decision, not an automatic result
+
+   of creating the internal wheel.
+6. **Turn extension boundaries into deployable boundaries.** Give AEGIS,
+
+   provider verification, and SNOMED/MBS explicit packages, ownership,
 
    configuration/router inclusion, API/version policy, and dependency-direction
 
@@ -1245,7 +1613,7 @@ staleness or loss, and diagnose failure without exposing protected fact content.
    independent scaling, security, ownership,
 
    or release cadence justifies it.
-6. **Evaluate service consolidation from measured operations.** Keep Celery,
+7. **Evaluate service consolidation from measured operations.** Keep Celery,
 
    Redis, PostgreSQL, and Fuseki for the first release. After collecting queue
 
@@ -1256,12 +1624,12 @@ staleness or loss, and diagnose failure without exposing protected fact content.
    Replacing the Celery broker alone will not remove Redis because it also carries
 
    sessions, deltas, metadata, DLQ records, and task results.
-7. **Retire compatibility deliberately.** Remove legacy iterate, matrix shims,
+8. **Retire compatibility deliberately.** Remove legacy iterate, matrix shims,
 
    obsolete feature switches, and `/service/*` only after client migration,
 
    stored-payload read evidence, parity tests, and rollback plans are complete.
-8. **Build governance-grade semantic audit.** Persist an append-only PostgreSQL
+9. **Build governance-grade semantic audit.** Persist an append-only PostgreSQL
 
    decision record containing rule/ontology/engine versions, confidence gates,
 
@@ -1270,6 +1638,14 @@ staleness or loss, and diagnose failure without exposing protected fact content.
    PROV-O audit graph. Operational logs diagnose health; the audit record explains
 
    why a decision occurred.
+10. **Build longitudinal account knowledge without conclusion reuse.** Discover
+    prior assertions and audit products through authorized account/case indexes;
+    revalidate assertions, re-run deterministic derivations, and repeat semantic
+    queries against pinned current snapshots before a new decision can use them.
+11. **Implement governed graph lifecycle and correlation.** Add versioned
+    retention overrides, legal holds, coordinated purge/tombstone operations,
+    Relationship Declaration workflows, cross-tenant approval, revocation, and
+    access audit. Do not infer correlation from an RDF edge alone.
 
 
 
@@ -1299,9 +1675,11 @@ migrations, recoverable data stores, and a fully observed ontology path.
 
 
 
-The highest-leverage move before launch is **freeze, reduce, prove, and sign**:
+The highest-leverage move before launch is **extract, freeze, reduce, prove, and
+sign**:
 
-produce one reproducible SHA, reduce the exposed surface, prove the real stack in
+establish the internal deterministic package without changing semantics, produce
+one reproducible SHA, reduce the exposed surface, prove the real stack in
 
 staging, and close the production decision register. After launch, re-pour the
 
@@ -1309,8 +1687,9 @@ platform's strong domain judgment onto explicit rule versioning, normalized and
 
 append-only provenance, safe session schemas, enforceable LLM governance, durable
 
-cross-store publication, and clearer product boundaries. Do not rewrite the core
-
-or replace Celery/Redis/Fuseki on speculation; change them only from measured
+cross-store publication, and clearer product boundaries. Extract Core
+incrementally behind golden vectors; do not combine packaging with a semantic
+rewrite. Do not replace Celery/Redis/Fuseki on speculation; change them only
+from measured
 
 production evidence.

@@ -30,7 +30,7 @@ _logger = get_logger(__name__)
 
 
 class CyclicGraphError(RuntimeError):
-    """Raised when back-propagation detects a likely cyclic dependency."""
+    """Raised when graph traversal detects a cyclic dependency."""
     pass
 
 
@@ -398,8 +398,9 @@ class HyperAdjacencyGraph(DependencyGraphPort):
         """
         Return nodes in topological order using Kahn's algorithm.
 
-        Result is cached until the next mutation. Returns an empty tuple
-        if the graph contains a cycle.
+        Result is cached until the next mutation. A cycle raises
+        :class:`CyclicGraphError`; an empty tuple therefore means that the graph
+        is genuinely empty.
 
         Returns:
             Tuple of node names in topological order
@@ -431,9 +432,12 @@ class HyperAdjacencyGraph(DependencyGraphPort):
                             queue.append(child)
 
         if len(result) != len(all_names):
-            _logger.error("Cyclic graph detected during topological sort")
-            self._topo_cache = ()
-            return ()
+            unresolved = tuple(sorted(name for name, degree in in_degree.items() if degree > 0))
+            preview = ", ".join(unresolved[:10])
+            raise CyclicGraphError(
+                "Cyclic graph detected during topological sort"
+                + (f": {preview}" if preview else "")
+            )
 
         self._topo_cache = tuple(result)
         return self._topo_cache

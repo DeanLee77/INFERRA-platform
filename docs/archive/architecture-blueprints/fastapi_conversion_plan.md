@@ -1,4 +1,8 @@
-**Superseded Document Notice - 2026-05-11:** FastAPI migration is complete and this document is retained as historical migration context only. Current API, routing, auth, session, metrics, and production readiness status are tracked in the reconciled phase plans and `INFERRA_Production_Readiness_and_Tech_Stack.md`.
+**Superseded Document Notice - updated 2026-07-17:** FastAPI migration is
+complete and this document is retained as historical migration context only.
+Current API/runtime status is tracked in active production documents; the
+accepted package-versus-service boundary is controlled by
+`../../INFERRA_Core_Package_and_Runtime_Architecture.md`.
 
 # INFERRA Platform FastAPI Conversion Plan
 

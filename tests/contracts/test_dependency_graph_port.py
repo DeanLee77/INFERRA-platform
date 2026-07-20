@@ -258,8 +258,8 @@ def test_topological_sort_diamond(graph):
     assert result.index("C") < result.index("D")
 
 
-def test_topological_sort_cyclic_returns_empty(graph):
+def test_topological_sort_cyclic_raises_typed_error(graph):
     graph.add_dependency_group("A", int(DependencyType.AND), {"B"})
     graph.add_dependency_group("B", int(DependencyType.AND), {"A"})
-    result = graph.topological_sort()
-    assert result == ()
+    with pytest.raises(CyclicGraphError, match="A, B"):
+        graph.topological_sort()

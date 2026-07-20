@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "captured_on": "2026-07-17",
+  "purpose": "Behavioral equivalence baseline for the inferra-core extraction; update only for an intentional semantic change.",
+  "parser": {
+    "id": "parser-and-dependency-v1",
+    "source_name": "eligibility_baseline",
+    "rule_text": "INPUT applicant age AS NUMBER\nINPUT citizenship confirmed AS BOOLEAN\n\neligible\n    AND applicant age >= 18\n    AND citizenship confirmed\n",
+    "expected": {
+      "source_sha256": "8b5ce0892e65ecf732023d8f5283a4bdc7467d9bf223362d973071089a06e4e5",
+      "node_names": [
+        "applicant age >= 18",
+        "citizenship confirmed",
+        "eligible"
+      ],
+      "input_types": {
+        "applicant age": "DOUBLE",
+        "citizenship confirmed": "BOOLEAN"
+      },
+      "edges": [
+        {
+          "parent": "eligible",
+          "child": "applicant age >= 18",
+          "dependency_type": 8
+        },
+        {
+          "parent": "eligible",
+          "child": "citizenship confirmed",
+          "dependency_type": 8
+        }
+      ],
+      "stable_node_ids": {
+        "applicant age >= 18": "8d4502c0f1005ba9",
+        "citizenship confirmed": "b6c064bd32ddd2b5",
+        "eligible": "d5a0c1f3944158ff"
+      }
+    }
+  },
+  "diagnostics": {
+    "id": "diagnostics-duplicate-declaration-v1",
+    "rule_name": "duplicate_declaration_baseline",
+    "rule_text": "INPUT age AS NUMBER\nINPUT age AS BOOLEAN\n\neligible\n    AND age >= 18\n",
+    "expected": {
+      "source_sha256": "2f5c3cd2358d2461a10536d31fb81798486cf46f75f7d0972c582922c69c6503",
+      "result": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "DUPLICATE_DECLARATION",
+            "message": "Variable 'age' is declared more than once",
+            "waiver_id": "DUPLICATE_DECLARATION:age",
+            "severity": "error",
+            "source": "deterministic",
+            "blocking": false,
+            "review_required": false,
+            "line": 2,
+            "node_name": "age"
+          }
+        ],
+        "warnings": [],
+        "review_queue": []
+      }
+    }
+  },
+  "inference": {
+    "id": "inference-false-or-short-circuit-v1",
+    "source_name": "wedding_baseline",
+    "target": "wedding can proceed",
+    "rule_text": "INPUT someone booked the celebrant AS BOOLEAN\nINPUT the celebrant randomly turned up AS BOOLEAN\nINPUT unrelated catering confirmed AS BOOLEAN\n\nwedding can proceed\n    AND celebrant available\n    AND unrelated catering confirmed\n\ncelebrant available\n    OR someone booked the celebrant\n    OR the celebrant randomly turned up\n",
+    "preferred_order": [
+      "wedding can proceed",
+      "celebrant available",
+      "someone booked the celebrant",
+      "the celebrant randomly turned up",
+      "unrelated catering confirmed"
+    ],
+    "answers": {
+      "someone booked the celebrant": false,
+      "the celebrant randomly turned up": false
+    },
+    "expected": {
+      "source_sha256": "ba5f451b2250290f018f7012b1b3e14962a7f36fef71a2bf12d41ade86375161",
+      "asked": [
+        "someone booked the celebrant",
+        "the celebrant randomly turned up"
+      ],
+      "facts": {
+        "celebrant available": {
+          "value": false,
+          "type": "BOOLEAN",
+          "sources": ["INFERRED"]
+        },
+        "someone booked the celebrant": {
+          "value": false,
+          "type": "BOOLEAN",
+          "sources": ["ASSERTED"]
+        },
+        "the celebrant randomly turned up": {
+          "value": false,
+          "type": "BOOLEAN",
+          "sources": ["ASSERTED"]
+        },
+        "wedding can proceed": {
+          "value": false,
+          "type": "BOOLEAN",
+          "sources": ["INFERRED"]
+        }
+      },
+      "inclusive": [
+        "celebrant available",
+        "someone booked the celebrant",
+        "the celebrant randomly turned up",
+        "wedding can proceed"
+      ],
+      "mandatory": [],
+      "branch_prune_trace": [
+        {
+          "node_name": "unrelated catering confirmed",
+          "action": "pruned",
+          "reason": "and_parent_failed"
+        }
+      ]
+    }
+  },
+  "imports": {
+    "id": "imports-transitive-diamond-v1",
+    "root": "root",
+    "sources": {
+      "root": "IMPORT: left\nIMPORT: right\nroot rule",
+      "left": "IMPORT: shared\nleft rule",
+      "right": "IMPORT: shared\nright rule",
+      "shared": "shared rule"
+    },
+    "expected": {
+      "source_hashes": {
+        "left": "7243c2a8f24a7716f3f3929f4b924c8696e4fb9a621233811a26177e33281dd0",
+        "right": "46b4f8935b13a114827665475fee4d14741c1f635c845d94cd440ff6ee904f82",
+        "root": "e9ba9d58148740b97de8c5c79b04e757de924c26eb3b36e9453b08eeb36a502f",
+        "shared": "f27e48438387899938956878212f446f58cd957c0db2ce700672aab2687bac00"
+      },
+      "resolution_order": ["root", "left", "shared", "right"],
+      "origins": {
+        "root": {"module": "root", "imported": false, "depth": 0},
+        "left": {"module": "left", "imported": true, "depth": 1},
+        "shared": {"module": "shared", "imported": true, "depth": 2},
+        "right": {"module": "right", "imported": true, "depth": 1}
+      }
+    }
+  },
+  "iteration": {
+    "id": "iteration-quantifiers-v1",
+    "cases": [
+      {"quantifier": "ALL", "answers": [true, true, false]},
+      {"quantifier": "NOT ALL", "answers": [true, true, false]},
+      {"quantifier": "NONE", "answers": [false, false, false]},
+      {"quantifier": "SOME", "answers": [false, true, false]},
+      {"quantifier": "EXACTLY 2", "answers": [true, true, false]},
+      {"quantifier": "AT LEAST 2", "answers": [true, true, false]},
+      {"quantifier": "AT MOST 1", "answers": [true, false, false]},
+      {"quantifier": "2", "answers": [true, true, true]}
+    ],
+    "expected": {
+      "cases": [
+        {
+          "quantifier": "ALL",
+          "answers": [true, true, false],
+          "completion_flags": [false, false, true],
+          "progress": [3, 3],
+          "result": false
+        },
+        {
+          "quantifier": "NOT ALL",
+          "answers": [true, true, false],
+          "completion_flags": [false, false, true],
+          "progress": [3, 3],
+          "result": true
+        },
+        {
+          "quantifier": "NONE",
+          "answers": [false, false, false],
+          "completion_flags": [false, false, true],
+          "progress": [3, 3],
+          "result": true
+        },
+        {
+          "quantifier": "SOME",
+          "answers": [false, true, false],
+          "completion_flags": [false, false, true],
+          "progress": [3, 3],
+          "result": true
+        },
+        {
+          "quantifier": "EXACTLY 2",
+          "answers": [true, true, false],
+          "completion_flags": [false, false, true],
+          "progress": [3, 3],
+          "result": true
+        },
+        {
+          "quantifier": "AT LEAST 2",
+          "answers": [true, true, false],
+          "completion_flags": [false, false, true],
+          "progress": [3, 3],
+          "result": true
+        },
+        {
+          "quantifier": "AT MOST 1",
+          "answers": [true, false, false],
+          "completion_flags": [false, false, true],
+          "progress": [3, 3],
+          "result": true
+        },
+        {
+          "quantifier": "2",
+          "answers": [true, true, true],
+          "completion_flags": [false, false, true],
+          "progress": [3, 3],
+          "result": true
+        }
+      ]
+    }
+  },
+  "provenance": {
+    "id": "provenance-asserted-inferred-v1",
+    "session_id": "golden-session",
+    "rule_name": "eligibility_baseline",
+    "target": "eligible",
+    "iteration_count": 2,
+    "ontology_profile": "none",
+    "ontology_profile_source": "explicit",
+    "ontology_flags": {"enabled": false},
+    "facts": [
+      {"name": "applicant age", "value": 25, "source": "ASSERTED"},
+      {"name": "eligible", "value": true, "source": "INFERRED"}
+    ],
+    "expected": {
+      "turtle": {
+        "triple_count": 17,
+        "sha256": "1e067e4833dbcb485343cd00327c32e014d421dfbed2cfff59fccdbd9e7fc83b"
+      },
+      "json_ld": {
+        "triple_count": 17,
+        "sha256": "1e067e4833dbcb485343cd00327c32e014d421dfbed2cfff59fccdbd9e7fc83b"
+      }
+    }
+  }
+}

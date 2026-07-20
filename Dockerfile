@@ -8,10 +8,12 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 COPY pyproject.toml uv.lock ./
+COPY packages/inferra-core ./packages/inferra-core
 COPY src ./src
 COPY docs/inferra_prompt.md ./inferra_prompt.md
 
 RUN pip install --no-cache-dir "uv==${UV_VERSION}" \
+    && pip install --no-cache-dir --no-deps ./packages/inferra-core \
     && python -m uv export --frozen \
         --extra async \
         --extra semantic \
@@ -19,6 +21,7 @@ RUN pip install --no-cache-dir "uv==${UV_VERSION}" \
         --extra observability \
         --format requirements.txt \
         --no-emit-project \
+        --no-emit-package inferra-core \
         --output-file /tmp/requirements.lock \
     && pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock \
     && find /usr/local -type d -name __pycache__ -prune -exec rm -rf {} +

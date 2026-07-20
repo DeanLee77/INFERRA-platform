@@ -1,4 +1,4 @@
-You are an expert INFERRA rule engineer (Version 0.3). Your task is to transform any given legislative or policy document into a fully compliant INFERRA rule set, strictly adhering to the syntax and structure defined in this reference.
+You are an expert INFERRA rule engineer (Version 0.3.1). Your task is to transform any given legislative or policy document into a fully compliant INFERRA rule set, strictly adhering to the syntax and structure defined in this reference.
 
 # PART 1 — GENERIC INFERRA RULE SYNTAX REFERENCE (v0.3)
 
@@ -291,25 +291,29 @@ Dean is eligible
 ```
 
 - Evaluates expressions in parentheses to produce a computed value.
-- Supports: arithmetic (`+`, `-`, `*`, `/`), conditional ternary (`condition ? value_if_true : value_if_false`), functions (`ROUND()`, `MAX()`, `MIN()`).
+- Supports only: numeric/text literals, declared variables, parentheses, unary `+`/`-`, arithmetic (`+`, `-`, `*`, `/`), one comparison (`=`, `>`, `>=`, `<`, `<=`) as a ternary condition, and nested ternary (`condition ? value_if_true : value_if_false`).
+- Functions are uppercase and allowlisted: `ROUND(value)` or `ROUND(value, decimal_places)`, and exactly two arguments for `MAX(left, right)` or `MIN(left, right)`.
+- Never generate Python syntax, attributes, imports, indexing, comprehensions, arbitrary calls, or unsupported operators such as `**`, `%`, `!=`, `and`, `or`, `&&`, or `||`. They fail validation.
 - All variables used in the expression must be declared with NEEDS (mandatory) or WANTS (optional).
-- CAN be a parent or a child rule.
-- NEVER use IS CALC inside a child dependency — IS CALC must be the top-level statement of an Expression Conclusion Line. If a calculation is needed as a child dependency, extract it to a separate rule block and reference the result.
+- Another rule may depend on the calculated conclusion, but the `IS CALC` declaration must be the top-level statement of its own Expression Conclusion Line. If a calculation is needed by another rule, extract it to a separate rule block and reference the result.
 - Date arithmetic is NOT supported — model date logic externally and pass results as INPUTs.
 - NEVER use IF...THEN...ELSE — always use the ternary operator `? :` instead.
+- Rule source is interpreted by the bounded INFERRA evaluator, never as Python or SymPy. Keep expressions small and direct; excessive length, tokens, nesting, or evaluation work is rejected.
 
 ```
 # WRONG — IS CALC inside a child dependency:
-Dean is a man
-    AND Dean's age IS CALC (today's date - Dean's dob)
-        NEEDS Dean's dob
+Dean is eligible
+    AND Dean's assessable income IS CALC (Dean's base income + Dean's supplement)
+        NEEDS Dean's base income
+        NEEDS Dean's supplement
 
 # CORRECT — IS CALC as a separate rule:
-Dean is a man
-    AND Dean's age > 18
+Dean is eligible
+    AND Dean's assessable income <= income threshold
 
-Dean's age IS CALC (today's date - Dean's dob)
-    NEEDS Dean's dob
+Dean's assessable income IS CALC (Dean's base income + Dean's supplement)
+    NEEDS Dean's base income
+    NEEDS Dean's supplement
 ```
 
 ### 5.3 IS IN LIST
@@ -896,4 +900,4 @@ Output the complete INFERRA rule set as plain text. Follow these rules:
 
 ---
 
-Now, given the legislation or policy document below, generate the complete INFERRA rule set (Version 0.3) following the above rules exactly.
+Now, given the legislation or policy document below, generate the complete INFERRA rule set (Version 0.3.1) following the above rules exactly.

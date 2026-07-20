@@ -3,6 +3,20 @@
 ## Project Overview
 Rule-based inference platform with a FastAPI backend. Python 3.10+. The codebase uses a port/adapter architecture: domain logic lives in `src/domain/`, contracts in `src/ports/`, inbound adapters in `src/adapters/inbound/`, outbound adapters in `src/adapters/outbound/`, and operational infrastructure in `src/infrastructure/`.
 
+Accepted target architecture (P0.2 extraction in progress): the internal
+`inferra-core==0.1.1` distribution, leaf contracts, and private executable
+graph/node/token/parser/validation layer now exist under the `inferra_core`
+import namespace. The security correction removed SymPy/string evaluation,
+made declaration validation fail closed, and made topological cycles typed.
+Define the narrow public compile/validation facade and rewire Platform for the
+completed slice before moving fact-store/iteration/imports or inference/
+provenance. `inferra-platform` remains the
+authoritative API/persistence/audit runtime. Core must not import FastAPI,
+SQLAlchemy, Redis, Celery, Fuseki, LLM, environment/secrets, AEGIS, AXIOM, or
+other extensions. Follow
+`docs/INFERRA_Core_Package_and_Runtime_Architecture.md`; preserve behavior with
+golden vectors and installed-wheel tests during extraction.
+
 ## Architecture Conventions
 
 ### Port Pattern
@@ -24,6 +38,7 @@ Rule-based inference platform with a FastAPI backend. Python 3.10+. The codebase
 
 ### Structured Logging
 - Production modules use `structlog`; do not add bare `print()` or raw `logging` calls.
+- `inferra_core` is the exception: it creates neutral values/events and must not import Platform logging or Structlog.
 - Core log context fields: `session_id`, `node_id`, `fact_source`, `correlation_id`.
 - Extended fields used across later phases include `rule_name`, `import_depth`, `propagation_depth`, `source_hash`, `task_id`, and reasoning confidence metadata.
 
@@ -32,13 +47,19 @@ Rule-based inference platform with a FastAPI backend. Python 3.10+. The codebase
 - `HistoryRecord` is `@dataclass(frozen=True)` with `name`, `true_count`, `false_count`, computed rates, and `with_increment()`.
 - `IterateContext` is a dataclass with `list_name`, `list_size`, `quantifier`, `progress: Dict[int, bool]`, and `is_initialised`.
 
+### Expression Security
+- `IS CALC` source is untrusted data and may use only documented arithmetic, comparison/ternary, and `ROUND`/`MAX`/`MIN` constructs.
+- Never pass rule source to `eval`, `exec`, `compile`, SymPy string parsing, or another general-purpose evaluator.
+- Preserve the bounded manual AST, fail-closed diagnostics, expression limits, and adversarial installed-wheel tests.
+
 ### FactStorePort Contract
 - `set_fact(name, value, source=FactSource.ASSERTED)` has no `metadata` kwarg.
 - `remove_fact(name, source=None)`, `invalidate_layer(source)`, `get_fact_sources(name)`, `get_overrides()`, `get_changed_since(timestamp)`, `get_layer_snapshot(source)`, `peek_in_layer(name, source)`, and `get_unified_view()` are wired through `LayeredFactStore`.
 - Phase 2+ consumers such as `IterationEngine` and `IncrementalPropagator` must use the port contract rather than concrete store internals.
 
 ## Key Directories
-- `src/ports/` - ABC port contracts.
+- `packages/inferra-core/` - independently buildable internal Core distribution; leaf values/ports plus private graph/node/token/parser/validation and bounded expression implementations live here. It currently has no third-party runtime dependencies; `_internal` is not stable public API.
+- `src/ports/` - Platform/runtime ports plus temporary re-exports of the five Core-owned ABC ports.
 - `src/domain/graph/` - `HyperAdjacencyGraph`, graph serialization, sparse graph bridges, propagation, and legacy matrix compatibility.
 - `src/domain/inference/` - inference engine, orchestrators, sessions, topological sorting, and backward chaining.
 - `src/domain/iterate/` - `IterationEngine` implementing `IterationPort`.
@@ -56,10 +77,18 @@ Rule-based inference platform with a FastAPI backend. Python 3.10+. The codebase
 - Run tests: `pytest`
 - Run with coverage: `pytest --cov=src --cov-fail-under=97`
 - Run benchmarks: `pytest tests/benchmarks/`
-- Install dev dependencies: `pip install -e ".[dev,async,semantic,reasoning,observability]"`
+- Install Core first: `pip install -e "packages/inferra-core"`
+- Install Platform dev dependencies: `pip install -e ".[dev,async,semantic,reasoning,observability]"`
 - Build local images: `docker compose build api worker`
 
 ## Documentation Source of Truth
+- Package/runtime architecture: `docs/INFERRA_Core_Package_and_Runtime_Architecture.md`
+- Core extraction P0.1 baseline: `docs/INFERRA_Core_Extraction_P0_1_Baseline.md`
+- Core extraction P0.2 progress: `docs/INFERRA_Core_Extraction_P0_2_Distribution.md`
+- Cross-project ownership and priority: `docs/INFERRA_Cross_Project_Technical_Direction.md`
+- Account/case hierarchy, ontology/provenance authority, graph versioning,
+  retention, and AXIOM/AEGIS semantic boundaries:
+  `docs/INFERRA_Account_Case_Ontology_and_Provenance_Architecture.md`
 - Current implementation status: `docs/IMPLEMENTATION_STATUS.md`
 - Current roadmap: `docs/ROADMAP.md`
 - Current operations runbook: `docs/OPERATIONS.md`

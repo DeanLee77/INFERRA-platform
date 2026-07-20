@@ -216,12 +216,13 @@ def test_topological_sort_diamond():
     assert order.index("C") < order.index("D")
 
 
-def test_topological_sort_cyclic_returns_empty():
+def test_topological_sort_cyclic_raises_typed_error():
     g = HyperAdjacencyGraph()
     g.add_dependency_group("A", DependencyType.AND, {"B"})
     g.add_dependency_group("B", DependencyType.AND, {"A"})
 
-    assert g.topological_sort() == ()
+    with pytest.raises(CyclicGraphError, match="A, B"):
+        g.topological_sort()
 
 
 def test_topological_sort_cached():

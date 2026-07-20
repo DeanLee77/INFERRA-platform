@@ -1,19 +1,5 @@
-from enum import Enum
+"""Compatibility re-export for the Core-owned fact value type."""
 
+from inferra_core import FactValueType
 
-class FactValueType(Enum):
-    BOOLEAN = "BOOLEAN"
-    INTEGER = "INTEGER"
-    DOUBLE = "DOUBLE"
-    DECIMAL = "DECIMAL"
-    DATE = "DATE"
-    STRING = "STRING"
-    TEXT = "TEXT"
-    DEFI_STRING = "DEFI_STRING"
-    HASH = "HASH"
-    URL = "URL"
-    GUID = "GUID"
-    LIST = "LIST"
-    WARNING = "WARNING"
-    SECTION = "SECTION"
-    UNKNOWN = "UNKNOWN"
+__all__ = ["FactValueType"]

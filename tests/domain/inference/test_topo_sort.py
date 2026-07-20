@@ -1,7 +1,8 @@
+import pytest
 from unittest.mock import MagicMock
 
 from src.domain.inference.topo_sort import TopologicalSort
-from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
+from src.domain.graph.hyper_adjacency_graph import CyclicGraphError, HyperAdjacencyGraph
 from src.domain.nodes.node_id_utils import canonical_node_key
 from src.domain.nodes.node import Node
 from src.domain.nodes.line_type import LineType
@@ -39,14 +40,14 @@ class TestBfsTopologicalSort:
         assert result[0].get_node_name() == "A"
         assert result[1].get_node_name() == "B"
 
-    def test_cycle_returns_empty(self):
+    def test_cycle_raises_typed_error(self):
         n0 = _make_node(0, "A")
         n1 = _make_node(1, "B")
         node_dict = {"A": n0, "B": n1}
         id_dict = {0: "A", 1: "B"}
         matrix = [[-1, DependencyType.get_and()], [DependencyType.get_and(), -1]]
-        result = TopologicalSort.bfs_topological_sort(node_dict, id_dict, matrix)
-        assert result == []
+        with pytest.raises(CyclicGraphError, match="Cyclic graph detected"):
+            TopologicalSort.bfs_topological_sort(node_dict, id_dict, matrix)
 
     def test_three_nodes_dag(self):
         n0 = _make_node(0, "A")
@@ -210,4 +211,3 @@ class TestDfsTopologicalSortWithRecordFallback:
         )
 
         assert [node.get_node_name() for node in result] == ["A", "B"]
-

@@ -11,7 +11,7 @@ from src.domain.graph.dependency_type import DependencyType
 from src.domain.graph.dependency_matrix import DependencyMatrix
 from src.domain.graph.graph_serialization import deserialize_graph, serialize_graph
 from src.domain.graph.graph_to_matrix_adapter import GraphToMatrixAdapter
-from src.domain.graph.hyper_adjacency_graph import HyperAdjacencyGraph
+from src.domain.graph.hyper_adjacency_graph import CyclicGraphError, HyperAdjacencyGraph
 from src.domain.graph.matrix_to_hyper_adapter import MatrixToHyperGraphAdapter
 from src.domain.graph.ml_topological_sort_strategy import MLTopologicalSortStrategy
 from src.domain.nodes.record import HistoryRecord
@@ -304,16 +304,15 @@ class TestMLTopologicalSortStrategy:
 
         assert result == ("root", "a", "b")
 
-    def test_depth_first_cycle_returns_empty_tuple(self):
+    def test_depth_first_cycle_raises_typed_error(self):
         g = HyperAdjacencyGraph()
         g.add_dependency_group("A", int(DependencyType.AND), {"B"})
         g.add_dependency_group("B", int(DependencyType.AND), {"A"})
 
-        result = MLTopologicalSortStrategy(g).sort_depth_first(
-            {"A": HistoryRecord(name="A", true_count=1)}
-        )
-
-        assert result == ()
+        with pytest.raises(CyclicGraphError):
+            MLTopologicalSortStrategy(g).sort_depth_first(
+                {"A": HistoryRecord(name="A", true_count=1)}
+            )
 
     def test_depth_first_does_not_repeat_shared_descendant(self):
         g = HyperAdjacencyGraph()

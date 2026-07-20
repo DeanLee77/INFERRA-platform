@@ -1,8 +1,28 @@
 # INFERRA Platform — Complete Implementation Guide
 
-> **Version:** 2026-07-03  
-> **Status:** Production-ready core (Phase 1), optional advanced features (Phases 2-5)  
+> **Version:** 2026-07-17
+> **Status:** Broad development-profile implementation reference; Core 1.0 remains blocked
 > **Repository:** `inferra-platform`
+
+> **Accepted architecture amendment.** The deterministic kernel will be
+> extracted into an internal, independently buildable `inferra-core` Python
+> distribution before Core 1.0. `inferra-platform` will import that artifact and
+> remain the official authoritative service for API, identity, persistence,
+> transactions, audit/outbox, ontology publication, workers, and operations.
+> P0.1 and P0.2a-P0.2b are complete: internal `inferra-core==0.1.1` owns its
+> leaf contracts plus private graph/node/token/parser/validation layers and
+> passes independent build and clean installed-wheel parser checks. The P0
+> security correction replaces string-to-SymPy evaluation with a bounded
+> INFERRA AST, fails declaration validation closed, and makes cycles typed;
+> Core now has no third-party runtime dependencies. A public compile/validation
+> facade and Platform rewiring must precede remaining state/import/inference/
+> provenance extraction, and the package is not publicly published. Evidence is in
+> `docs/INFERRA_Core_Extraction_P0_1_Baseline.md` and
+> `docs/INFERRA_Core_Extraction_P0_2_Distribution.md`. The controlling design is
+> `docs/INFERRA_Core_Package_and_Runtime_Architecture.md`; the
+> cross-product release direction is
+> `docs/INFERRA_Cross_Project_Technical_Direction.md`. This guide describes the
+> current broad development surface unless a section explicitly says otherwise.
 
 ---
 
@@ -25,6 +45,26 @@
 ## 1. Architecture Overview
 
 The INFERRA platform is a **FastAPI** application built with hexagonal/ports-and-adapters architecture:
+
+The accepted target adds a physical package boundary inside that architecture:
+
+```text
+AXIOM/AEGIS/generated SDKs -> Platform API/application services
+                                      |
+                                      v
+                            inferra-core package
+
+Platform owns: HTTP, identity, SQLAlchemy, migrations, transactions, sessions,
+               outbox/audit persistence, workers, Fuseki and operations.
+Core owns:     pure parsing, graph, fact store, inference, imports, provenance,
+               deterministic hashes, diagnostics and audit-event construction.
+```
+
+The package must not import FastAPI, SQLAlchemy, Redis, Celery, Fuseki, LLM
+providers, environment/secrets, AEGIS, AXIOM, or other extensions. Python hosts
+may eventually embed it directly for offline/single-process use, but those hosts
+then own durability, identity, concurrency, migration, audit, and recovery. The
+official multi-user authority remains the Platform service.
 
 ```
 src/
@@ -185,6 +225,11 @@ Pre-built profiles toggling ontology flags together:
 ---
 
 ## 3. API Reference
+
+The endpoint inventory below is the current broad development profile. It is not
+the Core 1.0 production contract. The package-backed `core` profile will exclude
+AEGIS, LLM, files, experimental reasoning, ontology authoring/sync, private demo,
+and legacy routes; disabled capabilities must be absent from generated OpenAPI.
 
 ### `/api/v1/rules` — Rule Set CRUD
 
@@ -498,6 +543,13 @@ After many sessions generate trace corpus:
 
 ## 6. Implementation Status
 
+Implementation presence is not production approval. The independent Core
+package, narrow API profile, migrations/immutable revisions, durable ontology
+audit, identity decisions, and release evidence described in the active
+governance documents remain P0 gates. Statements below that use
+"production-ready" describe local implementation maturity at the time they were
+written, not current release authorization.
+
 ### ✅ Fully Implemented & Production-Ready
 
 #### Core Inference Engine (Phase 1)
@@ -772,7 +824,8 @@ docker run -d --name inferra-redis -p 6379:6379 redis:7
 
 ```bash
 cd inferra-platform
-pip install -r requirements.txt
+python -m pip install -e packages/inferra-core
+python -m pip install -e ".[async,semantic,reasoning,observability]"
 INFERRA_ENV_FILE=.env uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -1559,7 +1612,8 @@ Response includes structured rows plus overlay targets for graph visualization:
 # Clone and install
 git clone https://github.com/your-org/inferra-platform.git
 cd inferra-platform
-pip install -r requirements.txt
+python -m pip install -e packages/inferra-core
+python -m pip install -e ".[async,semantic,reasoning,observability]"
 
 # Set minimal env vars
 export DATABASE_URL=postgresql://inferra:inferra@localhost:5432/inferra
